@@ -1,0 +1,240 @@
+{
+  "version": 3,
+  "grid": {
+    "cols": 16,
+    "rows": 9,
+    "cellSize": 2
+  },
+  "path": {
+    "waypoints": []
+  },
+  "base": {
+    "hp": 20
+  },
+  "waves": [
+    {
+      "count": 10,
+      "interval": 1,
+      "type": "basic",
+      "hp": 10,
+      "speed": 1,
+      "reward": 1
+    },
+    {
+      "count": 12,
+      "interval": 0.9,
+      "type": "basic",
+      "hp": 12,
+      "speed": 1,
+      "reward": 1
+    },
+    {
+      "count": 15,
+      "interval": 0.8,
+      "type": "basic",
+      "hp": 15,
+      "speed": 1.1,
+      "reward": 2
+    }
+  ],
+  "towers": [
+    {
+      "id": "d2bc9abc-c961-4af5-a109-d507554c7114",
+      "type": "house",
+      "col": 12,
+      "row": 2,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "b107a430-89ed-4ed7-a0e6-2e6a0f66b036",
+      "type": "house",
+      "col": 6,
+      "row": 3,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "779c84fd-91ae-493f-8cda-2868e626cae8",
+      "type": "house",
+      "col": 9,
+      "row": 6,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "ab44136c-0823-4976-b18f-5d7d0c88c200",
+      "type": "house",
+      "col": 13,
+      "row": 7,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "f57fe8c0-a0a3-4179-b65a-fa5f1e754727",
+      "type": "house",
+      "col": 5,
+      "row": 6,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "97b0c08d-19b9-437b-9ef0-101bf4c74ec2",
+      "type": "house",
+      "col": 0,
+      "row": 1,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "a89b1003-7b63-453e-b4dd-e9980c05092d",
+      "type": "house",
+      "col": 1,
+      "row": 7,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "f570894c-decb-4492-bd66-299482621a94",
+      "type": "house",
+      "col": 9,
+      "row": 2,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "1e29ccb5-1637-410f-bab9-4cf57b338a03",
+      "type": "house",
+      "col": 14,
+      "row": 4,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "70e743b9-125e-458d-a345-f72876f1de49",
+      "type": "house",
+      "col": 9,
+      "row": 8,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "24ef2713-a329-4fc7-9154-2327dcf5d2b2",
+      "type": "house",
+      "col": 9,
+      "row": 4,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    }
+  ]
+}

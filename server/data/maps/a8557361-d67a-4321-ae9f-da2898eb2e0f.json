@@ -1,0 +1,557 @@
+{
+  "version": 1,
+  "grid": {
+    "cols": 16,
+    "rows": 9,
+    "cellSize": 2
+  },
+  "path": {
+    "waypoints": [
+      {
+        "col": 15,
+        "row": 6
+      },
+      {
+        "col": 14,
+        "row": 6
+      },
+      {
+        "col": 13,
+        "row": 6
+      },
+      {
+        "col": 12,
+        "row": 6
+      },
+      {
+        "col": 11,
+        "row": 6
+      },
+      {
+        "col": 10,
+        "row": 6
+      },
+      {
+        "col": 10,
+        "row": 5
+      },
+      {
+        "col": 9,
+        "row": 4
+      },
+      {
+        "col": 8,
+        "row": 3
+      },
+      {
+        "col": 7,
+        "row": 3
+      },
+      {
+        "col": 6,
+        "row": 3
+      },
+      {
+        "col": 5,
+        "row": 3
+      },
+      {
+        "col": 5,
+        "row": 4
+      },
+      {
+        "col": 4,
+        "row": 4
+      },
+      {
+        "col": 3,
+        "row": 4
+      },
+      {
+        "col": 2,
+        "row": 4
+      },
+      {
+        "col": 2,
+        "row": 5
+      },
+      {
+        "col": 3,
+        "row": 5
+      },
+      {
+        "col": 4,
+        "row": 5
+      },
+      {
+        "col": 4,
+        "row": 6
+      },
+      {
+        "col": 3,
+        "row": 6
+      },
+      {
+        "col": 2,
+        "row": 6
+      },
+      {
+        "col": 2,
+        "row": 7
+      },
+      {
+        "col": 3,
+        "row": 7
+      },
+      {
+        "col": 3,
+        "row": 8
+      }
+    ]
+  },
+  "base": {
+    "hp": 20
+  },
+  "waves": [
+    {
+      "count": 10,
+      "interval": 1,
+      "type": "basic",
+      "hp": 10,
+      "speed": 1,
+      "reward": 1
+    },
+    {
+      "count": 12,
+      "interval": 0.9,
+      "type": "basic",
+      "hp": 12,
+      "speed": 1,
+      "reward": 1
+    },
+    {
+      "count": 15,
+      "interval": 0.8,
+      "type": "basic",
+      "hp": 15,
+      "speed": 1.1,
+      "reward": 2
+    }
+  ],
+  "towers": [
+    {
+      "id": "7b14f9cd-d389-4143-ba73-0fdf311588bf",
+      "type": "tower",
+      "col": 0,
+      "row": 0,
+      "level": 1,
+      "size": {
+        "w": 3,
+        "h": 3
+      },
+      "height": 6,
+      "color": {
+        "r": 0.4,
+        "g": 0.6,
+        "b": 0.9
+      },
+      "props": {}
+    },
+    {
+      "id": "1bcb549a-1325-4773-8076-e5b36d4224b0",
+      "type": "house",
+      "col": 8,
+      "row": 5,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "36b21476-489f-4d9f-9556-241fc681c160",
+      "type": "house",
+      "col": 8,
+      "row": 8,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "7a80cfd6-8278-409d-8074-240ddc809c99",
+      "type": "house",
+      "col": 4,
+      "row": 8,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "53e4cae2-8367-409c-8209-b24c97c476b6",
+      "type": "house",
+      "col": 0,
+      "row": 8,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "310f8c84-cd15-4ac8-98f5-b4fb9391e7f6",
+      "type": "house",
+      "col": 6,
+      "row": 8,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "081b82f5-2612-4571-bc30-bd6ba92b5a45",
+      "type": "house",
+      "col": 6,
+      "row": 4,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "77142ef9-2054-43ef-9ae1-ba5c6a2c104a",
+      "type": "house",
+      "col": 2,
+      "row": 3,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "13c87abb-930e-45cd-8a48-14b3ecf371fb",
+      "type": "house",
+      "col": 0,
+      "row": 4,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "7af65dd8-85d3-4874-b918-4383f5a32d65",
+      "type": "house",
+      "col": 0,
+      "row": 5,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "93790142-bed0-4a07-ae78-c585f40af189",
+      "type": "house",
+      "col": 3,
+      "row": 3,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "6bae45f2-261c-4fa0-ac2d-33f2db9034e9",
+      "type": "house",
+      "col": 12,
+      "row": 5,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "11c69a91-96fd-4e50-9543-cdfbe036c674",
+      "type": "house",
+      "col": 12,
+      "row": 7,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "73bc7bad-2e3d-48a5-8423-9c712a7f7dc6",
+      "type": "house",
+      "col": 5,
+      "row": 6,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "5d070cc7-c246-4fd0-9276-989ee002d4cc",
+      "type": "house",
+      "col": 1,
+      "row": 6,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "31e36dbd-417f-43f4-9d19-ba07c4a0077d",
+      "type": "house",
+      "col": 2,
+      "row": 8,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "73747e46-2461-4e3c-950e-c8a7df0c319b",
+      "type": "house",
+      "col": 13,
+      "row": 4,
+      "level": 1,
+      "size": {
+        "w": 2,
+        "h": 2
+      },
+      "height": 3,
+      "color": {
+        "r": 0.5,
+        "g": 0.7,
+        "b": 0.5
+      },
+      "props": {}
+    },
+    {
+      "id": "41e40499-275a-48cc-bcc9-29f4b10e1663",
+      "type": "house",
+      "col": 8,
+      "row": 6,
+      "level": 1,
+      "size": {
+        "w": 2,
+        "h": 2
+      },
+      "height": 3,
+      "color": {
+        "r": 0.5,
+        "g": 0.7,
+        "b": 0.5
+      },
+      "props": {}
+    },
+    {
+      "id": "5acb4ad8-551c-4692-acb2-51febbc105eb",
+      "type": "house",
+      "col": 7,
+      "row": 1,
+      "level": 1,
+      "size": {
+        "w": 2,
+        "h": 2
+      },
+      "height": 3,
+      "color": {
+        "r": 0.5,
+        "g": 0.7,
+        "b": 0.5
+      },
+      "props": {}
+    },
+    {
+      "id": "93181c8a-3393-46ba-b6fb-2b274a3a4b98",
+      "type": "house",
+      "col": 5,
+      "row": 1,
+      "level": 1,
+      "size": {
+        "w": 2,
+        "h": 2
+      },
+      "height": 3,
+      "color": {
+        "r": 0.5,
+        "g": 0.7,
+        "b": 0.5
+      },
+      "props": {}
+    },
+    {
+      "id": "36f6ee73-613b-49e8-b952-f56293ea375b",
+      "type": "house",
+      "col": 15,
+      "row": 7,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "438cc70e-5e1d-4609-9643-34e3709908da",
+      "type": "house",
+      "col": 14,
+      "row": 7,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    },
+    {
+      "id": "ae0ac94c-b60f-46e8-a95b-d5c4d8f5f18b",
+      "type": "house",
+      "col": 11,
+      "row": 5,
+      "level": 1,
+      "size": {
+        "w": 1,
+        "h": 1
+      },
+      "height": 4,
+      "color": {
+        "r": 0.6,
+        "g": 0.8,
+        "b": 0.6
+      },
+      "props": {}
+    }
+  ]
+}

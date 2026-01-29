@@ -1,0 +1,20 @@
+{
+  "name": "tower-defense-monorepo",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "install:all": "npm install --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.2.0"
+  }
+}
