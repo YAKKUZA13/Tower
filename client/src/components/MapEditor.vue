@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { getMap, saveMap } from '../services/api.js';
-import { createEngine, createScene, addBuilding, pickGrid, makePreviewMesh, updatePreviewMesh, drawPath, applyHeightmapToGround, sampleHeight, gridToWorld } from '../babylon/createScene.js';
+import { createEngine, createScene, addBuilding, pickGrid, makePreviewMesh, updatePreviewMesh, drawPath, updateHeightmapTexture, sampleHeight, gridToWorld } from '../babylon/createScene.js';
 import { PointerEventTypes } from 'babylonjs';
 import AssetManager from './AssetManager.vue';
 
@@ -126,6 +126,13 @@ const flattenTargetHeight = ref(null);
 const cursorHeight = ref(0);
 const lastTerrainCell = ref(null);
 let isPaintingTerrain = false;
+const modeOptions = ['place', 'remove', 'path', 'terrain'];
+const modeLabels = {
+  place: 'Строить',
+  remove: 'Удалять',
+  path: 'Путь',
+  terrain: 'Рельеф'
+};
 
 // Catalog at bottom menu
 const catalog = ref([
@@ -313,7 +320,7 @@ function applyTerrainBrush(cell) {
       hm[r][c] = clampHeight(next);
     }
   }
-  applyHeightmapToGround(babylonRef.value?.ground, grid, hm);
+  updateHeightmapTexture(babylonRef.value?.ground, grid, hm);
   renderAll();
   drawPath(babylonRef.value.scene, map.value.grid, map.value?.path?.waypoints || [], map.value.heightmap);
 }
@@ -363,7 +370,7 @@ async function init() {
     }
   } catch (e) {
     console.error(e);
-    status.value = 'Failed to load map, using default.';
+    status.value = 'Не удалось загрузить карту, использую стандартную.';
   }
 
   const engine = createEngine(canvasRef.value);
@@ -450,10 +457,10 @@ async function doSave() {
   try {
     map.value.heightmap = normalizeHeightmap(map.value.grid, map.value.heightmap);
     await saveMap(map.value);
-    status.value = 'Saved';
+    status.value = 'Сохранено';
   } catch (e) {
     console.error(e);
-    status.value = 'Save failed';
+    status.value = 'Ошибка сохранения';
   } finally {
     saving.value = false;
     setTimeout(() => (status.value = ''), 1200);
@@ -471,66 +478,66 @@ onBeforeUnmount(() => {
   <div class="map-editor">
     <header class="toolbar">
       <div class="toolbar-left">
-        <div class="brand">Map Editor</div>
+        <div class="brand">Редактор карты</div>
         <div class="mode-switch">
-          <label v-for="opt in ['place','remove','path','terrain']" :key="opt" :class="['chip', mode === opt ? 'active' : '']">
+          <label v-for="opt in modeOptions" :key="opt" :class="['chip', mode === opt ? 'active' : '']">
             <input type="radio" :value="opt" v-model="mode" />
-            <span>{{ opt.charAt(0).toUpperCase() + opt.slice(1) }}</span>
+            <span>{{ modeLabels[opt] }}</span>
           </label>
         </div>
       </div>
       <div class="toolbar-right">
-        <div class="grid-pill">Cols {{ map.grid.cols }} · Rows {{ map.grid.rows }} · Cell {{ map.grid.cellSize }}</div>
-        <button class="btn primary" :disabled="saving" @click="doSave">Save</button>
-        <span class="status" :class="{ success: status === 'Saved' }">{{ status }}</span>
+        <div class="grid-pill">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
+        <button class="btn primary" :disabled="saving" @click="doSave">Сохранить</button>
+        <span class="status" :class="{ success: status === 'Сохранено' }">{{ status }}</span>
       </div>
     </header>
 
     <div class="workspace">
       <aside class="side-panel">
         <section class="panel-block" v-if="mode === 'terrain'">
-          <div class="section-title">Terrain brush</div>
+          <div class="section-title">Кисть рельефа</div>
           <label class="field">
-            <span>Brush</span>
+            <span>Инструмент</span>
             <select v-model="brushMode">
-              <option value="raise">Raise</option>
-              <option value="lower">Lower</option>
-              <option value="smooth">Smooth</option>
-              <option value="flatten">Flatten (to center height)</option>
+              <option value="raise">Поднять</option>
+              <option value="lower">Опустить</option>
+              <option value="smooth">Сгладить</option>
+              <option value="flatten">Выровнять по высоте</option>
             </select>
           </label>
           <label class="field slider">
             <div class="field-top">
-              <span>Radius</span>
-              <span class="value">{{ brushRadius.toFixed(1) }} cells</span>
+              <span>Радиус</span>
+              <span class="value">{{ brushRadius.toFixed(1) }} яч.</span>
             </div>
             <input type="range" min="0" max="5" step="0.5" v-model.number="brushRadius" />
           </label>
           <label class="field slider">
             <div class="field-top">
-              <span>Strength</span>
+              <span>Сила</span>
               <span class="value">{{ brushStrength.toFixed(2) }}</span>
             </div>
             <input type="range" min="0.05" max="1.2" step="0.05" v-model.number="brushStrength" />
           </label>
-          <p class="hint">Hold mouse and drag to sculpt. Buildings need relatively flat tiles.</p>
-          <div class="pill muted" style="margin-top:6px;">Height under cursor: {{ cursorHeight.toFixed(2) }}</div>
+          <p class="hint">Зажмите мышь и тяните для изменения рельефа. Постройки требуют ровных площадок.</p>
+          <div class="pill muted" style="margin-top:6px;">Высота под курсором: {{ cursorHeight.toFixed(2) }}</div>
           <div class="pill muted" style="margin-top:6px;">
-            Flatten height: {{ flattenTargetHeight === null ? 'auto' : flattenTargetHeight.toFixed(2) }}
+            Высота выравнивания: {{ flattenTargetHeight === null ? 'авто' : flattenTargetHeight.toFixed(2) }}
           </div>
           <div class="button-row">
-            <button class="btn ghost" @click="pickFlattenHeightFromLast" :disabled="!lastTerrainCell">Pick height (pipette)</button>
-            <button class="btn ghost" @click="flattenTargetHeight = null">Reset target</button>
+            <button class="btn ghost" @click="pickFlattenHeightFromLast" :disabled="!lastTerrainCell">Взять высоту</button>
+            <button class="btn ghost" @click="flattenTargetHeight = null">Сбросить</button>
           </div>
         </section>
 
         <section class="panel-block">
-          <div class="section-title">Grid</div>
-          <div class="pill muted">Cols {{ map.grid.cols }} · Rows {{ map.grid.rows }} · Cell {{ map.grid.cellSize }}</div>
+          <div class="section-title">Сетка</div>
+          <div class="pill muted">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
         </section>
 
         <section class="panel-block">
-          <div class="section-title">Assets</div>
+          <div class="section-title">Объекты</div>
           <AssetManager />
         </section>
       </aside>
@@ -549,7 +556,7 @@ onBeforeUnmount(() => {
           >
             <div class="card-header">
               <div class="card-title">{{ item.label }}</div>
-              <div class="card-meta">{{ item.size.w }}x{{ item.size.h }} · h {{ item.height }}</div>
+              <div class="card-meta">{{ item.size.w }}x{{ item.size.h }} · высота {{ item.height }}</div>
             </div>
             <div class="swatch" :style="{ background: `rgb(${Math.floor(item.color.r*255)}, ${Math.floor(item.color.g*255)}, ${Math.floor(item.color.b*255)})` }"></div>
           </div>

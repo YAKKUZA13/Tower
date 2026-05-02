@@ -15,6 +15,11 @@ const wsStatus = ref('');
 const joiningId = ref('');
 const characterName = ref('');
 const isAuthed = computed(() => !!username.value && !!authToken.value);
+const roleLabel = computed(() => {
+  if (role.value === 'gm') return 'Ведущий';
+  if (role.value === 'player') return 'Игрок';
+  return role.value;
+});
 let wsConn = null;
 const chatInput = ref('');
 const chatLog = ref([]);
@@ -145,7 +150,7 @@ function nextTurn() {
 }
 
 function setTurnOrder() {
-  const order = prompt('Введите порядок через запятую', turnOrder.value.join(','));
+  const order = prompt('Введите порядок ходов через запятую', turnOrder.value.join(','));
   if (order !== null) {
     const arr = order.split(',').map(x => x.trim()).filter(Boolean);
     wsConn?.send({ type: 'turn_set', order: arr });
@@ -159,89 +164,99 @@ function requestState() {
 
 
 <template>
-  <div style="height:100vh; display:flex; flex-direction:column;">
-    <header style="padding:3px 12px; background:#111; color:#fff; display:flex; align-items:center; justify-content:space-between;">
-      <div style="display:flex; align-items:center; gap:12px;">
-        <div>D&D Tabletop (LAN)</div>
-        <div v-if="isAuthed && sessionId" style="display:flex; gap:6px;">
-          <button @click="view='lobby'" :disabled="view==='lobby'">Lobby</button>
-          <button @click="view='editor'" :disabled="view==='editor'">GM Hub</button>
-          <button @click="view='play'" :disabled="view==='play'">Player</button>
+  <div class="app">
+    <header class="app-header">
+      <div class="app-header-left">
+        <div class="app-brand">D&D Tabletop (LAN)</div>
+        <div v-if="isAuthed && sessionId" class="app-nav">
+          <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Лобби</button>
+          <button class="nav-button" :class="{ active: view === 'editor' }" @click="view='editor'">Редактор карты</button>
+          <button class="nav-button" :class="{ active: view === 'play' }" @click="view='play'">Игровой экран</button>
         </div>
       </div>
-      <div v-if="isAuthed" style="display:flex; align-items:center; gap:8px;">
-        <span style="opacity:0.8;">{{ username }} <span v-if="role">({{ role }})</span></span>
-        <span v-if="sessionId" style="opacity:0.7;">Session: {{ sessionId }}</span>
-        <span style="opacity:0.7;">{{ wsStatus }}</span>
-        <button @click="logout">Logout</button>
+      <div v-if="isAuthed" class="app-header-right">
+        <div class="user-meta">
+          <span>{{ username }}</span>
+          <span v-if="roleLabel" class="muted">({{ roleLabel }})</span>
+        </div>
+        <div v-if="sessionId" class="muted">Сессия: {{ sessionId }}</div>
+        <div class="muted">{{ wsStatus }}</div>
+        <button class="btn ghost" @click="logout">Выйти</button>
       </div>
     </header>
-    <div style="flex:1; min-height:0;">
+
+    <div class="app-body">
       <LoginForm v-if="!isAuthed" @authed="handleAuthed" />
       <template v-else>
-        <div v-if="sessionId" style="display:flex; gap:12px; padding:10px; border-bottom:1px solid #ddd; background:#f7f7f7;">
-          <div style="flex:1; min-width:260px;">
-            <div style="font-weight:600; margin-bottom:4px;">Chat</div>
-            <div style="max-height:120px; overflow:auto; border:1px solid #ddd; padding:6px; background:#fff;">
-              <div v-for="(msg, idx) in chatLog" :key="idx" style="font-size:12px; margin-bottom:4px;">
-                <span style="font-weight:600;">{{ msg.from || 'system' }}:</span>
+        <section v-if="sessionId" class="session-tools">
+          <div class="tool-card">
+            <div class="tool-title">Чат</div>
+            <div class="chat-log">
+              <div v-for="(msg, idx) in chatLog" :key="idx" class="chat-line">
+                <span class="chat-author">{{ msg.from || 'system' }}:</span>
                 <span>{{ msg.text || (msg.type==='dice' ? msg.text : '') }}</span>
               </div>
             </div>
-            <div style="display:flex; gap:6px; margin-top:6px;">
-              <input v-model="chatInput" placeholder="Сообщение" style="flex:1;" @keyup.enter="sendChat" />
-              <button @click="sendChat">Send</button>
+            <div class="tool-row">
+              <input v-model="chatInput" placeholder="Сообщение" class="input" @keyup.enter="sendChat" />
+              <button class="btn primary" @click="sendChat">Отправить</button>
             </div>
-            <button style="margin-top:6px;" @click="requestState">Resync</button>
+            <button class="btn ghost" @click="requestState">Синхронизировать</button>
           </div>
-          <div style="width:200px;">
-            <div style="font-weight:600; margin-bottom:4px;">Dice</div>
-            <div style="display:flex; gap:4px; align-items:center;">
+
+          <div class="tool-card">
+            <div class="tool-title">Кости</div>
+            <div class="tool-row compact">
               <span>d</span>
-              <input type="number" min="2" max="1000" v-model.number="diceSides" style="width:70px;" />
-              <span>count</span>
-              <input type="number" min="1" max="10" v-model.number="diceCount" style="width:50px;" />
+              <input type="number" min="2" max="1000" v-model.number="diceSides" class="input small" />
+              <span>кол-во</span>
+              <input type="number" min="1" max="10" v-model.number="diceCount" class="input tiny" />
             </div>
-            <button style="margin-top:6px;" @click="sendDice">Roll</button>
+            <button class="btn primary" @click="sendDice">Бросить</button>
           </div>
-          <div style="width:220px;">
-            <div style="font-weight:600; margin-bottom:4px;">Turn Order</div>
-            <div style="font-size:12px; min-height:60px; border:1px solid #ddd; padding:6px; background:#fff;">
-              <div v-if="turnOrder.length === 0" style="color:#777;">No order</div>
+
+          <div class="tool-card">
+            <div class="tool-title">Порядок ходов</div>
+            <div class="turn-list">
+              <div v-if="turnOrder.length === 0" class="muted">Пока не задан</div>
               <div v-else>
-                <div v-for="(p, idx) in turnOrder" :key="p" :style="{fontWeight: idx===turnCurrent ? '700' : '400'}">
+                <div v-for="(p, idx) in turnOrder" :key="p" :class="['turn-item', idx===turnCurrent ? 'active' : '']">
                   {{ idx===turnCurrent ? '→ ' : '' }}{{ p }}
                 </div>
               </div>
             </div>
-            <div style="display:flex; gap:6px; margin-top:6px;">
-              <button @click="nextTurn">Next</button>
-              <button @click="setTurnOrder">Set</button>
+            <div class="tool-row">
+              <button class="btn ghost" @click="nextTurn">Следующий</button>
+              <button class="btn ghost" @click="setTurnOrder">Установить</button>
             </div>
           </div>
-        </div>
-        <div v-if="view==='lobby'" style="padding:20px; display:flex; gap:20px;">
-          <div style="width:300px; padding:12px; border:1px solid #ccc; border-radius:8px; display:flex; flex-direction:column; gap:8px;">
-            <div><strong>Host (GM)</strong></div>
-            <button @click="hostSession">Create Session</button>
-            <div style="font-size:12px; color:#555;">Создаёт сессию, вы — GM.</div>
-            <button v-if="sessionId && role==='gm'" @click="resetCurrentSession" style="margin-top:8px;">Reset Session</button>
+        </section>
+
+        <div v-if="view==='lobby'" class="lobby">
+          <div class="lobby-card">
+            <div class="card-title">Создать сессию (ведущий)</div>
+            <div class="card-help">Создаёт новую игру, вы — ведущий.</div>
+            <button class="btn primary" @click="hostSession">Создать сессию</button>
+            <button v-if="sessionId && role==='gm'" class="btn danger" @click="resetCurrentSession">Сбросить сессию</button>
           </div>
-          <div style="width:320px; padding:12px; border:1px solid #ccc; border-radius:8px; display:flex; flex-direction:column; gap:8px;">
-            <div><strong>Join</strong></div>
-            <label>Session ID</label>
-            <input v-model="joiningId" placeholder="enter session id" />
-            <label>Character</label>
-            <input v-model="characterName" placeholder="optional name" />
-            <button @click="joinExisting">Join</button>
+
+          <div class="lobby-card">
+            <div class="card-title">Присоединиться к сессии</div>
+            <label class="field-label">ID сессии</label>
+            <input v-model="joiningId" class="input" placeholder="введите ID сессии" />
+            <label class="field-label">Имя персонажа</label>
+            <input v-model="characterName" class="input" placeholder="необязательно" />
+            <button class="btn primary" @click="joinExisting">Подключиться</button>
           </div>
-          <div v-if="sessionId" style="padding:12px; border:1px solid #ccc; border-radius:8px; display:flex; flex-direction:column; gap:8px; min-width:240px;">
-            <div><strong>Current Session</strong></div>
+
+          <div v-if="sessionId" class="lobby-card">
+            <div class="card-title">Текущая сессия</div>
             <div>ID: {{ sessionId }}</div>
-            <div>Role: {{ role || 'unknown' }}</div>
-            <button @click="refreshSession">Refresh</button>
+            <div>Роль: {{ roleLabel || 'неизвестно' }}</div>
+            <button class="btn ghost" @click="refreshSession">Обновить</button>
           </div>
         </div>
+
         <MapEditor v-else-if="view==='editor'" />
         <Play v-else />
       </template>
@@ -250,6 +265,191 @@ function requestState() {
 </template>
 
 <style>
-html, body, #app { height: 100%; margin: 0; }
-button { cursor: pointer; }
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #0b1021;
+}
+button {
+  cursor: pointer;
+}
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.app-brand {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.app-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.nav-button {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e2e8f0;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.nav-button.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+}
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.user-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.muted {
+  opacity: 0.7;
+}
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.session-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.tool-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 160px;
+}
+.tool-title {
+  font-weight: 600;
+  color: #0f172a;
+}
+.chat-log {
+  flex: 1;
+  max-height: 140px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 6px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.chat-line {
+  margin-bottom: 4px;
+}
+.chat-author {
+  font-weight: 600;
+  margin-right: 4px;
+}
+.tool-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tool-row.compact {
+  font-size: 13px;
+}
+.turn-list {
+  flex: 1;
+  min-height: 80px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 6px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.turn-item.active {
+  font-weight: 700;
+}
+.lobby {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+.lobby-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #0f172a;
+}
+.card-title {
+  font-weight: 700;
+}
+.card-help {
+  color: #64748b;
+  font-size: 13px;
+}
+.field-label {
+  font-size: 12px;
+  color: #475569;
+}
+.input {
+  border: 1px solid #cbd5f5;
+  border-radius: 8px;
+  padding: 6px 8px;
+  width: 100%;
+}
+.input.small {
+  width: 80px;
+}
+.input.tiny {
+  width: 60px;
+}
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+}
+.btn.primary {
+  background: #2563eb;
+  color: #fff;
+}
+.btn.ghost {
+  background: #f1f5f9;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+}
+.btn.danger {
+  background: #dc2626;
+  color: #fff;
+}
 </style>

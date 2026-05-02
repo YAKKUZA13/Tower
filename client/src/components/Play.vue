@@ -112,29 +112,109 @@ onBeforeUnmount(() => { if (engineRef.value) engineRef.value.dispose(); mobs.for
 </script>
 
 <template>
-  <div style="display:flex; height:100%;">
-    <div style="width:260px; padding:10px; border-right:1px solid #ddd; display:flex; flex-direction:column; gap:10px;">
-      <div><strong>Play</strong></div>
-      <div>Gold: {{ gold }}</div>
-      <div>Base HP: {{ baseHp }}</div>
-      <div style="display:flex; gap:6px;">
-        <button @click="start">Start</button>
-        <button @click="pause">Pause</button>
-        <button @click="resume">Resume</button>
+  <div class="play-layout">
+    <aside class="play-sidebar">
+      <div class="panel-title">Игровая панель</div>
+      <div class="stat-line">Золото: {{ gold }}</div>
+      <div class="stat-line">Здоровье базы: {{ baseHp }}</div>
+      <div class="button-row">
+        <button class="btn primary" @click="start">Старт</button>
+        <button class="btn ghost" @click="pause">Пауза</button>
+        <button class="btn ghost" @click="resume">Продолжить</button>
       </div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        <span>Speed:</span>
-        <button @click="setSpeed(1)">1x</button>
-        <button @click="setSpeed(2)">2x</button>
-        <button @click="setSpeed(4)">4x</button>
+      <div class="speed-row">
+        <span>Скорость:</span>
+        <button class="btn ghost" @click="setSpeed(1)">1x</button>
+        <button class="btn ghost" @click="setSpeed(2)">2x</button>
+        <button class="btn ghost" @click="setSpeed(4)">4x</button>
+      </div>
+    </aside>
+    <div class="play-stage">
+      <canvas ref="canvasRef" class="play-canvas"></canvas>
+      <div v-if="!map?.path || (map.path.waypoints?.length||0) === 0" class="play-alert">
+        Настройте путь в редакторе карты (режим «Путь»)
       </div>
     </div>
-    <div style="flex:1; position:relative;">
-      <canvas ref="canvasRef" style="width:100%; height:100%;"></canvas>
-    </div>
-  </div>
-  <div v-if="!map?.path || (map.path.waypoints?.length||0) === 0" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; font-size:18px; color:#b00;">
-    Настройте путь в редакторе (режим Path)
   </div>
 </template>
+
+<style scoped>
+.play-layout {
+  display: flex;
+  height: 100%;
+  background: #0b1021;
+  color: #e5e7eb;
+}
+.play-sidebar {
+  width: 260px;
+  padding: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.panel-title {
+  font-weight: 700;
+}
+.stat-line {
+  font-size: 14px;
+}
+.button-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.speed-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.play-stage {
+  flex: 1;
+  position: relative;
+}
+.play-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.play-alert {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-size: 16px;
+  color: #fca5a5;
+  text-align: center;
+  padding: 12px;
+}
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-weight: 600;
+}
+.btn.primary {
+  background: #2563eb;
+  color: #fff;
+}
+.btn.ghost {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+@media (max-width: 960px) {
+  .play-layout {
+    flex-direction: column;
+  }
+  .play-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+</style>
 
