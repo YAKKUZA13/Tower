@@ -1,64 +1,37 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import LoginForm from './components/LoginForm.vue';
 import MapEditor from './components/MapEditor.vue';
 import Play from './components/Play.vue';
-import { createSession, joinSession, getSession, resetSession } from './services/api.js';
-import { connectWS } from './services/ws.js';
+import { useSessionSocket } from './composables/use-session-socket';
+import { useAuthStore } from './stores/auth-store';
+import { useGameSessionStore } from './stores/game-session-store';
 
-const username = ref(localStorage.getItem('username') || '');
-const authToken = ref(localStorage.getItem('authToken') || localStorage.getItem('apiKey') || '');
-const sessionId = ref(localStorage.getItem('sessionId') || '');
-const role = ref(localStorage.getItem('role') || '');
+const authStore = useAuthStore();
+const sessionStore = useGameSessionStore();
+const { user, isAuthed } = storeToRefs(authStore);
+const { sessionId, role, roleLabel } = storeToRefs(sessionStore);
 const view = ref('lobby'); // lobby | editor | play
-const wsStatus = ref('');
 const joiningId = ref('');
 const characterName = ref('');
-const isAuthed = computed(() => !!username.value && !!authToken.value);
-const roleLabel = computed(() => {
-  if (role.value === 'gm') return 'Ведущий';
-  if (role.value === 'player') return 'Игрок';
-  return role.value;
-});
-let wsConn = null;
-const chatInput = ref('');
-const chatLog = ref([]);
-const diceSides = ref(20);
-const diceCount = ref(1);
-const turnOrder = ref([]);
-const turnCurrent = ref(0);
+const username = computed(() => user.value?.username || user.value?.login || '');
+const accountRoleLabel = computed(() => authStore.defaultRole === 'gm' ? 'Мастер' : 'Игрок');
+const { status: wsStatus, connectSocket, closeSocket } = useSessionSocket({ sessionId, isAuthed });
 
-function handleAuthed({ username: u, token: k }) {
-  username.value = u;
-  authToken.value = k;
-  localStorage.setItem('username', u);
-  if (k) {
-    localStorage.setItem('authToken', k);
-    localStorage.setItem('apiKey', k);
-  }
+function handleAuthed() {
+  view.value = authStore.defaultRole === 'gm' ? 'lobby' : 'lobby';
 }
 
-function logout() {
-  localStorage.removeItem('username');
-  localStorage.removeItem('authToken');
-  localStorage.removeItem('apiKey');
-  localStorage.removeItem('sessionId');
-  localStorage.removeItem('role');
-  username.value = '';
-  authToken.value = '';
-  sessionId.value = '';
-  role.value = '';
+async function logout() {
+  closeSocket();
+  sessionStore.clearSession();
+  await authStore.logoutAccount();
   view.value = 'lobby';
-  wsStatus.value = '';
-  if (wsConn) { wsConn.close(); wsConn = null; }
 }
 
 async function hostSession() {
-  const res = await createSession();
-  sessionId.value = res.sessionId;
-  role.value = res.role || 'gm';
-  localStorage.setItem('sessionId', sessionId.value);
-  localStorage.setItem('role', role.value);
+  await sessionStore.createGameSession();
   view.value = 'editor';
   connectSocket();
 }
@@ -66,100 +39,33 @@ async function hostSession() {
 async function joinExisting() {
   const sid = joiningId.value.trim();
   if (!sid) return;
-  const res = await joinSession(sid, characterName.value.trim());
-  sessionId.value = res.sessionId;
-  role.value = res.role || 'player';
-  localStorage.setItem('sessionId', sessionId.value);
-  localStorage.setItem('role', role.value);
+  const res = await sessionStore.joinGameSession(sid, characterName.value.trim());
   view.value = role.value === 'gm' ? 'editor' : 'play';
+  joiningId.value = '';
   connectSocket();
 }
 
 async function refreshSession() {
-  if (!sessionId.value) return;
   try {
-    const res = await getSession(sessionId.value);
-    if (res && res.sessionId) {
-      role.value = res.role || role.value;
-      localStorage.setItem('role', role.value);
-    }
+    await sessionStore.refreshGameSession();
   } catch (e) {
     console.warn('session refresh failed', e);
   }
 }
 
 async function resetCurrentSession() {
-  if (!sessionId.value) return;
-  await resetSession(sessionId.value);
-  sessionId.value = '';
-  role.value = '';
-  localStorage.removeItem('sessionId');
-  localStorage.removeItem('role');
+  await sessionStore.resetCurrentSession();
   view.value = 'lobby';
-  if (wsConn) { wsConn.close(); wsConn = null; }
+  closeSocket();
 }
 
-function connectSocket() {
-  if (!sessionId.value || !isAuthed.value) return;
-  if (wsConn) { wsConn.close(); wsConn = null; }
-  wsStatus.value = 'connecting...';
-  wsConn = connectWS({ sessionId: sessionId.value });
-  wsConn.on('open', () => {
-    wsConn.send({ type: 'request_state' });
-  });
-  wsConn.on('welcome', (msg) => {
-    wsStatus.value = `ws: ${msg.role || ''}`;
-  });
-  wsConn.on('map_updated', () => {
-    wsStatus.value = 'map updated (ws)';
-    setTimeout(() => { wsStatus.value = ''; }, 1500);
-  });
-  wsConn.on('pong', () => { wsStatus.value = 'ws pong'; });
-  wsConn.on('chat', (msg) => {
-    chatLog.value = [...chatLog.value.slice(-30), msg];
-  });
-  wsConn.on('dice_roll', (msg) => {
-    chatLog.value = [...chatLog.value.slice(-30), { type: 'dice', from: msg.from, text: `d${msg.sides} x${msg.count}: ${msg.results.join(',')}` }];
-  });
-  wsConn.on('turn_update', (msg) => {
-    turnOrder.value = msg?.turn?.order || [];
-    turnCurrent.value = msg?.turn?.current || 0;
-  });
-  wsConn.on('state', (msg) => {
-    turnOrder.value = msg?.turn?.order || [];
-    turnCurrent.value = msg?.turn?.current || 0;
-  });
-}
-
-watch(sessionId, () => connectSocket());
-watch(isAuthed, (val) => { if (val && sessionId.value) connectSocket(); });
-
-function sendChat() {
-  const text = chatInput.value.trim();
-  if (!text) return;
-  wsConn?.send({ type: 'chat_send', text });
-  chatInput.value = '';
-}
-
-function sendDice() {
-  wsConn?.send({ type: 'dice_roll', sides: diceSides.value, count: diceCount.value });
-}
-
-function nextTurn() {
-  wsConn?.send({ type: 'turn_next' });
-}
-
-function setTurnOrder() {
-  const order = prompt('Введите порядок ходов через запятую', turnOrder.value.join(','));
-  if (order !== null) {
-    const arr = order.split(',').map(x => x.trim()).filter(Boolean);
-    wsConn?.send({ type: 'turn_set', order: arr });
+onMounted(async () => {
+  await authStore.restoreSession();
+  if (sessionStore.sessionId) {
+    await refreshSession();
+    view.value = sessionStore.role === 'gm' ? 'editor' : 'play';
   }
-}
-
-function requestState() {
-  wsConn?.send({ type: 'request_state' });
-}
+});
 </script>
 
 
@@ -167,16 +73,17 @@ function requestState() {
   <div class="app">
     <header class="app-header">
       <div class="app-header-left">
-        <div class="app-brand">D&D Tabletop (LAN)</div>
+        <div class="app-brand">D&D Battle Tabletop</div>
         <div v-if="isAuthed && sessionId" class="app-nav">
           <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Лобби</button>
-          <button class="nav-button" :class="{ active: view === 'editor' }" @click="view='editor'">Редактор карты</button>
+          <button v-if="role === 'gm'" class="nav-button" :class="{ active: view === 'editor' }" @click="view='editor'">Редактор карты</button>
           <button class="nav-button" :class="{ active: view === 'play' }" @click="view='play'">Игровой экран</button>
         </div>
       </div>
       <div v-if="isAuthed" class="app-header-right">
         <div class="user-meta">
           <span>{{ username }}</span>
+          <span class="muted">({{ accountRoleLabel }})</span>
           <span v-if="roleLabel" class="muted">({{ roleLabel }})</span>
         </div>
         <div v-if="sessionId" class="muted">Сессия: {{ sessionId }}</div>
@@ -188,55 +95,11 @@ function requestState() {
     <div class="app-body">
       <LoginForm v-if="!isAuthed" @authed="handleAuthed" />
       <template v-else>
-        <section v-if="sessionId" class="session-tools">
-          <div class="tool-card">
-            <div class="tool-title">Чат</div>
-            <div class="chat-log">
-              <div v-for="(msg, idx) in chatLog" :key="idx" class="chat-line">
-                <span class="chat-author">{{ msg.from || 'system' }}:</span>
-                <span>{{ msg.text || (msg.type==='dice' ? msg.text : '') }}</span>
-              </div>
-            </div>
-            <div class="tool-row">
-              <input v-model="chatInput" placeholder="Сообщение" class="input" @keyup.enter="sendChat" />
-              <button class="btn primary" @click="sendChat">Отправить</button>
-            </div>
-            <button class="btn ghost" @click="requestState">Синхронизировать</button>
-          </div>
-
-          <div class="tool-card">
-            <div class="tool-title">Кости</div>
-            <div class="tool-row compact">
-              <span>d</span>
-              <input type="number" min="2" max="1000" v-model.number="diceSides" class="input small" />
-              <span>кол-во</span>
-              <input type="number" min="1" max="10" v-model.number="diceCount" class="input tiny" />
-            </div>
-            <button class="btn primary" @click="sendDice">Бросить</button>
-          </div>
-
-          <div class="tool-card">
-            <div class="tool-title">Порядок ходов</div>
-            <div class="turn-list">
-              <div v-if="turnOrder.length === 0" class="muted">Пока не задан</div>
-              <div v-else>
-                <div v-for="(p, idx) in turnOrder" :key="p" :class="['turn-item', idx===turnCurrent ? 'active' : '']">
-                  {{ idx===turnCurrent ? '→ ' : '' }}{{ p }}
-                </div>
-              </div>
-            </div>
-            <div class="tool-row">
-              <button class="btn ghost" @click="nextTurn">Следующий</button>
-              <button class="btn ghost" @click="setTurnOrder">Установить</button>
-            </div>
-          </div>
-        </section>
-
         <div v-if="view==='lobby'" class="lobby">
-          <div class="lobby-card">
+          <div v-if="authStore.defaultRole === 'gm'" class="lobby-card">
             <div class="card-title">Создать сессию (ведущий)</div>
             <div class="card-help">Создаёт новую игру, вы — ведущий.</div>
-            <button class="btn primary" @click="hostSession">Создать сессию</button>
+            <button class="btn primary" :disabled="sessionStore.isLoading" @click="hostSession">Создать сессию</button>
             <button v-if="sessionId && role==='gm'" class="btn danger" @click="resetCurrentSession">Сбросить сессию</button>
           </div>
 
@@ -246,7 +109,7 @@ function requestState() {
             <input v-model="joiningId" class="input" placeholder="введите ID сессии" />
             <label class="field-label">Имя персонажа</label>
             <input v-model="characterName" class="input" placeholder="необязательно" />
-            <button class="btn primary" @click="joinExisting">Подключиться</button>
+            <button class="btn primary" :disabled="sessionStore.isLoading" @click="joinExisting">Подключиться</button>
           </div>
 
           <div v-if="sessionId" class="lobby-card">
@@ -334,65 +197,6 @@ button {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-.session-tools {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
-  padding: 12px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-}
-.tool-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 160px;
-}
-.tool-title {
-  font-weight: 600;
-  color: #0f172a;
-}
-.chat-log {
-  flex: 1;
-  max-height: 140px;
-  overflow: auto;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  padding: 6px;
-  border-radius: 8px;
-  font-size: 12px;
-}
-.chat-line {
-  margin-bottom: 4px;
-}
-.chat-author {
-  font-weight: 600;
-  margin-right: 4px;
-}
-.tool-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.tool-row.compact {
-  font-size: 13px;
-}
-.turn-list {
-  flex: 1;
-  min-height: 80px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  padding: 6px;
-  border-radius: 8px;
-  font-size: 12px;
-}
-.turn-item.active {
-  font-weight: 700;
 }
 .lobby {
   display: grid;

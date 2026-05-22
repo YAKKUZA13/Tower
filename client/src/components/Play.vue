@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { getMap } from '../services/api.js';
+import { getMap } from '../services/api';
 import { createEngine, createScene, drawPath, gridToWorld, addBuilding } from '../babylon/createScene.js';
 import { createMob } from '../babylon/mobs.js';
 import { findTarget, spawnProjectile } from '../babylon/combat.js';

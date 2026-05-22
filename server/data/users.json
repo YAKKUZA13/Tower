@@ -18,5 +18,35 @@
     "userId": "4446be00-0347-48bc-95a6-168869626957",
     "username": "asda",
     "apiKey": "4be1a3d5c70b5ca1a46b9002277c4444d6407bd633453b05"
+  },
+  {
+    "userId": "f6acc658-3a84-4759-9303-9651ddeb6bb6",
+    "username": "фывф",
+    "apiKey": "9aba9459e81cd1d6b2916920b47c830348ae4c2612315e7c"
+  },
+  {
+    "userId": "ecd773f4-27aa-4e86-be79-e4df39528a3a",
+    "login": "admin",
+    "username": "admin",
+    "defaultRole": "gm",
+    "password": {
+      "algorithm": "scrypt",
+      "salt": "249d9a9c51a4e498c4bea99dc0f2f64c",
+      "hash": "58b0c09f725d11c82488168ee98b09de216f63bfe080987d21eee903127d853ea7a839ca50390d366576abaa2fd1f6e9d9c6b4f1fd131ad5b973095ba435154c",
+      "keyLength": 64,
+      "params": {
+        "N": 16384,
+        "r": 8,
+        "p": 1
+      }
+    },
+    "profile": {
+      "wins": 0,
+      "losses": 0,
+      "rewards": [],
+      "stats": {}
+    },
+    "createdAt": 1779484036038,
+    "updatedAt": 1779484036038
   }
 ]

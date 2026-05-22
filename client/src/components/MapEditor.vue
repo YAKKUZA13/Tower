@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { getMap, saveMap } from '../services/api.js';
-import { createEngine, createScene, addBuilding, pickGrid, makePreviewMesh, updatePreviewMesh, drawPath, updateHeightmapTexture, sampleHeight, gridToWorld } from '../babylon/createScene.js';
+import { getMap, saveMap } from '../services/api';
+import { createEngine, createScene, addBuilding, pickGrid, makePreviewMesh, makeTerrainBrushMesh, updatePreviewMesh, drawPath, updateHeightmapTexture, sampleHeight, gridToWorld } from '../babylon/createScene.js';
 import { PointerEventTypes } from 'babylonjs';
 import AssetManager from './AssetManager.vue';
 
@@ -262,6 +262,7 @@ function renderAll() {
 }
 
 let previewMesh = null;
+let terrainBrushMesh = null;
 
 function applyTerrainBrush(cell) {
   const grid = map.value.grid;
@@ -326,20 +327,20 @@ function applyTerrainBrush(cell) {
 }
 
 function updateTerrainPreview(cell) {
-  if (!previewMesh) return;
-  const size = brushRadius.value * 2 + 0.5;
-  const h = 0.2;
+  if (!terrainBrushMesh) return;
+  const diameter = Math.max(0.4, brushRadius.value * 2 * map.value.grid.cellSize);
+  const h = 0.08;
   const pos = gridToWorld(map.value.grid, cell.col, cell.row);
   const groundHeight = sampleHeight(map.value.heightmap, map.value.grid, cell.col, cell.row, true);
   cursorHeight.value = groundHeight;
   lastTerrainCell.value = cell;
   pos.y = groundHeight + h / 2 + 0.05;
-  previewMesh.scaling.set(size, h, size);
-  previewMesh.position = pos;
-  if (previewMesh.material?.diffuseColor) {
-    previewMesh.material.diffuseColor.set(0.2, 0.6, 0.9);
+  terrainBrushMesh.scaling.set(diameter, 1, diameter);
+  terrainBrushMesh.position = pos;
+  if (terrainBrushMesh.material?.diffuseColor) {
+    terrainBrushMesh.material.diffuseColor.set(0.16, 0.64, 1);
   }
-  previewMesh.setEnabled(true);
+  terrainBrushMesh.setEnabled(true);
 }
 
 function pickFlattenHeight(cell) {
@@ -379,6 +380,7 @@ async function init() {
   babylonRef.value = { scene, ground };
 
   previewMesh = makePreviewMesh(scene, map.value.grid);
+  terrainBrushMesh = makeTerrainBrushMesh(scene);
 
   engine.runRenderLoop(() => {
     scene.render();
@@ -393,18 +395,23 @@ async function init() {
     if (!cell) return;
     const def = getSelectedDef();
     if (mode.value === 'place') {
+      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
       const valid = canPlace(cell.col, cell.row, def.size);
       updatePreviewMesh(previewMesh, map.value.grid, { col: cell.col, row: cell.row, size: def.size, height: def.height }, valid, map.value.heightmap);
     } else if (mode.value === 'remove') {
       // hide preview in remove mode
       if (previewMesh) previewMesh.setEnabled(false);
+      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
     } else if (mode.value === 'path') {
       if (previewMesh) previewMesh.setEnabled(false);
+      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
     } else if (mode.value === 'terrain') {
+      if (previewMesh) previewMesh.setEnabled(false);
       updateTerrainPreview(cell);
       if (isPaintingTerrain) applyTerrainBrush(cell);
     } else {
       if (previewMesh) previewMesh.setEnabled(false);
+      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
     }
   }, PointerEventTypes.POINTERMOVE);
 
@@ -447,6 +454,7 @@ async function init() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (previewMesh) previewMesh.setEnabled(false);
+      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
     }
   });
 }
@@ -479,12 +487,6 @@ onBeforeUnmount(() => {
     <header class="toolbar">
       <div class="toolbar-left">
         <div class="brand">Редактор карты</div>
-        <div class="mode-switch">
-          <label v-for="opt in modeOptions" :key="opt" :class="['chip', mode === opt ? 'active' : '']">
-            <input type="radio" :value="opt" v-model="mode" />
-            <span>{{ modeLabels[opt] }}</span>
-          </label>
-        </div>
       </div>
       <div class="toolbar-right">
         <div class="grid-pill">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
@@ -495,45 +497,50 @@ onBeforeUnmount(() => {
 
     <div class="workspace">
       <aside class="side-panel">
-        <section class="panel-block" v-if="mode === 'terrain'">
-          <div class="section-title">Кисть рельефа</div>
-          <label class="field">
-            <span>Инструмент</span>
-            <select v-model="brushMode">
-              <option value="raise">Поднять</option>
-              <option value="lower">Опустить</option>
-              <option value="smooth">Сгладить</option>
-              <option value="flatten">Выровнять по высоте</option>
-            </select>
-          </label>
-          <label class="field slider">
-            <div class="field-top">
-              <span>Радиус</span>
-              <span class="value">{{ brushRadius.toFixed(1) }} яч.</span>
-            </div>
-            <input type="range" min="0" max="5" step="0.5" v-model.number="brushRadius" />
-          </label>
-          <label class="field slider">
-            <div class="field-top">
-              <span>Сила</span>
-              <span class="value">{{ brushStrength.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="0.05" max="1.2" step="0.05" v-model.number="brushStrength" />
-          </label>
-          <p class="hint">Зажмите мышь и тяните для изменения рельефа. Постройки требуют ровных площадок.</p>
-          <div class="pill muted" style="margin-top:6px;">Высота под курсором: {{ cursorHeight.toFixed(2) }}</div>
-          <div class="pill muted" style="margin-top:6px;">
-            Высота выравнивания: {{ flattenTargetHeight === null ? 'авто' : flattenTargetHeight.toFixed(2) }}
-          </div>
-          <div class="button-row">
-            <button class="btn ghost" @click="pickFlattenHeightFromLast" :disabled="!lastTerrainCell">Взять высоту</button>
-            <button class="btn ghost" @click="flattenTargetHeight = null">Сбросить</button>
-          </div>
-        </section>
-
         <section class="panel-block">
-          <div class="section-title">Сетка</div>
-          <div class="pill muted">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
+          <div class="section-title">Инструменты</div>
+          <div class="tool-grid">
+            <label v-for="opt in modeOptions" :key="opt" :class="['tool-button', mode === opt ? 'active' : '']">
+              <input type="radio" :value="opt" v-model="mode" />
+              <span>{{ modeLabels[opt] }}</span>
+            </label>
+          </div>
+
+          <div v-if="mode === 'terrain'" class="tool-section">
+            <div class="section-subtitle">Кисть рельефа</div>
+            <label class="field">
+              <span>Инструмент</span>
+              <select v-model="brushMode">
+                <option value="raise">Поднять</option>
+                <option value="lower">Опустить</option>
+                <option value="smooth">Сгладить</option>
+                <option value="flatten">Выровнять по высоте</option>
+              </select>
+            </label>
+            <label class="field slider">
+              <div class="field-top">
+                <span>Радиус</span>
+                <span class="value">{{ brushRadius.toFixed(1) }} яч.</span>
+              </div>
+              <input type="range" min="0" max="5" step="0.5" v-model.number="brushRadius" />
+            </label>
+            <label class="field slider">
+              <div class="field-top">
+                <span>Сила</span>
+                <span class="value">{{ brushStrength.toFixed(2) }}</span>
+              </div>
+              <input type="range" min="0.05" max="1.2" step="0.05" v-model.number="brushStrength" />
+            </label>
+            <p class="hint">Зажмите мышь и тяните для изменения рельефа. Постройки требуют ровных площадок.</p>
+            <div class="pill muted" style="margin-top:6px;">Высота под курсором: {{ cursorHeight.toFixed(2) }}</div>
+            <div class="pill muted" style="margin-top:6px;">
+              Высота выравнивания: {{ flattenTargetHeight === null ? 'авто' : flattenTargetHeight.toFixed(2) }}
+            </div>
+            <div class="button-row">
+              <button class="btn ghost" @click="pickFlattenHeightFromLast" :disabled="!lastTerrainCell">Взять высоту</button>
+              <button class="btn ghost" @click="flattenTargetHeight = null">Сбросить</button>
+            </div>
+          </div>
         </section>
 
         <section class="panel-block">
@@ -600,35 +607,6 @@ onBeforeUnmount(() => {
 .brand {
   font-weight: 700;
   letter-spacing: 0.2px;
-  color: #f8fafc;
-}
-
-.mode-switch {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: #d1d5db;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-}
-
-.chip input {
-  display: none;
-}
-
-.chip.active {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.16);
   color: #f8fafc;
 }
 
@@ -712,6 +690,50 @@ onBeforeUnmount(() => {
   font-weight: 600;
   margin-bottom: 8px;
   color: #e2e8f0;
+}
+
+.section-subtitle {
+  margin: 14px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tool-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.tool-button input {
+  display: none;
+}
+
+.tool-button.active {
+  border-color: rgba(96, 165, 250, 0.9);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.38), rgba(14, 165, 233, 0.16));
+  color: #f8fafc;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.16);
+}
+
+.tool-section {
+  margin-top: 12px;
+  padding-top: 2px;
 }
 
 .field {

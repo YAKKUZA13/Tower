@@ -17,10 +17,9 @@ function makeEmitter() {
 }
 
 export function connectWS({ sessionId }) {
-  const username = encodeURIComponent(localStorage.getItem('username') || '');
-  const token = encodeURIComponent(localStorage.getItem('authToken') || localStorage.getItem('apiKey') || '');
+  const token = encodeURIComponent(localStorage.getItem('authToken') || '');
   const sid = encodeURIComponent(sessionId || '');
-  const url = `${WS_BASE}?username=${username}${token ? `&token=${token}` : ''}${sid ? `&sessionId=${sid}` : ''}`;
+  const url = `${WS_BASE}?${token ? `token=${token}` : ''}${sid ? `&sessionId=${sid}` : ''}`;
   const emitter = makeEmitter();
   const socket = new WebSocket(url);
 

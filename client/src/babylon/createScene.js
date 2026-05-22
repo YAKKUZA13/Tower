@@ -377,6 +377,18 @@ export function createScene(engine, grid, heightmap = null) {
   ground.material = terrain.material;
   ground.metadata.terrain = terrain;
 
+  const terrainBase = MeshBuilder.CreateBox('terrain-base', {
+    width: boardWidth,
+    height: 1.2,
+    depth: boardHeight
+  }, scene);
+  terrainBase.position.y = -0.75;
+  const baseMat = new StandardMaterial('terrainBaseMat', scene);
+  baseMat.diffuseColor = new Color3(0.10, 0.13, 0.11);
+  baseMat.specularColor = new Color3(0.02, 0.02, 0.02);
+  terrainBase.material = baseMat;
+  terrainBase.isPickable = false;
+
   // Grid lines
   const halfW = (grid.cols * grid.cellSize) / 2;
   const halfH = (grid.rows * grid.cellSize) / 2;
@@ -400,6 +412,7 @@ export function createScene(engine, grid, heightmap = null) {
   gridMat.emissiveColor = new Color3(0.75, 0.75, 0.75);
   gridLines.color = new Color3(0.7, 0.7, 0.7);
   gridLines.alwaysSelectAsActiveMesh = true;
+  gridLines.setEnabled(false);
 
   const towersParent = new TransformNode('towers', scene);
 
@@ -471,6 +484,22 @@ export function makePreviewMesh(scene, grid) {
   const mat = new StandardMaterial('previewMat', scene);
   mat.alpha = 0.4;
   mat.diffuseColor = new Color3(0.2, 0.8, 0.2);
+  mesh.material = mat;
+  mesh.isPickable = false;
+  mesh.setEnabled(false);
+  return mesh;
+}
+
+export function makeTerrainBrushMesh(scene) {
+  const mesh = MeshBuilder.CreateCylinder('terrain-brush-preview', {
+    diameter: 1,
+    height: 0.08,
+    tessellation: 72
+  }, scene);
+  const mat = new StandardMaterial('terrainBrushPreviewMat', scene);
+  mat.alpha = 0.28;
+  mat.diffuseColor = new Color3(0.16, 0.64, 1);
+  mat.emissiveColor = new Color3(0.04, 0.22, 0.42);
   mesh.material = mat;
   mesh.isPickable = false;
   mesh.setEnabled(false);

@@ -9,11 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.5.12",
-    "babylonjs": "^7.48.4"
+    "babylonjs": "^7.48.4",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.12"
   },
   "devDependencies": {
-    "vite": "^5.4.8",
-    "@vitejs/plugin-vue": "^5.1.4"
+    "@vitejs/plugin-vue": "^5.1.4",
+    "typescript": "^6.0.3",
+    "vite": "^5.4.8"
   }
 }

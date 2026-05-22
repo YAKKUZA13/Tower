@@ -17,8 +17,8 @@ async function start() {
   await app.register(cors, {
     origin: 'http://localhost:5173',
     credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-username', 'x-api-key', 'x-session-id', 'authorization', 'Authorization']
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-session-id', 'authorization', 'Authorization']
   });
 
   await app.register(websocket);
@@ -47,37 +47,29 @@ async function start() {
   });
 
   app.get('/ws', { websocket: true }, async (connection, req) => {
-    const usernameRaw = req.headers['x-username'] || req.query?.username;
+    const socket = connection.socket || connection;
     const sessionId = (req.headers['x-session-id'] || req.query?.sessionId || '').toString().trim() || null;
     const bearer = req.headers['authorization'] || req.headers['Authorization'];
     const tokenFromHeader = (typeof bearer === 'string' && bearer.toLowerCase().startsWith('bearer ')) ? bearer.slice(7).trim() : null;
-    const token = tokenFromHeader || req.headers['x-api-key'] || req.query?.apiKey || req.query?.token;
+    const token = tokenFromHeader || req.query?.token;
     if (!token) {
-      connection.socket.close(4001, 'missing_auth');
+      socket.close(4001, 'missing_auth');
       return;
     }
-    const { verifyUser, getActiveSession, findUserByApiKey } = await import('./services/store.js');
-    let usernameDecoded = usernameRaw ? String(usernameRaw) : null;
-    try { if (usernameDecoded) usernameDecoded = decodeURIComponent(usernameDecoded); } catch {}
-    const tokenStr = String(token);
-    let user = null;
-    if (usernameDecoded) {
-      user = await verifyUser(usernameDecoded, tokenStr);
-    }
-    if (!user) {
-      user = await findUserByApiKey(tokenStr);
-    }
-    if (!user) {
-      connection.socket.close(4002, 'invalid_auth');
+    const { findAuthSessionByToken, getActiveSession } = await import('./services/store.js');
+    const auth = await findAuthSessionByToken(String(token));
+    if (!auth?.user) {
+      socket.close(4002, 'invalid_auth');
       return;
     }
+    const user = auth.user;
     const session = sessionId ? await getActiveSession(sessionId) : await getActiveSession(null);
     const role = session ? (session.gmUserId === user.userId ? 'gm' : (session.players.find(p => p.userId === user.userId) ? 'player' : 'spectator')) : 'spectator';
-    const client = { socket: connection.socket, sessionId: session?.sessionId || null, userId: user.userId, role };
+    const client = { socket, sessionId: session?.sessionId || null, userId: user.userId, role };
     clients.add(client);
-    const send = (obj) => connection.socket.send(JSON.stringify(obj));
+    const send = (obj) => socket.send(JSON.stringify(obj));
     send({ type: 'welcome', role, sessionId: client.sessionId });
-    connection.socket.on('message', (raw) => {
+    socket.on('message', (raw) => {
       let data = null;
       try { data = JSON.parse(raw); } catch {}
       if (data?.type === 'ping') {
@@ -121,7 +113,7 @@ async function start() {
           break;
       }
     });
-    connection.socket.on('close', () => {
+    socket.on('close', () => {
       clients.delete(client);
     });
   });

@@ -1,57 +1,57 @@
-<script setup>
-import { ref } from 'vue';
-import { register as apiRegister, login as apiLogin } from '../services/api.js';
+<script setup lang="ts">
+import { computed, ref } from 'vue';
+import { useAuthStore } from '../stores/auth-store';
+import type { AccountRole } from '../domain/auth';
 
 const emit = defineEmits(['authed']);
 
-const username = ref(localStorage.getItem('username') || '');
-const token = ref(localStorage.getItem('authToken') || localStorage.getItem('apiKey') || '');
+const authStore = useAuthStore();
+const mode = ref<'login' | 'register'>('login');
+const login = ref('');
+const password = ref('');
+const passwordRepeat = ref('');
+const defaultRole = ref<AccountRole>('player');
 const status = ref('');
-const loading = ref(false);
+const isRegisterMode = computed(() => mode.value === 'register');
+const canSubmit = computed(() => {
+  if (!login.value.trim() || password.value.length < 8) return false;
+  if (isRegisterMode.value && password.value !== passwordRepeat.value) return false;
+  return !authStore.isLoading;
+});
 
 async function doRegister() {
-  loading.value = true;
   status.value = '';
   try {
-    const uname = username.value.trim();
-    const res = await apiRegister(uname);
-    const key = String(res.token || res.apiKey || '').trim();
-    token.value = key;
-    localStorage.setItem('username', uname);
-    if (key) {
-      localStorage.setItem('authToken', key);
-      localStorage.setItem('apiKey', key);
-    }
-    emit('authed', { username: uname, token: key });
-    status.value = 'Registered — token saved';
+    await authStore.registerAccount({
+      login: login.value.trim(),
+      password: password.value,
+      defaultRole: defaultRole.value
+    });
+    emit('authed');
+    status.value = 'Аккаунт создан';
   } catch (e) {
-    status.value = 'Register failed';
-  } finally {
-    loading.value = false;
+    status.value = authStore.error || 'Регистрация не удалась';
   }
 }
 
 async function doLogin() {
-  loading.value = true;
   status.value = '';
   try {
-    const uname = username.value.trim();
-    const keyInput = String(token.value).trim() || localStorage.getItem('authToken') || localStorage.getItem('apiKey') || '';
-    const res = await apiLogin(uname, keyInput);
-    const key = String(res.token || res.apiKey || keyInput).trim();
-    token.value = key;
-    localStorage.setItem('username', uname);
-    if (key) {
-      localStorage.setItem('authToken', key);
-      localStorage.setItem('apiKey', key);
-    }
-    emit('authed', { username: uname, token: key });
-    status.value = 'Logged in';
+    await authStore.loginAccount({
+      login: login.value.trim(),
+      password: password.value
+    });
+    emit('authed');
+    status.value = 'Вход выполнен';
   } catch (e) {
-    status.value = 'Login failed';
-  } finally {
-    loading.value = false;
+    status.value = authStore.error || 'Войти не удалось';
   }
+}
+
+function submit() {
+  if (!canSubmit.value) return;
+  if (isRegisterMode.value) doRegister();
+  else doLogin();
 }
 </script>
 
@@ -59,15 +59,41 @@ async function doLogin() {
   <div class="auth-wrap">
     <div class="auth-card">
       <h2>Добро пожаловать</h2>
-      <label class="auth-label">Имя</label>
-      <input v-model="username" class="auth-input" placeholder="Введите имя" />
-      <label class="auth-label">Ключ доступа</label>
-      <input v-model="token" class="auth-input" placeholder="Автоматически после регистрации" />
-      <div class="auth-actions">
-        <button class="auth-btn primary" :disabled="loading || !username" @click="doRegister">Создать пользователя</button>
-        <button class="auth-btn ghost" :disabled="loading || !username || !token" @click="doLogin">Войти</button>
+      <div class="auth-tabs">
+        <button type="button" :class="['tab-btn', mode === 'login' ? 'active' : '']" @click="mode = 'login'">Войти</button>
+        <button type="button" :class="['tab-btn', mode === 'register' ? 'active' : '']" @click="mode = 'register'">Создать аккаунт</button>
       </div>
-      <div class="auth-hint">Ключ хранится локально и используется для авторизации.</div>
+
+      <label class="auth-label">Логин</label>
+      <input v-model="login" class="auth-input" placeholder="Введите логин" autocomplete="username" @keyup.enter="submit" />
+
+      <label class="auth-label">Пароль</label>
+      <input v-model="password" type="password" class="auth-input" placeholder="Минимум 8 символов" autocomplete="current-password" @keyup.enter="submit" />
+
+      <template v-if="isRegisterMode">
+        <label class="auth-label">Повтор пароля</label>
+        <input v-model="passwordRepeat" type="password" class="auth-input" placeholder="Повторите пароль" autocomplete="new-password" @keyup.enter="submit" />
+
+        <div class="role-select">
+          <label :class="['role-card', defaultRole === 'gm' ? 'active' : '']">
+            <input v-model="defaultRole" type="radio" value="gm" />
+            <span class="role-title">Мастер</span>
+            <span class="role-help">Создание сессий, редактор, управление миром.</span>
+          </label>
+          <label :class="['role-card', defaultRole === 'player' ? 'active' : '']">
+            <input v-model="defaultRole" type="radio" value="player" />
+            <span class="role-title">Игрок</span>
+            <span class="role-help">Подключение к игре, персонаж, прогрессия.</span>
+          </label>
+        </div>
+      </template>
+
+      <div class="auth-actions">
+        <button class="auth-btn primary" :disabled="!canSubmit" @click="submit">
+          {{ authStore.isLoading ? 'Подождите...' : (isRegisterMode ? 'Создать аккаунт' : 'Войти') }}
+        </button>
+      </div>
+      <div class="auth-hint">Пароль хранится на сервере только как salted hash. Токен входа можно отозвать.</div>
       <div class="auth-status">{{ status }}</div>
     </div>
   </div>
@@ -82,7 +108,7 @@ async function doLogin() {
   padding: 16px;
 }
 .auth-card {
-  width: 360px;
+  width: min(440px, 100%);
   padding: 20px;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -91,6 +117,25 @@ async function doLogin() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tab-btn {
+  border: 1px solid #dbe3f0;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 700;
+}
+.tab-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
 }
 .auth-label {
   font-size: 12px;
@@ -101,6 +146,34 @@ async function doLogin() {
   border: 1px solid #cbd5f5;
   border-radius: 8px;
   padding: 8px 10px;
+  box-sizing: border-box;
+}
+.role-select {
+  display: grid;
+  gap: 8px;
+}
+.role-card {
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+.role-card input {
+  display: none;
+}
+.role-card.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.role-title {
+  font-weight: 800;
+}
+.role-help {
+  color: #64748b;
+  font-size: 12px;
 }
 .auth-actions {
   display: flex;
@@ -112,10 +185,15 @@ async function doLogin() {
   border-radius: 8px;
   padding: 8px 12px;
   font-weight: 600;
+  width: 100%;
 }
 .auth-btn.primary {
   background: #2563eb;
   color: #fff;
+}
+.auth-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .auth-btn.ghost {
   background: #f1f5f9;

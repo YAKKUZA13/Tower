@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import { promisify } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,9 +10,16 @@ const ROOT_DIR = path.resolve(__dirname, '../..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
 const MAPS_DIR = path.join(DATA_DIR, 'maps');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const AUTH_SESSIONS_FILE = path.join(DATA_DIR, 'authSessions.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const ASSETS_DIR = path.join(DATA_DIR, 'assets');
 const ASSETS_INDEX = path.join(ASSETS_DIR, 'assets.json');
+const scryptAsync = promisify(crypto.scrypt);
+
+const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD_KEY_LENGTH = 64;
+const PASSWORD_PARAMS = { N: 16384, r: 8, p: 1 };
+const ACCOUNT_ROLES = new Set(['gm', 'player']);
 
 // Larger default playfield with higher tile density
 const DEFAULT_GRID = { cols: 32, rows: 18, cellSize: 1.5 };
@@ -104,6 +112,9 @@ export async function ensureDataDirs() {
   if (!(await fileExists(USERS_FILE))) {
     await fs.writeFile(USERS_FILE, JSON.stringify([], null, 2), 'utf-8');
   }
+  if (!(await fileExists(AUTH_SESSIONS_FILE))) {
+    await fs.writeFile(AUTH_SESSIONS_FILE, JSON.stringify([], null, 2), 'utf-8');
+  }
   if (!(await fileExists(SESSIONS_FILE))) {
     await fs.writeFile(SESSIONS_FILE, JSON.stringify([], null, 2), 'utf-8');
   }
@@ -140,35 +151,147 @@ export async function writeUsers(users) {
   await writeJson(USERS_FILE, users);
 }
 
+export async function readAuthSessions() {
+  return await readJson(AUTH_SESSIONS_FILE, []);
+}
+
+export async function writeAuthSessions(authSessions) {
+  await writeJson(AUTH_SESSIONS_FILE, authSessions);
+}
+
+function normalizeLogin(login) {
+  return String(login || '').trim();
+}
+
+function normalizeAccountRole(role) {
+  return ACCOUNT_ROLES.has(role) ? role : 'player';
+}
+
+function createEmptyProfile() {
+  return {
+    wins: 0,
+    losses: 0,
+    rewards: [],
+    stats: {}
+  };
+}
+
+export function toPublicUser(user) {
+  if (!user) return null;
+  const login = user.login || user.username;
+  return {
+    userId: user.userId,
+    login,
+    username: login,
+    defaultRole: normalizeAccountRole(user.defaultRole),
+    profile: user.profile || createEmptyProfile(),
+    createdAt: user.createdAt || null,
+    updatedAt: user.updatedAt || null
+  };
+}
+
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = await scryptAsync(String(password), salt, PASSWORD_KEY_LENGTH, PASSWORD_PARAMS);
+  return {
+    algorithm: 'scrypt',
+    salt,
+    hash: Buffer.from(derived).toString('hex'),
+    keyLength: PASSWORD_KEY_LENGTH,
+    params: { ...PASSWORD_PARAMS }
+  };
+}
+
+async function verifyPassword(password, stored) {
+  if (!stored || stored.algorithm !== 'scrypt' || !stored.salt || !stored.hash) return false;
+  const keyLength = Number(stored.keyLength) || PASSWORD_KEY_LENGTH;
+  const params = stored.params || PASSWORD_PARAMS;
+  const derived = await scryptAsync(String(password), stored.salt, keyLength, params);
+  const storedBuffer = Buffer.from(String(stored.hash), 'hex');
+  const derivedBuffer = Buffer.from(derived);
+  if (storedBuffer.length !== derivedBuffer.length) return false;
+  return crypto.timingSafeEqual(storedBuffer, derivedBuffer);
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
 export async function findUserByUsername(username) {
   const users = await readUsers();
-  return users.find(u => u.username === username) || null;
+  const login = normalizeLogin(username);
+  return users.find(u => (u.login || u.username) === login) || null;
 }
 
-export async function findUserByApiKey(apiKey) {
+export async function createUserWithPassword(loginRaw, passwordRaw, defaultRoleRaw = 'player') {
   const users = await readUsers();
-  return users.find(u => u.apiKey === apiKey) || null;
-}
-
-export async function createOrGetUser(username) {
-  const users = await readUsers();
-  let user = users.find(u => u.username === username);
-  if (!user) {
-    user = {
-      userId: crypto.randomUUID(),
-      username,
-      apiKey: crypto.randomBytes(24).toString('hex')
-    };
-    users.push(user);
-    await writeUsers(users);
-  }
+  const login = normalizeLogin(loginRaw);
+  const exists = users.find(u => (u.login || u.username) === login);
+  if (exists) return null;
+  const now = Date.now();
+  const user = {
+    userId: crypto.randomUUID(),
+    login,
+    username: login,
+    defaultRole: normalizeAccountRole(defaultRoleRaw),
+    password: await hashPassword(passwordRaw),
+    profile: createEmptyProfile(),
+    createdAt: now,
+    updatedAt: now
+  };
+  users.push(user);
+  await writeUsers(users);
   return user;
 }
 
-export async function verifyUser(username, apiKey) {
+export async function verifyPasswordLogin(loginRaw, passwordRaw) {
+  const user = await findUserByUsername(loginRaw);
+  if (!user) return null;
+  const isValid = await verifyPassword(passwordRaw, user.password);
+  return isValid ? user : null;
+}
+
+export async function createAuthSession(user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  const authSession = {
+    sessionId: crypto.randomUUID(),
+    userId: user.userId,
+    tokenHash: hashToken(token),
+    createdAt: now,
+    expiresAt: now + AUTH_SESSION_TTL_MS,
+    lastSeenAt: now
+  };
+  const authSessions = await readAuthSessions();
+  authSessions.push(authSession);
+  await writeAuthSessions(authSessions);
+  return { authSession, token };
+}
+
+export async function findAuthSessionByToken(token) {
+  const tokenHash = hashToken(token);
+  const now = Date.now();
+  const authSessions = await readAuthSessions();
+  const activeSessions = authSessions.filter(s => !s.expiresAt || s.expiresAt > now);
+  const idx = activeSessions.findIndex(s => s.tokenHash === tokenHash);
+  if (idx === -1) {
+    if (activeSessions.length !== authSessions.length) await writeAuthSessions(activeSessions);
+    return null;
+  }
+  activeSessions[idx] = { ...activeSessions[idx], lastSeenAt: now };
+  await writeAuthSessions(activeSessions);
   const users = await readUsers();
-  const user = users.find(u => u.username === username && u.apiKey === apiKey);
-  return user || null;
+  const user = users.find(u => u.userId === activeSessions[idx].userId) || null;
+  if (!user) return null;
+  return { authSession: activeSessions[idx], user };
+}
+
+export async function deleteAuthSession(token) {
+  const tokenHash = hashToken(token);
+  const authSessions = await readAuthSessions();
+  const filtered = authSessions.filter(s => s.tokenHash !== tokenHash);
+  await writeAuthSessions(filtered);
+  return filtered.length !== authSessions.length;
 }
 
 export async function readSessions() {
@@ -189,13 +312,22 @@ export async function getActiveSession(sessionId) {
 
 export async function createSession(gmUser) {
   const sessions = await readSessions();
+  const now = Date.now();
   const session = {
     sessionId: crypto.randomUUID(),
     gmUserId: gmUser.userId,
-    gmName: gmUser.username,
+    gmName: gmUser.login || gmUser.username,
+    gm: {
+      userId: gmUser.userId,
+      username: gmUser.login || gmUser.username,
+      characterName: '',
+      role: 'gm'
+    },
     players: [],
-    createdAt: Date.now(),
-    mapOwnerId: gmUser.userId
+    createdAt: now,
+    mapOwnerId: gmUser.userId,
+    mapId: null,
+    status: 'active'
   };
   // overwrite existing active session for simplicity
   const updated = [session, ...sessions.filter(s => s.sessionId === session.sessionId ? false : true)];
@@ -210,7 +342,12 @@ export async function joinSession(sessionId, user, characterName = '') {
   const session = sessions[idx];
   const exists = session.players.find(p => p.userId === user.userId);
   if (!exists) {
-    session.players.push({ userId: user.userId, username: user.username, characterName });
+    session.players.push({
+      userId: user.userId,
+      username: user.login || user.username,
+      characterName,
+      role: 'player'
+    });
     sessions[idx] = session;
     await writeSessions(sessions);
   }

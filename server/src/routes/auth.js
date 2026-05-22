@@ -1,39 +1,78 @@
-import { createOrGetUser, verifyUser } from '../services/store.js';
+import { createAuthSession, createUserWithPassword, deleteAuthSession, toPublicUser, verifyPasswordLogin } from '../services/store.js';
+import { authenticateRequest } from '../services/auth.js';
+
+function extractBearerToken(headers) {
+  const raw = headers?.authorization || headers?.Authorization;
+  if (!raw || typeof raw !== 'string') return null;
+  if (!raw.toLowerCase().startsWith('bearer ')) return null;
+  return raw.slice(7).trim();
+}
+
+function createAuthResponse(user, authSession, token) {
+  return {
+    user: toPublicUser(user),
+    authSession: {
+      sessionId: authSession.sessionId,
+      token,
+      expiresAt: authSession.expiresAt
+    },
+    token
+  };
+}
 
 export default async function authRoutes(app) {
   app.post('/register', {
     schema: {
       body: {
         type: 'object',
-        required: ['username'],
+        required: ['login', 'password', 'defaultRole'],
         properties: {
-          username: { type: 'string', minLength: 1, maxLength: 40 }
+          login: { type: 'string', minLength: 2, maxLength: 40 },
+          password: { type: 'string', minLength: 8, maxLength: 200 },
+          defaultRole: { type: 'string', enum: ['gm', 'player'] }
         }
       }
     }
   }, async (req, reply) => {
-    const { username } = req.body;
-    const user = await createOrGetUser(String(username).trim());
-    return reply.send({ userId: user.userId, username: user.username, token: user.apiKey, apiKey: user.apiKey });
+    const { login, password, defaultRole } = req.body;
+    const user = await createUserWithPassword(login, password, defaultRole);
+    if (!user) return reply.code(409).send({ error: 'login_taken' });
+    const { authSession, token } = await createAuthSession(user);
+    return reply.send(createAuthResponse(user, authSession, token));
   });
 
   app.post('/login', {
     schema: {
       body: {
         type: 'object',
-        required: ['username', 'apiKey'],
+        required: ['login', 'password'],
         properties: {
-          username: { type: 'string', minLength: 1, maxLength: 40 },
-          apiKey: { type: 'string', minLength: 10, maxLength: 200 }
+          login: { type: 'string', minLength: 2, maxLength: 40 },
+          password: { type: 'string', minLength: 8, maxLength: 200 }
         }
       }
     }
   }, async (req, reply) => {
-    const { username, apiKey } = req.body;
-    const user = await verifyUser(String(username).trim(), String(apiKey));
+    const { login, password } = req.body;
+    const user = await verifyPasswordLogin(login, password);
     if (!user) {
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
-    return reply.send({ userId: user.userId, username: user.username, token: user.apiKey, apiKey: user.apiKey });
+    const { authSession, token } = await createAuthSession(user);
+    return reply.send(createAuthResponse(user, authSession, token));
+  });
+
+  app.post('/logout', async (req, reply) => {
+    const ok = await authenticateRequest(req, reply);
+    if (!ok) return;
+    const token = extractBearerToken(req.headers);
+    if (token) await deleteAuthSession(token);
+    return reply.send({ ok: true });
+  });
+
+  app.get('/me', async (req, reply) => {
+    const ok = await authenticateRequest(req, reply);
+    if (!ok) return;
+    return reply.send(toPublicUser(req.user));
   });
 }

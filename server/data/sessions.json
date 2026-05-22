@@ -1,5 +1,21 @@
 [
   {
+    "sessionId": "bfd0c682-f9c1-4717-995f-9e5907669337",
+    "gmUserId": "f6acc658-3a84-4759-9303-9651ddeb6bb6",
+    "gmName": "фывф",
+    "players": [],
+    "createdAt": 1779395732066,
+    "mapOwnerId": "f6acc658-3a84-4759-9303-9651ddeb6bb6"
+  },
+  {
+    "sessionId": "4a87db1f-f868-4675-98d3-ca7960d4ddf1",
+    "gmUserId": "4da91a30-8a5a-4347-a14b-d94f2213338a",
+    "gmName": "Антон",
+    "players": [],
+    "createdAt": 1779388594349,
+    "mapOwnerId": "4da91a30-8a5a-4347-a14b-d94f2213338a"
+  },
+  {
     "sessionId": "a5a3b701-592c-466f-bc1b-2433e0c9ad8d",
     "gmUserId": "4446be00-0347-48bc-95a6-168869626957",
     "gmName": "asda",
