@@ -1,5 +1,9 @@
 import { readMap, writeMap, getDefaultMap, getActiveSession } from '../services/store.js';
 import { authenticateRequest } from '../services/auth.js';
+import { normalizeMapDocument } from '../domain/map.js';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import type { GameSession } from '../types/game-session.js';
+import type { GridData, MapDocument } from '../types/map.js';
 
 const MIN_HEIGHT = -50;
 const MAX_HEIGHT = 200;
@@ -7,7 +11,9 @@ const MAX_GRID = 1000;
 const MIN_CELL_SIZE = 0.1;
 const MAX_CELL_SIZE = 100;
 
-function clampGrid(grid) {
+type MapBody = Partial<MapDocument> & Record<string, any>;
+
+function clampGrid(grid: Partial<GridData> | undefined): GridData {
   const rawCols = Number(grid?.cols);
   const rawRows = Number(grid?.rows);
   const rawCell = Number(grid?.cellSize);
@@ -17,12 +23,13 @@ function clampGrid(grid) {
   return { cols, rows, cellSize };
 }
 
-function normalizeHeightmap(grid, incoming) {
+function normalizeHeightmap(grid: GridData, incoming: unknown): number[][] {
   const rows = Math.max(1, Number(grid.rows) || 1);
   const cols = Math.max(1, Number(grid.cols) || 1);
   const result = [];
   for (let r = 0; r < rows; r++) {
-    const rowSrc = Array.isArray(incoming?.[r]) ? incoming[r] : null;
+    const rowsSource = Array.isArray(incoming) ? incoming : [];
+    const rowSrc = Array.isArray(rowsSource[r]) ? rowsSource[r] as unknown[] : null;
     const normalizedRow = [];
     for (let c = 0; c < cols; c++) {
       const raw = rowSrc && Number.isFinite(Number(rowSrc[c])) ? Number(rowSrc[c]) : 0;
@@ -34,25 +41,26 @@ function normalizeHeightmap(grid, incoming) {
   return result;
 }
 
-function isSessionMember(session, userId) {
+function isSessionMember(session: GameSession | null, userId: string): boolean {
   if (!session) return false;
   if (session.gmUserId === userId) return true;
   return Array.isArray(session.players) && session.players.some(p => p.userId === userId);
 }
 
-function clampCell(value, maxInclusive) {
+function clampCell(value: unknown, maxInclusive: number): number {
   return Math.max(0, Math.min(maxInclusive, Number(value)));
 }
 
-async function requireAuth(req, reply) {
+async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const ok = await authenticateRequest(req, reply);
   if (!ok) return;
 }
 
-export default async function mapRoutes(app) {
+const mapRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', requireAuth);
 
   app.get('/', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'missing_auth' });
     const sessionIdRaw = req.headers['x-session-id'];
     const sessionId = sessionIdRaw ? String(sessionIdRaw).trim() : null;
     let ownerId = req.user.userId;
@@ -77,7 +85,8 @@ export default async function mapRoutes(app) {
     schema: {
       body: {
         type: 'object',
-        required: ['version', 'grid', 'towers'],
+        required: ['version', 'grid'],
+        additionalProperties: true,
         properties: {
           version: { type: 'integer' },
           grid: {
@@ -167,11 +176,44 @@ export default async function mapRoutes(app) {
                 props: { type: 'object', additionalProperties: true }
               }
             }
-          }
+          },
+          objects: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: true,
+              required: ['id', 'type', 'transform'],
+              properties: {
+                id: { type: 'string' },
+                type: { type: 'string' },
+                assetId: { type: ['string', 'null'] },
+                primitiveType: { type: 'string' },
+                transform: {
+                  type: 'object',
+                  additionalProperties: true,
+                  required: ['position', 'rotation', 'scale'],
+                  properties: {
+                    position: { type: 'object', additionalProperties: true },
+                    rotation: { type: 'object', additionalProperties: true },
+                    scale: { type: 'object', additionalProperties: true }
+                  }
+                },
+                collision: { type: 'object', additionalProperties: true },
+                tags: { type: 'array', items: { type: 'string' } },
+                properties: { type: 'object', additionalProperties: true }
+              }
+            }
+          },
+          terrain: { type: 'object', additionalProperties: true },
+          paths: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          encounters: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          lighting: { type: 'object', additionalProperties: true },
+          metadata: { type: 'object', additionalProperties: true }
         }
       }
     }
-  }, async (req, reply) => {
+  }, async (req: FastifyRequest<{ Body: MapBody }>, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'missing_auth' });
     const sessionIdRaw = req.headers['x-session-id'];
     const sessionId = sessionIdRaw ? String(sessionIdRaw).trim() : null;
     let ownerId = req.user.userId;
@@ -181,61 +223,25 @@ export default async function mapRoutes(app) {
       if (!isSessionMember(session, req.user.userId)) return reply.code(403).send({ error: 'not_in_session' });
       ownerId = session.sessionId;
     }
-    const existing = await readMap(ownerId);
     const incoming = req.body;
 
     const grid = clampGrid(incoming.grid);
     const heightmap = normalizeHeightmap(grid, incoming.heightmap);
-
-    const normalized = {
+    const existing = await readMap(ownerId);
+    const normalized = normalizeMapDocument({
+      ...existing,
+      ...incoming,
       version: (existing?.version || 1) + 1,
       grid,
       heightmap,
+      terrain: { ...(incoming.terrain || {}), heightmap },
       path: {
-        waypoints: Array.isArray(incoming?.path?.waypoints) ? incoming.path.waypoints.map(wp => ({
+        waypoints: Array.isArray(incoming?.path?.waypoints) ? incoming.path.waypoints.map((wp: any) => ({
           col: clampCell(wp.col, grid.cols - 1),
           row: clampCell(wp.row, grid.rows - 1)
         })) : []
-      },
-      base: {
-        hp: Math.max(1, Number(incoming?.base?.hp || 20))
-      },
-      waves: Array.isArray(incoming?.waves) ? incoming.waves.map(w => ({
-        count: Math.max(1, Number(w.count)),
-        interval: Math.max(0.01, Number(w.interval)),
-        type: String(w.type || 'basic'),
-        hp: Math.max(1, Number(w.hp)),
-        speed: Math.max(0.01, Number(w.speed)),
-        reward: Math.max(0, Number(w.reward))
-      })) : [
-        { count: 10, interval: 1, type: 'basic', hp: 10, speed: 1, reward: 1 },
-        { count: 12, interval: 0.9, type: 'basic', hp: 12, speed: 1, reward: 1 },
-        { count: 15, interval: 0.8, type: 'basic', hp: 15, speed: 1.1, reward: 2 }
-      ],
-      towers: Array.isArray(incoming.towers) ? incoming.towers.map(t => {
-        const lvl = Math.max(1, Number(t.level || 1));
-        const sizeW = Math.max(1, Number(t?.size?.w || 1));
-        const sizeH = Math.max(1, Number(t?.size?.h || 1));
-        const explicitHeight = Number(t?.height);
-        const height = Number.isFinite(explicitHeight) ? Math.max(0.1, explicitHeight) : Math.max(0.1, 2 + lvl * 0.2);
-        const props = (t && typeof t === 'object' && t.props && typeof t.props === 'object') ? t.props : {};
-        const colorObj = (t && typeof t === 'object' && t.color && typeof t.color === 'object') ? t.color : null;
-        const r = Math.max(0, Math.min(1, Number(colorObj?.r ?? 0.6)));
-        const g = Math.max(0, Math.min(1, Number(colorObj?.g ?? 0.6)));
-        const b = Math.max(0, Math.min(1, Number(colorObj?.b ?? 0.6)));
-        return {
-          id: String(t.id),
-          type: String(t.type || 'basic'),
-          col: clampCell(t.col, grid.cols - 1),
-          row: clampCell(t.row, grid.rows - 1),
-          level: lvl,
-          size: { w: sizeW, h: sizeH },
-          height,
-          color: { r, g, b },
-          props
-        };
-      }) : []
-    };
+      }
+    });
 
     await writeMap(ownerId, normalized);
     if (sessionId && typeof app.broadcast === 'function') {
@@ -243,4 +249,6 @@ export default async function mapRoutes(app) {
     }
     return reply.send({ ok: true });
   });
-}
+};
+
+export default mapRoutes;

@@ -6,9 +6,19 @@
     "client"
   ],
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev": "npm run db:setup && concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm --workspace server run dev",
     "dev:client": "npm --workspace client run dev",
+    "build": "npm --workspace server run build && npm --workspace client run build",
+    "typecheck": "npm --workspace server run typecheck",
+    "start": "npm --workspace server run start",
+    "db:up": "docker compose up -d --wait postgres redis",
+    "db:down": "docker compose down",
+    "db:ps": "docker compose ps",
+    "db:logs": "docker compose logs -f postgres redis",
+    "db:setup": "npm run db:up && npm run migrate",
+    "migrate": "npm --workspace server run migrate",
+    "migrate:json": "npm --workspace server run migrate:json",
     "install:all": "npm install --workspaces"
   },
   "devDependencies": {

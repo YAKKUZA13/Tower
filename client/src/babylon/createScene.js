@@ -479,6 +479,64 @@ export function addBuilding(scene, grid, b, heightmap = null) {
   return mesh;
 }
 
+export function addPlacedObject(scene, obj, heightmap = null, grid = null) {
+  const transform = obj?.transform || {};
+  const scale = transform.scale || { x: 1, y: 1, z: 1 };
+  const position = transform.position || { x: 0, y: 0, z: 0 };
+  const rotation = transform.rotation || { x: 0, y: 0, z: 0 };
+  const width = Math.max(0.1, Number(scale.x || 1));
+  const height = Math.max(0.1, Number(scale.y || 1));
+  const depth = Math.max(0.1, Number(scale.z || 1));
+  const primitive = obj?.primitiveType || obj?.properties?.primitiveType || 'box';
+  let mesh;
+  if (primitive === 'cylinder') {
+    mesh = MeshBuilder.CreateCylinder(`object-${obj.id}`, { diameter: width, height, tessellation: 24 }, scene);
+  } else if (primitive === 'sphere') {
+    mesh = MeshBuilder.CreateSphere(`object-${obj.id}`, { diameter: Math.max(width, depth) }, scene);
+    mesh.scaling.y = height / Math.max(width, depth);
+  } else {
+    mesh = MeshBuilder.CreateBox(`object-${obj.id}`, { width, height, depth }, scene);
+  }
+  let groundHeight = Number(position.y || 0);
+  if (heightmap && grid) {
+    const halfW = (grid.cols * grid.cellSize) / 2;
+    const halfH = (grid.rows * grid.cellSize) / 2;
+    const col = (Number(position.x || 0) + halfW) / grid.cellSize;
+    const row = (Number(position.z || 0) + halfH) / grid.cellSize;
+    groundHeight = sampleHeight(heightmap, grid, col, row, true);
+  }
+  mesh.position = new Vector3(Number(position.x || 0), groundHeight + height / 2, Number(position.z || 0));
+  mesh.rotation = new Vector3(Number(rotation.x || 0), Number(rotation.y || 0), Number(rotation.z || 0));
+  mesh.metadata = { objectId: obj.id, placedObject: obj };
+  const mat = new StandardMaterial(`objectMat-${obj.id}`, scene);
+  const color = obj?.properties?.color || { r: 0.62, g: 0.72, b: 0.64 };
+  mat.diffuseColor = new Color3(color.r ?? 0.62, color.g ?? 0.72, color.b ?? 0.64);
+  mesh.material = mat;
+  return mesh;
+}
+
+export function updateFreePlacementPreview(previewMesh, obj, valid = true, heightmap = null, grid = null) {
+  if (!previewMesh || !obj?.transform) return;
+  const scale = obj.transform.scale || { x: 1, y: 1, z: 1 };
+  const pos = obj.transform.position || { x: 0, y: 0, z: 0 };
+  const height = Math.max(0.1, Number(scale.y || 1));
+  previewMesh.scaling = new Vector3(Math.max(0.1, scale.x || 1), height, Math.max(0.1, scale.z || 1));
+  let groundHeight = Number(pos.y || 0);
+  if (heightmap && grid) {
+    const halfW = (grid.cols * grid.cellSize) / 2;
+    const halfH = (grid.rows * grid.cellSize) / 2;
+    const col = (Number(pos.x || 0) + halfW) / grid.cellSize;
+    const row = (Number(pos.z || 0) + halfH) / grid.cellSize;
+    groundHeight = sampleHeight(heightmap, grid, col, row, true);
+  }
+  previewMesh.position = new Vector3(Number(pos.x || 0), groundHeight + height / 2, Number(pos.z || 0));
+  const mat = previewMesh.material;
+  if (mat?.diffuseColor) {
+    mat.diffuseColor = valid ? new Color3(0.2, 0.8, 0.2) : new Color3(0.9, 0.2, 0.2);
+  }
+  previewMesh.setEnabled(true);
+}
+
 export function makePreviewMesh(scene, grid) {
   const mesh = MeshBuilder.CreateBox('preview', { width: grid.cellSize, height: 1, depth: grid.cellSize }, scene);
   const mat = new StandardMaterial('previewMat', scene);
@@ -581,6 +639,26 @@ export function drawPath(scene, grid, waypoints, heightmap = null) {
     ls.color = new Color3(0.95, 0.6, 0.1);
     ls.isPickable = false;
   }
+}
+
+export function pickWorld(scene) {
+  const pick = scene.pick(scene.pointerX, scene.pointerY, mesh => mesh.name === 'ground');
+  return pick?.pickedPoint || null;
+}
+
+export function pickSceneObject(scene) {
+  const pick = scene.pick(scene.pointerX, scene.pointerY, mesh => Boolean(mesh?.metadata?.objectId));
+  if (!pick?.pickedMesh?.metadata?.objectId) return null;
+  return {
+    objectId: pick.pickedMesh.metadata.objectId,
+    mesh: pick.pickedMesh,
+    point: pick.pickedPoint
+  };
+}
+
+export function setGridVisible(scene, visible) {
+  const grid = scene.getMeshByName('grid-lines');
+  if (grid) grid.setEnabled(Boolean(visible));
 }
 
 export function pickGrid(scene, grid) {

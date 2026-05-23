@@ -1,4 +1,4 @@
-export type EditorTool = 'place' | 'remove' | 'path' | 'terrain' | 'select' | 'move' | 'rotate' | 'scale';
+export type EditorTool = 'select' | 'place' | 'move' | 'rotate' | 'scale' | 'remove' | 'path' | 'terrain';
 
 export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten';
 

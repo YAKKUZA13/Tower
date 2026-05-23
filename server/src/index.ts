@@ -2,16 +2,31 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { ensureDataDirs } from './services/store.js';
+import { query } from './db/pool.js';
+import { runMigrations } from './db/migrate.js';
+import { connectRedis, getRedis } from './redis/client.js';
 import authRoutes from './routes/auth.js';
 import mapRoutes from './routes/map.js';
 import sessionRoutes from './routes/session.js';
 import assetsRoutes from './routes/assets.js';
+import type { FastifyRequest } from 'fastify';
+import type { LiveSessionState, ServerMessage, WsClient } from './types/realtime.js';
+import type { ClientMessage } from './types/realtime.js';
+import type { GameRole } from './types/game-session.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const BODY_LIMIT_BYTES = 20 * 1024 * 1024;
+
+interface WsQuery {
+  sessionId?: string;
+  token?: string;
+}
 
 async function start() {
-  const app = Fastify({ logger: true, ignoreTrailingSlash: true });
+  const app = Fastify({ logger: true, ignoreTrailingSlash: true, bodyLimit: BODY_LIMIT_BYTES });
 
+  await runMigrations();
+  await connectRedis();
   await ensureDataDirs();
 
   await app.register(cors, {
@@ -23,18 +38,18 @@ async function start() {
 
   await app.register(websocket);
 
-  const clients = new Set();
-  const liveState = new Map(); // sessionId -> { turn, entities }
-  const ensureState = (sessionId) => {
+  const clients = new Set<WsClient>();
+  const liveState = new Map<string, LiveSessionState>();
+  const ensureState = (sessionId: string | null): LiveSessionState | null => {
     if (!sessionId) return null;
     if (!liveState.has(sessionId)) {
       liveState.set(sessionId, { entities: [], turn: { order: [], current: 0 } });
     }
-    return liveState.get(sessionId);
+    return liveState.get(sessionId) || null;
   };
 
   app.decorate('wsClients', clients);
-  app.decorate('broadcast', (sessionId, payload) => {
+  app.decorate('broadcast', (sessionId: string | null, payload: ServerMessage) => {
     const msg = JSON.stringify(payload);
     for (const c of clients) {
       if (sessionId && c.sessionId !== sessionId) continue;
@@ -46,7 +61,14 @@ async function start() {
     }
   });
 
-  app.get('/ws', { websocket: true }, async (connection, req) => {
+  app.get('/health', async (_req, reply) => {
+    await query('SELECT 1');
+    const redis = getRedis();
+    await redis.ping();
+    return reply.send({ ok: true, postgres: 'ok', redis: 'ok' });
+  });
+
+  app.get('/ws', { websocket: true }, async (connection: any, req: FastifyRequest<{ Querystring: WsQuery }>) => {
     const socket = connection.socket || connection;
     const sessionId = (req.headers['x-session-id'] || req.query?.sessionId || '').toString().trim() || null;
     const bearer = req.headers['authorization'] || req.headers['Authorization'];
@@ -64,20 +86,32 @@ async function start() {
     }
     const user = auth.user;
     const session = sessionId ? await getActiveSession(sessionId) : await getActiveSession(null);
-    const role = session ? (session.gmUserId === user.userId ? 'gm' : (session.players.find(p => p.userId === user.userId) ? 'player' : 'spectator')) : 'spectator';
-    const client = { socket, sessionId: session?.sessionId || null, userId: user.userId, role };
+    const role: GameRole = session ? (session.gmUserId === user.userId ? 'gm' : (session.players.find(p => p.userId === user.userId) ? 'player' : 'spectator')) : 'spectator';
+    const client: WsClient = { socket, sessionId: session?.sessionId || null, userId: user.userId, role };
     clients.add(client);
-    const send = (obj) => socket.send(JSON.stringify(obj));
+    const { getRedisOrNull } = await import('./redis/client.js');
+    const redis = await getRedisOrNull();
+    if (redis && client.sessionId) {
+      await redis.hSet(`presence:session:${client.sessionId}`, user.userId, JSON.stringify({
+        userId: user.userId,
+        username: user.username || user.login,
+        role,
+        connectedAt: Date.now()
+      }));
+      await redis.expire(`presence:session:${client.sessionId}`, 120);
+    }
+    const send = (obj: ServerMessage) => socket.send(JSON.stringify(obj));
     send({ type: 'welcome', role, sessionId: client.sessionId });
-    socket.on('message', (raw) => {
-      let data = null;
-      try { data = JSON.parse(raw); } catch {}
+    socket.on('message', (raw: Buffer | string) => {
+      let data: ClientMessage | null = null;
+      try { data = JSON.parse(String(raw)) as ClientMessage; } catch {}
       if (data?.type === 'ping') {
         send({ type: 'pong', t: Date.now() });
         return;
       }
       if (!client.sessionId) return;
       const state = ensureState(client.sessionId);
+      if (!state) return;
       switch (data?.type) {
         case 'chat_send':
           app.broadcast(client.sessionId, { type: 'chat', from: user.username, text: String(data.text || '').slice(0, 500), ts: Date.now() });
@@ -115,6 +149,9 @@ async function start() {
     });
     socket.on('close', () => {
       clients.delete(client);
+      if (redis && client.sessionId) {
+        redis.hDel(`presence:session:${client.sessionId}`, user.userId).catch((err: unknown) => app.log.warn(err));
+      }
     });
   });
 

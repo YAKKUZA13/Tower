@@ -1,19 +1,30 @@
 import { createSession, getActiveSession, joinSession, resetSession } from '../services/store.js';
 import { authenticateRequest } from '../services/auth.js';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import type { GameRole, GameSession } from '../types/game-session.js';
 
-async function requireAuth(req, reply) {
+interface JoinBody {
+  sessionId: string;
+  characterName?: string;
+}
+
+interface ResetBody {
+  sessionId: string;
+}
+
+async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const ok = await authenticateRequest(req, reply);
   if (!ok) return;
 }
 
-function getSessionRole(session, userId) {
+function getSessionRole(session: GameSession | null, userId: string): GameRole {
   if (!session) return 'spectator';
   if (session.gmUserId === userId) return 'gm';
   if (session.players.find(p => p.userId === userId)) return 'player';
   return 'spectator';
 }
 
-function toSessionDto(session, userId) {
+function toSessionDto(session: GameSession | null, userId: string) {
   if (!session) return null;
   const gmName = session.gmName || session.gm?.username || '';
   return {
@@ -33,11 +44,12 @@ function toSessionDto(session, userId) {
   };
 }
 
-export default async function sessionRoutes(app) {
+const sessionRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', requireAuth);
 
   app.post('/session', async (req, reply) => {
     const user = req.user;
+    if (!user) return reply.code(401).send({ error: 'missing_auth' });
     const session = await createSession(user);
     return reply.send(toSessionDto(session, user.userId));
   });
@@ -53,14 +65,16 @@ export default async function sessionRoutes(app) {
         }
       }
     }
-  }, async (req, reply) => {
+  }, async (req: FastifyRequest<{ Body: JoinBody }>, reply) => {
     const { sessionId, characterName } = req.body;
+    if (!req.user) return reply.code(401).send({ error: 'missing_auth' });
     const session = await joinSession(sessionId, req.user, characterName || '');
     if (!session) return reply.code(404).send({ error: 'session_not_found' });
     return reply.send(toSessionDto(session, req.user.userId));
   });
 
   app.get('/session', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'missing_auth' });
     const sid = req.headers['x-session-id'] ? String(req.headers['x-session-id']) : null;
     const session = await getActiveSession(sid);
     if (!session) return reply.send(null);
@@ -77,7 +91,8 @@ export default async function sessionRoutes(app) {
         }
       }
     }
-  }, async (req, reply) => {
+  }, async (req: FastifyRequest<{ Body: ResetBody }>, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'missing_auth' });
     const { sessionId } = req.body;
     const session = await getActiveSession(sessionId);
     if (!session) return reply.code(404).send({ error: 'session_not_found' });
@@ -85,5 +100,7 @@ export default async function sessionRoutes(app) {
     await resetSession(sessionId);
     return reply.send({ ok: true });
   });
-}
+};
+
+export default sessionRoutes;
 

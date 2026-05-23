@@ -1,14 +1,27 @@
 import { createAuthSession, createUserWithPassword, deleteAuthSession, toPublicUser, verifyPasswordLogin } from '../services/store.js';
 import { authenticateRequest } from '../services/auth.js';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { AuthSession, PublicUser, UserAccount } from '../types/auth.js';
 
-function extractBearerToken(headers) {
+interface RegisterBody {
+  login: string;
+  password: string;
+  defaultRole: 'gm' | 'player';
+}
+
+interface LoginBody {
+  login: string;
+  password: string;
+}
+
+function extractBearerToken(headers: FastifyRequest['headers']): string | null {
   const raw = headers?.authorization || headers?.Authorization;
   if (!raw || typeof raw !== 'string') return null;
   if (!raw.toLowerCase().startsWith('bearer ')) return null;
   return raw.slice(7).trim();
 }
 
-function createAuthResponse(user, authSession, token) {
+function createAuthResponse(user: UserAccount | PublicUser, authSession: AuthSession, token: string) {
   return {
     user: toPublicUser(user),
     authSession: {
@@ -20,7 +33,7 @@ function createAuthResponse(user, authSession, token) {
   };
 }
 
-export default async function authRoutes(app) {
+const authRoutes: FastifyPluginAsync = async (app) => {
   app.post('/register', {
     schema: {
       body: {
@@ -33,7 +46,7 @@ export default async function authRoutes(app) {
         }
       }
     }
-  }, async (req, reply) => {
+  }, async (req: FastifyRequest<{ Body: RegisterBody }>, reply) => {
     const { login, password, defaultRole } = req.body;
     const user = await createUserWithPassword(login, password, defaultRole);
     if (!user) return reply.code(409).send({ error: 'login_taken' });
@@ -52,7 +65,7 @@ export default async function authRoutes(app) {
         }
       }
     }
-  }, async (req, reply) => {
+  }, async (req: FastifyRequest<{ Body: LoginBody }>, reply) => {
     const { login, password } = req.body;
     const user = await verifyPasswordLogin(login, password);
     if (!user) {
@@ -75,4 +88,6 @@ export default async function authRoutes(app) {
     if (!ok) return;
     return reply.send(toPublicUser(req.user));
   });
-}
+};
+
+export default authRoutes;

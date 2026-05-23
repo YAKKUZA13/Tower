@@ -1,6 +1,7 @@
 import { findAuthSessionByToken } from './store.js';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
-function extractBearerToken(headers) {
+function extractBearerToken(headers: FastifyRequest['headers']): string | null {
   const raw = headers?.authorization || headers?.Authorization;
   if (!raw || typeof raw !== 'string') return null;
   const lower = raw.toLowerCase();
@@ -8,7 +9,7 @@ function extractBearerToken(headers) {
   return raw.slice(7).trim();
 }
 
-export async function authenticateRequest(req, reply) {
+export async function authenticateRequest(req: FastifyRequest, reply: FastifyReply): Promise<boolean> {
   const token = extractBearerToken(req.headers);
 
   if (!token) {

@@ -20,8 +20,8 @@ export interface TerrainData {
 export interface PlacedObject {
   id: string;
   type: string;
-  assetId?: string;
-  primitiveType?: 'box' | 'cylinder' | 'sphere';
+  assetId?: string | null;
+  primitiveType?: 'box' | 'cylinder' | 'sphere' | string;
   transform: WorldTransform;
   collision?: {
     blocking?: boolean;

@@ -1,7 +1,11 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { getMap, saveMap } from '../services/api';
-import { createEngine, createScene, addBuilding, pickGrid, makePreviewMesh, makeTerrainBrushMesh, updatePreviewMesh, drawPath, updateHeightmapTexture, sampleHeight, gridToWorld } from '../babylon/createScene.js';
+import { createEngine, createScene, drawPath, gridToWorld } from '../babylon/createScene.js';
+import { addPlacedObject, updateFreePlacementPreview } from '../babylon/object-renderer.js';
+import { updateHeightmapTexture, sampleHeight } from '../babylon/terrain-renderer.js';
+import { pickGrid, pickSceneObject, pickWorld } from '../babylon/picking.js';
+import { makePreviewMesh, makeTerrainBrushMesh, setGridVisible } from '../babylon/editor-gizmos.js';
 import { PointerEventTypes } from 'babylonjs';
 import AssetManager from './AssetManager.vue';
 
@@ -110,14 +114,23 @@ const map = ref({
   version: 1,
   grid: { cols: 32, rows: 18, cellSize: 1.5 },
   heightmap: generateDefaultHeightmap(18, 32, 11),
+  terrain: { heightmap: generateDefaultHeightmap(18, 32, 11), materialLayers: [], water: [], biome: 'temperate' },
+  objects: [],
+  paths: [],
+  encounters: [],
+  lighting: { timeOfDay: 'day', fog: 0.02 },
+  metadata: { name: 'Новая карта', setting: '', version: 1 },
   towers: [],
   path: { waypoints: [] },
   base: { hp: 20 },
   waves: []
 });
-const mode = ref('place'); // place | remove | path | terrain
+const mode = ref('select'); // select | place | move | rotate | scale | remove | path | terrain
 const saving = ref(false);
 const status = ref('');
+const selectedObjectId = ref(null);
+const snapEnabled = ref(true);
+const snapStep = ref(0.5);
 
 const brushMode = ref('raise'); // raise | lower | smooth | flatten
 const brushRadius = ref(1.2);
@@ -126,9 +139,13 @@ const flattenTargetHeight = ref(null);
 const cursorHeight = ref(0);
 const lastTerrainCell = ref(null);
 let isPaintingTerrain = false;
-const modeOptions = ['place', 'remove', 'path', 'terrain'];
+const modeOptions = ['select', 'place', 'move', 'rotate', 'scale', 'remove', 'path', 'terrain'];
 const modeLabels = {
+  select: 'Выбор',
   place: 'Строить',
+  move: 'Двигать',
+  rotate: 'Вращать',
+  scale: 'Масштаб',
   remove: 'Удалять',
   path: 'Путь',
   terrain: 'Рельеф'
@@ -141,6 +158,46 @@ const catalog = ref([
   { key: 'tower_3x3', label: 'Башня 3x3', type: 'tower', size: { w: 3, h: 3 }, height: 6, color: { r: 0.4, g: 0.6, b: 0.9 }, props: {} },
 ]);
 const selectedKey = ref(catalog.value[0].key);
+
+function snapValue(value) {
+  if (!snapEnabled.value) return value;
+  const step = Math.max(0.01, Number(snapStep.value) || 0.5);
+  return Math.round(value / step) * step;
+}
+
+function createObjectFromCatalog(point) {
+  const def = getSelectedDef();
+  const cellSize = map.value.grid.cellSize;
+  return {
+    id: crypto.randomUUID(),
+    type: def.type,
+    primitiveType: 'box',
+    transform: {
+      position: {
+        x: snapValue(point.x),
+        y: Number(point.y || 0),
+        z: snapValue(point.z)
+      },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: {
+        x: Math.max(0.2, def.size.w * cellSize),
+        y: Math.max(0.2, def.height),
+        z: Math.max(0.2, def.size.h * cellSize)
+      }
+    },
+    collision: { blocking: true, selectable: true },
+    tags: [def.type],
+    properties: {
+      color: def.color,
+      catalogKey: def.key,
+      props: def.props || {}
+    }
+  };
+}
+
+function getSelectedObject() {
+  return map.value.objects?.find(obj => obj.id === selectedObjectId.value) || null;
+}
 
 function getSelectedDef() {
   return catalog.value.find(c => c.key === selectedKey.value) || catalog.value[0];
@@ -237,26 +294,12 @@ function removeBuildingByCell(col, row) {
 function renderAll() {
   const { scene } = babylonRef.value;
   const heightmap = map.value.heightmap;
-  // Remove previous building/tower meshes
-  scene.meshes.filter(m => m.name.startsWith('building-') || m.name.startsWith('tower-')).forEach(m => m.dispose());
-  for (const t of map.value.towers) {
-    const hasSize = t && t.size && Number.isFinite(Number(t.size.w)) && Number.isFinite(Number(t.size.h));
-    const hasHeight = Number.isFinite(Number(t.height));
-    if (hasSize && hasHeight) {
-      addBuilding(scene, map.value.grid, t, heightmap);
-    } else {
-      // Normalize legacy entries to box 1x1 with height from level for consistent visuals
-      const lvl = Math.max(1, Number(t.level || 1));
-      const norm = {
-        id: t.id,
-        type: t.type,
-        col: t.col,
-        row: t.row,
-        size: { w: 1, h: 1 },
-        height: 2 + lvl * 0.2,
-        color: t.color || { r: 0.6, g: 0.6, b: 0.6 }
-      };
-      addBuilding(scene, map.value.grid, norm, heightmap);
+  scene.meshes.filter(m => m.name.startsWith('object-') || m.name.startsWith('building-') || m.name.startsWith('tower-')).forEach(m => m.dispose());
+  if (!Array.isArray(map.value.objects)) map.value.objects = [];
+  for (const obj of map.value.objects) {
+    const mesh = addPlacedObject(scene, obj, heightmap, map.value.grid);
+    if (obj.id === selectedObjectId.value && mesh.material?.emissiveColor) {
+      mesh.material.emissiveColor.set(0.08, 0.18, 0.35);
     }
   }
 }
@@ -364,7 +407,12 @@ async function init() {
       ...map.value,
       ...data,
       grid,
-      heightmap: needsGeneration ? generateDefaultHeightmap(grid.rows, grid.cols, 11) : normalizedHm
+      heightmap: needsGeneration ? generateDefaultHeightmap(grid.rows, grid.cols, 11) : normalizedHm,
+      terrain: {
+        ...(data?.terrain || {}),
+        heightmap: needsGeneration ? generateDefaultHeightmap(grid.rows, grid.cols, 11) : normalizedHm
+      },
+      objects: Array.isArray(data?.objects) ? data.objects : []
     };
     if (!map.value.path || !Array.isArray(map.value.path.waypoints)) {
       map.value.path = { waypoints: [] };
@@ -391,14 +439,12 @@ async function init() {
 
   // Preview update on move (and path ghost)
   scene.onPointerObservable.add((pointerInfo) => {
-    const cell = pickGrid(scene, map.value.grid);
-    if (!cell) return;
-    const def = getSelectedDef();
     if (mode.value === 'place') {
       if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
-      const valid = canPlace(cell.col, cell.row, def.size);
-      updatePreviewMesh(previewMesh, map.value.grid, { col: cell.col, row: cell.row, size: def.size, height: def.height }, valid, map.value.heightmap);
-    } else if (mode.value === 'remove') {
+      const point = pickWorld(scene);
+      if (!point) return;
+      updateFreePlacementPreview(previewMesh, createObjectFromCatalog(point), true, map.value.heightmap, map.value.grid);
+    } else if (mode.value === 'remove' || mode.value === 'select' || mode.value === 'move' || mode.value === 'rotate' || mode.value === 'scale') {
       // hide preview in remove mode
       if (previewMesh) previewMesh.setEnabled(false);
       if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
@@ -406,6 +452,8 @@ async function init() {
       if (previewMesh) previewMesh.setEnabled(false);
       if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
     } else if (mode.value === 'terrain') {
+      const cell = pickGrid(scene, map.value.grid);
+      if (!cell) return;
       if (previewMesh) previewMesh.setEnabled(false);
       updateTerrainPreview(cell);
       if (isPaintingTerrain) applyTerrainBrush(cell);
@@ -418,15 +466,48 @@ async function init() {
   // Place/Remove/Path on click
   scene.onPointerObservable.add((pointerInfo) => {
     if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) return;
-    const cell = pickGrid(scene, map.value.grid);
-    if (!cell) return;
     if (mode.value === 'place') {
-      const b = addNewBuilding(cell.col, cell.row);
-      if (b) renderAll();
+      const point = pickWorld(scene);
+      if (!point) return;
+      const obj = createObjectFromCatalog(point);
+      map.value.objects.push(obj);
+      selectedObjectId.value = obj.id;
+      renderAll();
+    } else if (mode.value === 'select') {
+      const picked = pickSceneObject(scene);
+      selectedObjectId.value = picked?.objectId || null;
+      renderAll();
+    } else if (mode.value === 'move') {
+      const selected = getSelectedObject();
+      const point = pickWorld(scene);
+      if (!selected || !point) return;
+      selected.transform.position.x = snapValue(point.x);
+      selected.transform.position.y = Number(point.y || 0);
+      selected.transform.position.z = snapValue(point.z);
+      renderAll();
+    } else if (mode.value === 'rotate') {
+      const selected = getSelectedObject();
+      if (!selected) return;
+      selected.transform.rotation.y = (Number(selected.transform.rotation.y) || 0) + Math.PI / 8;
+      renderAll();
+    } else if (mode.value === 'scale') {
+      const selected = getSelectedObject();
+      if (!selected) return;
+      selected.transform.scale.x = Math.min(30, Number(selected.transform.scale.x || 1) * 1.1);
+      selected.transform.scale.y = Math.min(30, Number(selected.transform.scale.y || 1) * 1.1);
+      selected.transform.scale.z = Math.min(30, Number(selected.transform.scale.z || 1) * 1.1);
+      renderAll();
     } else if (mode.value === 'remove') {
-      removeBuildingByCell(cell.col, cell.row);
+      const picked = pickSceneObject(scene);
+      const removeId = picked?.objectId || selectedObjectId.value;
+      if (!removeId) return;
+      const idx = map.value.objects.findIndex(obj => obj.id === removeId);
+      if (idx >= 0) map.value.objects.splice(idx, 1);
+      if (selectedObjectId.value === removeId) selectedObjectId.value = null;
       renderAll();
     } else if (mode.value === 'path') {
+      const cell = pickGrid(scene, map.value.grid);
+      if (!cell) return;
       if (!map.value.path) map.value.path = { waypoints: [] };
       if (!Array.isArray(map.value.path.waypoints)) map.value.path.waypoints = [];
       const wps = map.value.path.waypoints;
@@ -439,6 +520,8 @@ async function init() {
       }
       drawPath(scene, map.value.grid, wps, map.value.heightmap);
     } else if (mode.value === 'terrain') {
+      const cell = pickGrid(scene, map.value.grid);
+      if (!cell) return;
       pickFlattenHeight(cell);
       applyTerrainBrush(cell);
       isPaintingTerrain = true;
@@ -464,6 +547,11 @@ async function doSave() {
   status.value = '';
   try {
     map.value.heightmap = normalizeHeightmap(map.value.grid, map.value.heightmap);
+    map.value.terrain = {
+      ...(map.value.terrain || {}),
+      heightmap: map.value.heightmap
+    };
+    if (!Array.isArray(map.value.objects)) map.value.objects = [];
     await saveMap(map.value);
     status.value = 'Сохранено';
   } catch (e) {
@@ -504,6 +592,22 @@ onBeforeUnmount(() => {
               <input type="radio" :value="opt" v-model="mode" />
               <span>{{ modeLabels[opt] }}</span>
             </label>
+          </div>
+
+          <div class="tool-section">
+            <div class="section-subtitle">Свободное размещение</div>
+            <label class="inline-check">
+              <input type="checkbox" v-model="snapEnabled" />
+              <span>Snap к шагу</span>
+            </label>
+            <label class="field">
+              <span>Шаг snap</span>
+              <input type="number" min="0.1" step="0.1" v-model.number="snapStep" />
+            </label>
+            <div class="pill muted">
+              Выбрано: {{ selectedObjectId || 'нет объекта' }}
+            </div>
+            <p class="hint">Place ставит объект в точку мира. Select выбирает объект, Move переносит, Rotate поворачивает, Scale увеличивает.</p>
           </div>
 
           <div v-if="mode === 'terrain'" class="tool-section">
@@ -744,13 +848,24 @@ onBeforeUnmount(() => {
   color: #cbd5e1;
 }
 
-.field select {
+.field select,
+.field input[type="number"] {
   width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: #e5e7eb;
+  box-sizing: border-box;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: #cbd5e1;
+  font-size: 13px;
 }
 
 .field.slider input {

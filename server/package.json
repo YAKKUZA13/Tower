@@ -4,12 +4,30 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/src/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "db:up": "docker compose -f ../docker-compose.yml up -d postgres redis",
+    "db:down": "docker compose -f ../docker-compose.yml down",
+    "db:ps": "docker compose -f ../docker-compose.yml ps",
+    "db:logs": "docker compose -f ../docker-compose.yml logs -f postgres redis",
+    "db:setup": "npm run db:up && npm run migrate",
+    "migrate": "tsx scripts/migrate.ts",
+    "migrate:json": "tsx scripts/migrate-json-to-postgres.ts"
   },
   "dependencies": {
-    "fastify": "^5.0.0",
     "@fastify/cors": "^10.0.0",
-    "@fastify/websocket": "^11.2.0"
+    "@fastify/websocket": "^11.2.0",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.0.0",
+    "pg": "^8.21.0",
+    "redis": "^5.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
   }
 }

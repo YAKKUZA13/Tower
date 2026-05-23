@@ -1,9 +1,19 @@
 import type { AuthResponse, AuthUser, RegisterCredentials } from '../domain/auth';
 import type { GameSession } from '../domain/game-session';
 import type { MapDocument } from '../domain/map';
-import { getAuthToken, getStoredSessionId } from './token-storage';
+import { clearStoredGameRole, clearStoredSessionId, getAuthToken, getStoredSessionId } from './token-storage';
 
 const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly body: string
+  ) {
+    super(message);
+  }
+}
 
 function authHeaders(extra: Record<string, string> = {}): HeadersInit {
   const token = getAuthToken().trim();
@@ -17,9 +27,13 @@ function authHeaders(extra: Record<string, string> = {}): HeadersInit {
 async function readJsonOrThrow<T>(res: Response, errorPrefix: string): Promise<T> {
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
-    throw new Error(`${errorPrefix}:${res.status}:${txt}`);
+    throw new ApiError(`${errorPrefix}:${res.status}:${txt}`, res.status, txt);
   }
   return await res.json() as T;
+}
+
+function isStaleSessionError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && error.body.includes('session_not_found');
 }
 
 export async function register(payload: RegisterCredentials): Promise<AuthResponse> {
@@ -67,6 +81,17 @@ export async function getMap(): Promise<MapDocument> {
 
 export async function saveMap(map: MapDocument): Promise<{ ok: boolean }> {
   const sessionId = getStoredSessionId();
+  try {
+    return await saveMapForSession(map, sessionId);
+  } catch (error) {
+    if (!sessionId || !isStaleSessionError(error)) throw error;
+    clearStoredSessionId();
+    clearStoredGameRole();
+    return await saveMapForSession(map, '');
+  }
+}
+
+async function saveMapForSession(map: MapDocument, sessionId: string): Promise<{ ok: boolean }> {
   const res = await fetch(`${BASE}/map`, {
     method: 'POST',
     headers: authHeaders(sessionId ? { 'x-session-id': sessionId } : {}),
