@@ -5,12 +5,14 @@ import type { Engine, Mesh, Scene } from 'babylonjs';
 import { DEFAULT_CATALOG } from '@tower/shared';
 import type { MapDocument, PlayerInput, TargetingMode, TowerType } from '@tower/shared';
 import { getMap } from '../services/api';
+import { canPlaceWall } from '../domain/placement';
 import { createEngine, createScene, gridToWorld, makePreviewMesh, sampleHeight, setGridVisible } from '../babylon/createScene';
 import { pickGrid } from '../babylon/picking';
 import { LevelOverlay } from '../babylon/level-renderer';
 import { EnemyRenderer } from '../babylon/enemies/enemy-renderer';
 import { TowerRenderer } from '../babylon/towers/tower-renderer';
 import { ProjectilePool } from '../babylon/projectiles/projectile-pool';
+import { WallRenderer } from '../babylon/walls/wall-renderer';
 import { AssetCatalog } from '../babylon/asset-catalog';
 import { AtmosphereRenderer } from '../babylon/atmosphere';
 import { startGameLoop } from '../babylon/game-loop';
@@ -20,6 +22,7 @@ import { useGameStore } from '../stores/game-store';
 import { useAuthStore } from '../stores/auth-store';
 import EconomyBar from './EconomyBar.vue';
 import TowerShop from './TowerShop.vue';
+import type { WallMaterial, WallMaterialDef } from '@tower/shared';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const engineRef = shallowRef<Engine | null>(null);
@@ -30,6 +33,7 @@ let catalog: AssetCatalog | null = null;
 let overlay: LevelOverlay | null = null;
 let enemyRenderer: EnemyRenderer | null = null;
 let projectilePool: ProjectilePool | null = null;
+let wallRenderer: WallRenderer | null = null;
 let atmosphere: AtmosphereRenderer | null = null;
 let loop: GameLoopHandle | null = null;
 let previewMesh: Mesh | null = null;
@@ -41,6 +45,12 @@ const selectedTowerId = ref<string | null>(null);
 const selectedTowerTypeId = ref<string | null>(null);
 const selectedTowerMode = ref<TargetingMode>('first');
 const gameOver = ref(false);
+
+// ── режим стройки стен (Фаза 4) ──
+const wallMaterials: WallMaterialDef[] = DEFAULT_CATALOG.walls ?? [];
+const wallBuildMode = ref(false);
+const repairMode = ref(false);
+const selectedWallMaterial = ref<WallMaterial>(wallMaterials[0]?.material ?? 'wood');
 
 const gameStore = useGameStore();
 const authStore = useAuthStore();
@@ -78,9 +88,36 @@ function canPlaceAt(col: number, row: number, typeId: string | null): boolean {
   if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false;
   if (sim.isPathCell(col, row)) return false;
   if (sim.state.towers.some((t) => t.col === col && t.row === row)) return false;
+  if (sim.state.walls.some((w) => w.col === col && w.row === row)) return false;
   const type = sim.getTowerType(typeId);
   if (!type) return false;
   return sim.state.gold >= type.cost;
+}
+
+function wallDef(material: WallMaterial): WallMaterialDef | undefined {
+  return wallMaterials.find((m) => m.material === material);
+}
+
+function canPlaceWallAt(col: number, row: number, material: WallMaterial): boolean {
+  const sim = simRef.value;
+  if (!sim) return false;
+  const grid = sim.map.grid;
+  if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false;
+  const def = wallDef(material);
+  if (!def) return false;
+  if (sim.state.gold < def.cost) return false;
+  return canPlaceWall(
+    { grid, spawn: sim.map.spawnPoint, base: sim.map.base, walls: sim.state.walls, towers: sim.state.towers },
+    col,
+    row
+  );
+}
+
+function wallAt(col: number, row: number): { id: string; material: WallMaterial } | null {
+  const sim = simRef.value;
+  if (!sim) return null;
+  const w = sim.state.walls.find((x) => x.col === col && x.row === row);
+  return w ? { id: w.id, material: w.material } : null;
 }
 
 function applyAction(action: PlayerInput['action']): void {
@@ -93,7 +130,7 @@ function updatePreview(): void {
   const scene = sceneRef.value;
   const sim = simRef.value;
   if (!scene || !sim || !previewMesh) return;
-  if (sellMode.value || !selectedTypeId.value) {
+  if (repairMode.value || sellMode.value || (!selectedTypeId.value && !wallBuildMode.value)) {
     previewMesh.setEnabled(false);
     return;
   }
@@ -102,17 +139,28 @@ function updatePreview(): void {
     previewMesh.setEnabled(false);
     return;
   }
-  const valid = canPlaceAt(cell.col, cell.row, selectedTypeId.value);
+  let valid: boolean;
+  let color: [number, number, number];
+  if (wallBuildMode.value) {
+    valid = canPlaceWallAt(cell.col, cell.row, selectedWallMaterial.value);
+    color = valid ? [0.55, 0.42, 0.20] : [0.9, 0.18, 0.18];
+  } else if (selectedTypeId.value) {
+    valid = canPlaceAt(cell.col, cell.row, selectedTypeId.value);
+    color = valid ? [0.2, 0.8, 0.25] : [0.9, 0.18, 0.18];
+  } else {
+    previewMesh.setEnabled(false);
+    return;
+  }
   const pos = gridToWorld(sim.map.grid, cell.col, cell.row);
   const groundY = sampleHeight(sim.map.heightmap, sim.map.grid, cell.col, cell.row, true);
   previewMesh.position.set(pos.x, groundY + sim.map.grid.cellSize * 0.55, pos.z);
   const mat = previewMesh.material as { diffuseColor?: { r: number; g: number; b: number } } | null;
   if (mat?.diffuseColor) {
-    mat.diffuseColor.r = valid ? 0.2 : 0.9;
-    mat.diffuseColor.g = valid ? 0.8 : 0.18;
-    mat.diffuseColor.b = valid ? 0.25 : 0.18;
+    mat.diffuseColor.r = color[0];
+    mat.diffuseColor.g = color[1];
+    mat.diffuseColor.b = color[2];
   }
-  previewMesh.scaling.set(sim.map.grid.cellSize * 0.7, sim.map.grid.cellSize * 1.1, sim.map.grid.cellSize * 0.7);
+  previewMesh.scaling.set(sim.map.grid.cellSize * 0.85, sim.map.grid.cellSize * 1.1, sim.map.grid.cellSize * 0.85);
   previewMesh.setEnabled(true);
 }
 
@@ -147,11 +195,28 @@ function setupPointerHandlers(): void {
     if (info.type === PointerEventTypes.POINTERMOVE) {
       updatePreview();
     } else if (info.type === PointerEventTypes.POINTERDOWN) {
+      if (repairMode.value) {
+        const sim = simRef.value;
+        if (!sim) return;
+        const cell = pickGrid(scene, sim.map.grid);
+        const w = cell ? wallAt(cell.col, cell.row) : null;
+        if (w) applyAction({ kind: 'repair-wall', wallId: w.id });
+        return;
+      }
       if (sellMode.value) {
         const id = pickTower();
         if (id) {
           applyAction({ kind: 'sell-tower', towerId: id });
           selectedTowerId.value = null;
+        }
+        return;
+      }
+      if (wallBuildMode.value) {
+        const sim = simRef.value;
+        if (!sim) return;
+        const cell = pickGrid(scene, sim.map.grid);
+        if (cell && canPlaceWallAt(cell.col, cell.row, selectedWallMaterial.value)) {
+          applyAction({ kind: 'place-wall', material: selectedWallMaterial.value, col: cell.col, row: cell.row });
         }
         return;
       }
@@ -223,6 +288,7 @@ async function init(): Promise<void> {
   const towerRenderer = new TowerRenderer(scene, DEFAULT_CATALOG.towers, playable.grid, playable.heightmap, catalog);
   towerRendererRef.value = towerRenderer;
   projectilePool = new ProjectilePool(scene, playable.grid.cellSize, catalog);
+  wallRenderer = new WallRenderer(scene, DEFAULT_CATALOG.walls ?? [], playable.grid, playable.heightmap, catalog);
 
   // тени — только башни и враги (юниты добавятся в Фазе 6). receiveShadows=false на террейне.
   for (const m of towerRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
@@ -230,16 +296,24 @@ async function init(): Promise<void> {
 
   previewMesh = makePreviewMesh(scene);
 
-  loop = startGameLoop(engine, scene, sim, {
-    enemies: enemyRenderer,
-    towers: towerRenderer,
-    projectiles: projectilePool,
-    atmosphere
-  }, (snap) => {
-    gameStore.setSnapshot(snap);
-    if (!gameOver.value && gameStore.isOver) gameOver.value = true;
-    syncSelectedTowerFromSnapshot();
-  });
+  loop = startGameLoop(
+    engine,
+    scene,
+    sim,
+    {
+      enemies: enemyRenderer,
+      towers: towerRenderer,
+      projectiles: projectilePool,
+      walls: wallRenderer,
+      atmosphere
+    },
+    (snap) => {
+      gameStore.setSnapshot(snap);
+      if (!gameOver.value && gameStore.isOver) gameOver.value = true;
+      syncSelectedTowerFromSnapshot();
+    },
+    (waypoints) => overlay?.updateRoute(waypoints)
+  );
 
   setupPointerHandlers();
   statusMessage.value = '';
@@ -250,24 +324,68 @@ function restart(): void {
   if (!sim) return;
   const map = sim.map;
   buildSim(map);
-  // перерисуем башни/врагов с нового состояния сразу
+  // перерисуем башни/врагов/стены с нового состояния сразу
   const scene = sceneRef.value;
   if (scene) {
     const s = simRef.value!;
     enemyRenderer?.sync(s.state);
     towerRendererRef.value?.sync(s.state);
     projectilePool?.sync(s.state);
+    wallRenderer?.sync(s.state);
+    overlay?.updateRoute(s.getRouteWaypoints());
   }
 }
 
 function onSelectType(typeId: string): void {
   selectedTypeId.value = typeId;
   selectedTowerId.value = null;
+  wallBuildMode.value = false;
+  repairMode.value = false;
+  sellMode.value = false;
+  updatePreview();
 }
 
 function onSellMode(enabled: boolean): void {
   sellMode.value = enabled;
-  if (enabled) selectedTowerId.value = null;
+  if (enabled) {
+    selectedTowerId.value = null;
+    wallBuildMode.value = false;
+    repairMode.value = false;
+  }
+  updatePreview();
+}
+
+function onWallBuildMode(enabled: boolean): void {
+  wallBuildMode.value = enabled;
+  if (enabled) {
+    selectedTypeId.value = null;
+    selectedTowerId.value = null;
+    sellMode.value = false;
+    repairMode.value = false;
+  }
+  updatePreview();
+}
+
+function onRepairMode(enabled: boolean): void {
+  repairMode.value = enabled;
+  if (enabled) {
+    selectedTypeId.value = null;
+    selectedTowerId.value = null;
+    sellMode.value = false;
+    wallBuildMode.value = false;
+  }
+  updatePreview();
+}
+
+function selectWallMaterial(material: WallMaterial): void {
+  selectedWallMaterial.value = material;
+  if (!wallBuildMode.value) onWallBuildMode(true);
+  updatePreview();
+}
+
+function cancelBuildModes(): void {
+  wallBuildMode.value = false;
+  repairMode.value = false;
   updatePreview();
 }
 
@@ -290,6 +408,7 @@ onBeforeUnmount(() => {
   enemyRenderer?.dispose();
   towerRendererRef.value?.dispose();
   projectilePool?.dispose();
+  wallRenderer?.dispose();
   atmosphere?.dispose();
   catalog?.dispose();
   engineRef.value?.dispose();
@@ -326,6 +445,32 @@ onBeforeUnmount(() => {
           @select="onSelectType"
           @sell-mode="onSellMode"
         />
+
+        <section class="wall-shop">
+          <div class="info-title">Стены лабиринта</div>
+          <div class="wall-grid">
+            <button
+              v-for="m in wallMaterials"
+              :key="m.material"
+              class="wall-btn"
+              :class="{ active: wallBuildMode && selectedWallMaterial === m.material, disabled: gameStore.gold < m.cost }"
+              :disabled="gameStore.gold < m.cost"
+              :title="`${m.name} · ${m.maxHp} HP`"
+              @click="selectWallMaterial(m.material)"
+            >
+              <span class="wall-mat" :data-mat="m.material">{{ m.name }}</span>
+              <span class="wall-cost">{{ m.cost }}g</span>
+            </button>
+          </div>
+          <div class="wall-toggles">
+            <button class="btn ghost" :class="{ active: repairMode }" @click="onRepairMode(!repairMode)">Ремонт</button>
+            <button v-if="wallBuildMode || repairMode" class="btn ghost" @click="cancelBuildModes">Отмена</button>
+          </div>
+          <p class="hint">
+            Стены перенаправляют врагов (длиннее путь). Нельзя запереть базу.
+            Враги ломают стены; огненные снаряды поджигают их.
+          </p>
+        </section>
 
         <section v-if="selectedTowerId && selectedTowerTypeId" class="tower-info">
           <div class="info-title">Башня: {{ simRef?.getTowerType(selectedTowerTypeId)?.name ?? selectedTowerTypeId }}</div>
@@ -417,6 +562,57 @@ onBeforeUnmount(() => {
 .tower-info, .hint-block {
   padding: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.wall-shop {
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.wall-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.wall-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 12px;
+}
+.wall-btn.active {
+  border-color: #d97706;
+  background: rgba(217, 119, 6, 0.22);
+}
+.wall-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wall-mat[data-mat='wood']  { color: #b58a55; }
+.wall-mat[data-mat='stone'] { color: #b8bcc4; }
+.wall-mat[data-mat='bone']  { color: #d8d2bd; }
+.wall-cost { font-size: 10px; color: #fbbf24; font-weight: 700; }
+.wall-toggles {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.btn.ghost {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.btn.ghost.active {
+  background: rgba(37, 99, 235, 0.3);
+  color: #fff;
+  border-color: #2563eb;
 }
 .info-title {
   font-weight: 800;

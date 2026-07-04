@@ -17,3 +17,9 @@ export const DEFAULT_SEED = 1337;
 
 /** Длительность полных суток в секундах сима (Фаза 3 — день/ночь). 0..1 в snapshot.timeOfDay. */
 export const DAY_LENGTH_SECONDS = 180;
+
+// ── Стены (Фаза 4) ──
+/** Длительность горения стены после поджога (сек). */
+export const BURN_DURATION = 3;
+/** Урон в секунду по горящей стене. */
+export const BURN_DPS = 14;

@@ -18,31 +18,18 @@ function cellCenter(grid: GridData, heightmap: number[][], col: number, row: num
 
 export class LevelOverlay {
   private readonly meshes: Mesh[] = [];
+  private pathTube: Mesh | null = null;
+  private readonly grid: GridData;
+  private readonly heightmap: number[][];
   readonly baseMarker: Mesh;
 
   constructor(private scene: Scene, map: MapDocument, catalog?: AssetCatalog) {
     const { grid, heightmap } = map;
+    this.grid = grid;
+    this.heightmap = heightmap;
+
     // ── путь (tube) ──
-    const wps = map.path.waypoints;
-    if (wps.length >= 2) {
-      const path = wps.map((wp) => cellCenter(grid, heightmap, wp.col, wp.row));
-      for (const p of path) p.y += 0.12;
-      const tube = MeshBuilder.CreateTube('level-path', {
-        path,
-        radius: Math.max(0.18, grid.cellSize * 0.22),
-        tessellation: 8,
-        cap: Mesh.CAP_ALL
-      }, scene);
-      const mat = new StandardMaterial('levelPathMat', scene);
-      const [r, g, b] = PATH_COLOR;
-      mat.diffuseColor = new Color3(r, g, b);
-      mat.emissiveColor = new Color3(r * 0.25, g * 0.25, b * 0.25);
-      mat.alpha = 0.85;
-      mat.specularColor = new Color3(0.05, 0.05, 0.05);
-      tube.material = mat;
-      tube.isPickable = false;
-      this.meshes.push(tube);
-    }
+    this.buildPathTube(map.path.waypoints);
 
     // ── спавн (портал) ──
     const spawnCenter = cellCenter(grid, heightmap, map.spawnPoint.col, map.spawnPoint.row);
@@ -64,6 +51,41 @@ export class LevelOverlay {
     base.isPickable = false;
     this.meshes.push(base);
     this.baseMarker = base;
+  }
+
+  /** Перестраивает tube пути по новому маршруту (Фаза 4 — A* вокруг стен). */
+  updateRoute(waypoints: { col: number; row: number }[]): void {
+    if (this.pathTube) {
+      this.pathTube.dispose();
+      this.pathTube = null;
+    }
+    this.buildPathTube(waypoints);
+  }
+
+  private buildPathTube(waypoints: { col: number; row: number }[]): void {
+    if (waypoints.length < 2) return;
+    const path = waypoints.map((wp) => cellCenter(this.grid, this.heightmap, wp.col, wp.row));
+    for (const p of path) p.y += 0.12;
+    const tube = MeshBuilder.CreateTube(
+      `level-path-${this.meshes.length}`,
+      {
+        path,
+        radius: Math.max(0.18, this.grid.cellSize * 0.22),
+        tessellation: 8,
+        cap: Mesh.CAP_ALL
+      },
+      this.scene
+    );
+    const mat = new StandardMaterial(`levelPathMat-${this.meshes.length}`, this.scene);
+    const [r, g, b] = PATH_COLOR;
+    mat.diffuseColor = new Color3(r, g, b);
+    mat.emissiveColor = new Color3(r * 0.25, g * 0.25, b * 0.25);
+    mat.alpha = 0.85;
+    mat.specularColor = new Color3(0.05, 0.05, 0.05);
+    tube.material = mat;
+    tube.isPickable = false;
+    this.pathTube = tube;
+    this.meshes.push(tube);
   }
 
   private buildCatalogMarker(catalog: AssetCatalog, catalogId: string, name: string, scale: number): Mesh {

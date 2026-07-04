@@ -4,8 +4,9 @@
  * Если цель умерла/ушла — снаряд гаснет.
  */
 
-import type { Enemy, Projectile, TowerType, EnemyType } from '@tower/shared';
+import type { Enemy, Projectile, TowerType, EnemyType, Wall, GridData } from '@tower/shared';
 import { SLOW_DURATION, PROJECTILE_HIT_RADIUS, FIXED_DT } from '../constants';
+import { gridToWorldData } from '../../domain/grid-math';
 
 export interface ProjectileOutcome {
   /** Награда золота за этот шаг (сумма reward убитых). */
@@ -20,9 +21,14 @@ export interface ProjectileDeps {
   aliveEnemies: Map<string, Enemy>;
   enemyTypes: Map<string, EnemyType>;
   towerTypes: Map<string, TowerType>;
+  grid: GridData;
   cellSize: number;
   dt: number;
   tick: number;
+  /** Стены (Фаза 4): снаряды с splash поджигают стены в радиусе. */
+  walls?: Wall[];
+  /** Длительность горения в тиках. */
+  burnTicks?: number;
 }
 
 export function tickProjectiles(deps: ProjectileDeps): ProjectileOutcome {
@@ -46,7 +52,7 @@ export function tickProjectiles(deps: ProjectileDeps): ProjectileOutcome {
     const dz = target.position.z - proj.z;
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (dist <= projStep + PROJECTILE_HIT_RADIUS) {
-      const justDied = onHit(proj, target, deps.enemies, enemyTypes, tick);
+      const justDied = onHit(proj, target, deps);
       proj.alive = false;
       if (justDied) {
         killed += 1;
@@ -64,16 +70,29 @@ export function tickProjectiles(deps: ProjectileDeps): ProjectileOutcome {
 }
 
 /** Применяет урон; возвращает true, если враг перешёл alive→dead именно от этого удара. */
-function onHit(proj: Projectile, target: Enemy, allEnemies: Enemy[], enemyTypes: Map<string, EnemyType>, tick: number): boolean {
+function onHit(proj: Projectile, target: Enemy, deps: ProjectileDeps): boolean {
+  const { enemies, enemyTypes, tick, grid, walls, burnTicks } = deps;
   const mainKilled = applyDamage(target, proj.damage, proj.category, enemyTypes);
   if (proj.splashRadius && proj.splashRadius > 0) {
     const r2 = proj.splashRadius * proj.splashRadius;
-    for (const other of allEnemies) {
+    for (const other of enemies) {
       if (!other.alive || other === target) continue;
       const dx = other.position.x - target.position.x;
       const dz = other.position.z - target.position.z;
       if (dx * dx + dz * dz <= r2) {
         applyDamage(other, proj.damage * 0.6, proj.category, enemyTypes);
+      }
+    }
+    // Фаза 4: осадные/зажигательные снаряды поджигают стены в радиусе splash.
+    if (walls && walls.length > 0 && burnTicks && burnTicks > 0) {
+      for (const wall of walls) {
+        const w = gridToWorldData(grid, wall.col, wall.row);
+        const dx = w.x - target.position.x;
+        const dz = w.z - target.position.z;
+        if (dx * dx + dz * dz <= r2) {
+          wall.burning = true;
+          wall.burningUntilTick = tick + burnTicks;
+        }
       }
     }
   }

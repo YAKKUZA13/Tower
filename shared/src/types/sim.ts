@@ -6,7 +6,7 @@
  * Single-player = host=local; co-op (Фаза 7) использует тот же GameSnapshot.
  */
 
-import type { Enemy, EnemyType, Tower, TowerType, Wave } from './td.js';
+import type { Enemy, EnemyType, Tower, TowerType, Wall, WallMaterial, WallMaterialDef, Wave } from './td.js';
 
 export type SimStatus = 'prep' | 'wave' | 'draft' | 'won' | 'lost';
 export type CoopRole = 'builder' | 'economist' | 'commander' | 'free';
@@ -44,6 +44,10 @@ export interface GameSnapshot {
   enemies: Enemy[];
   towers: Tower[];
   projectiles: Projectile[];
+  /** Стены лабиринта (Фаза 4). */
+  walls: Wall[];
+  /** Версия текущего маршрута врагов (A* вокруг стен). Растёт при перестройке. Рендер обновляет tube. */
+  routeVersion: number;
   /** Сколько врагов ещё не убито в текущей волне (pending + живые). Для UI/rules. */
   waveEnemiesRemaining: number;
   // ── окружение (Фаза 3 использует; заложено с Фазы 1 для детерминированности) ──
@@ -56,13 +60,15 @@ export interface GameSnapshot {
 
 /**
  * Действия игрока. Phase 1 реализует подмножество (place-tower/sell-tower/
- * start-wave/set-targeting); остальные добавляются в Фазах 4/5/6.
+ * start-wave/set-targeting); place-wall/repair-wall — Фаза 4; остальные в Фазах 5/6.
  */
 export type PlayerAction =
   | { kind: 'place-tower'; typeId: string; col: number; row: number }
   | { kind: 'sell-tower'; towerId: string }
   | { kind: 'start-wave' }
-  | { kind: 'set-targeting'; towerId: string; mode: TowerType['targetingMode'] };
+  | { kind: 'set-targeting'; towerId: string; mode: TowerType['targetingMode'] }
+  | { kind: 'place-wall'; material: WallMaterial; col: number; row: number }
+  | { kind: 'repair-wall'; wallId: string };
 
 export interface PlayerInput {
   tick: number;
@@ -75,4 +81,6 @@ export interface GameCatalog {
   towers: TowerType[];
   enemies: EnemyType[];
   waves: Wave[];
+  /** Материалы стен (Фаза 4). Опционально для совместимости со старыми каталогами. */
+  walls?: WallMaterialDef[];
 }

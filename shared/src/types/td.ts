@@ -96,3 +96,29 @@ export interface Wave {
   rewardBonus: number;
   isBoss?: boolean;
 }
+
+// ── Стены (maze-building, Фаза 4 — концепция 2) ──────────────────────
+export type WallMaterial = 'wood' | 'stone' | 'bone';
+
+/** Каталог материала стены: характеристики + модель. */
+export interface WallMaterialDef {
+  material: WallMaterial;
+  name: string;
+  maxHp: number;
+  cost: number;
+  /** Доля от cost, которую стоит ремонт 1 HP (полный ремонт = cost*repairRatio*(missingHp/fullHp)). */
+  repairRatio: number;
+  modelRef: ModelRef;
+}
+
+/** Экземпляр стены на поле (runtime, не персистится в карте). */
+export interface Wall {
+  id: string;
+  col: number;
+  row: number;
+  hp: number;
+  maxHp: number;
+  material: WallMaterial;
+  burning: boolean;
+  burningUntilTick?: number;
+}

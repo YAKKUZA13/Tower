@@ -4,7 +4,7 @@
  * модели (client/src/babylon/voxel) или GLB (client/public/catalog). См. TD-MVP-PLAN.md §2.9, §3.
  */
 
-import type { EnemyType, TowerType, Wave } from '../types/td.js';
+import type { EnemyType, TowerType, WallMaterialDef, Wave } from '../types/td.js';
 import type { GameCatalog } from '../types/sim.js';
 
 // ── Башни (4) ────────────────────────────────────────────────────────
@@ -156,8 +156,36 @@ export const DEFAULT_WAVES: Wave[] = [
   { index: 9, rewardBonus: 200, isBoss: true, groups: [{ enemyTypeId: 'boss', count: 1, interval: 1, startDelay: 0 }, { enemyTypeId: 'demon', count: 6, interval: 1.5, startDelay: 3 }] }
 ];
 
+export const DEFAULT_WALL_MATERIALS: WallMaterialDef[] = [
+  {
+    material: 'wood',
+    name: 'Дерево',
+    maxHp: 60,
+    cost: 8,
+    repairRatio: 0.4,
+    modelRef: { catalogId: 'wall:wood', scale: 1 }
+  },
+  {
+    material: 'stone',
+    name: 'Камень',
+    maxHp: 160,
+    cost: 18,
+    repairRatio: 0.4,
+    modelRef: { catalogId: 'wall:stone', scale: 1 }
+  },
+  {
+    material: 'bone',
+    name: 'Кость',
+    maxHp: 100,
+    cost: 12,
+    repairRatio: 0.4,
+    modelRef: { catalogId: 'wall:bone', scale: 1 }
+  }
+];
+
 export const DEFAULT_CATALOG: GameCatalog = {
   towers: DEFAULT_TOWER_TYPES,
   enemies: DEFAULT_ENEMY_TYPES,
-  waves: DEFAULT_WAVES
+  waves: DEFAULT_WAVES,
+  walls: DEFAULT_WALL_MATERIALS
 };

@@ -391,6 +391,65 @@ export function projectileBolt(): Voxel[] {
   return v;
 }
 
+// ── Стены лабиринта (Фаза 4) ────────────────────────────────────────────
+
+/** Деревянная стена — частокол из тёмных брёвен с перекладиной. */
+export function woodWall(): Voxel[] {
+  const v: Voxel[] = [];
+  const w = PALETTE.wood, wd = PALETTE.woodDark;
+  // 3 вертикальных бревна
+  for (const sx of [-0.22, 0, 0.22]) {
+    fill(v, sx - 0.09, sx + 0.09, -0.42, 0.42, -0.12, 0.12, 0.10, wd);
+  }
+  // перекладины (скрепляют частокол)
+  fill(v, -0.34, 0.34, -0.26, -0.20, -0.14, 0.14, 0.10, w);
+  fill(v, -0.34, 0.34, 0.20, 0.34, -0.14, 0.14, 0.10, w);
+  // заострённый верх (уголки)
+  for (const sx of [-0.22, 0, 0.22]) {
+    box(v, sx, 0.46, 0, 0.10, 0.10, 0.10, shade(wd, 0.8));
+  }
+  return v;
+}
+
+/** Каменная стена — грубая кладка из тёмных валунов. */
+export function stoneWall(): Voxel[] {
+  const v: Voxel[] = [];
+  const s = PALETTE.stone, sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
+  // основание-куча
+  fill(v, -0.36, 0.36, -0.50, -0.34, -0.34, 0.34, 0.14, sd);
+  // ряды кладки (со смещением)
+  fill(v, -0.34, 0.34, -0.34, -0.16, -0.30, 0.30, 0.14, s);
+  fill(v, -0.34, 0.34, -0.16, 0.02, -0.30, 0.30, 0.14, shade(s, 0.92));
+  fill(v, -0.34, 0.34, 0.02, 0.20, -0.30, 0.30, 0.14, s);
+  // верхние валуны (неровный гребень)
+  box(v, -0.14, 0.34, 0.0, 0.30, 0.20, 0.30, sl);
+  box(v, 0.18, 0.32, 0.08, 0.22, 0.18, 0.22, shade(sl, 0.9));
+  box(v, -0.10, 0.34, -0.14, 0.26, 0.18, 0.20, shade(sl, 0.95));
+  return v;
+}
+
+/** Костяная стена — баррикада из черепов и берцовых костей. */
+export function boneWall(): Voxel[] {
+  const v: Voxel[] = [];
+  const bo = PALETTE.bone, bod = PALETTE.boneDark;
+  // основание из крупных костей (бёдра)
+  fill(v, -0.34, 0.34, -0.50, -0.38, -0.30, 0.30, 0.12, bod);
+  // вертикальные берцовые кости
+  for (const sx of [-0.22, 0.04, 0.26]) {
+    fill(v, sx - 0.07, sx + 0.07, -0.34, 0.24, -0.09, 0.09, 0.08, bo);
+    // суставы
+    box(v, sx, -0.34, 0, 0.12, 0.08, 0.12, bod);
+    box(v, sx, 0.26, 0, 0.10, 0.07, 0.10, bod);
+  }
+  // черепа на гребне
+  box(v, -0.10, 0.36, 0, 0.16, 0.14, 0.16, bo);
+  box(v, -0.06, 0.40, 0.08, 0.03, 0.03, 0.02, ACCENT.eyeRed);
+  box(v, 0.02, 0.40, 0.08, 0.03, 0.03, 0.02, ACCENT.eyeRed);
+  box(v, 0.22, 0.32, 0, 0.14, 0.12, 0.14, shade(bo, 0.95));
+  box(v, 0.22, 0.36, 0.08, 0.03, 0.03, 0.02, ACCENT.eyeRed);
+  return v;
+}
+
 /** Реестр процедурных билдеров по имени (используется asset-catalog). */
 export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'tower:arrow': arrowTower,
@@ -404,7 +463,10 @@ export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'enemy:boss': bossEnemy,
   'base:altar': baseAltar,
   'spawn:portal': spawnPortal,
-  'projectile:bolt': projectileBolt
+  'projectile:bolt': projectileBolt,
+  'wall:wood': woodWall,
+  'wall:stone': stoneWall,
+  'wall:bone': boneWall
 };
 
 /** Emissive-акцент модели по имени билдера (для материала). */
@@ -419,6 +481,7 @@ export function builderEmissive(builderName: string): RGB | undefined {
     case 'base:altar': return ACCENT.soul;
     case 'spawn:portal': return ACCENT.fire;
     case 'projectile:bolt': return ACCENT.fireCore;
+    case 'wall:bone': return ACCENT.eyeRed;
     default: return undefined;
   }
 }
