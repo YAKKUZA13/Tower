@@ -5,3 +5,7 @@ dist
 TD-MVP-PLAN.md
 redy.md
 docs
+.env
+.env.*
+!.env.example
+

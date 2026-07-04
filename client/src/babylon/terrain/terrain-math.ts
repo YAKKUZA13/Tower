@@ -1,65 +1,22 @@
 ﻿import { Vector3 } from 'babylonjs';
 import type { GridData, Vector3Data } from '../../domain/map';
+import { gridToWorldData, worldToGridData, sampleHeight as sampleHeightPure, computeHeightRange } from '../../domain/grid-math';
 
 /**
- * Чистые хелперы геометрии поля боя (без зависимости от Scene).
- * Используются рендером террейна (createScene) и будут использованы
- * TD-симом (path-following, расстановка башен) в Фазе 1.
+ * Babylon-обёртки над чистой геометрией поля боя.
+ * Чистая математика (без Babylon) живёт в domain/grid-math.ts — это позволяет
+ * тестировать TD-симуляцию headless (без Babylon). См. ADR-2 / раздел 7.
  */
 
 export function gridToWorld(grid: GridData, col: number, row: number): Vector3 {
-  const x = (col + 0.5) * grid.cellSize - (grid.cols * grid.cellSize) / 2;
-  const z = (row + 0.5) * grid.cellSize - (grid.rows * grid.cellSize) / 2;
-  return new Vector3(x, 0, z);
+  const d = gridToWorldData(grid, col, row);
+  return new Vector3(d.x, 0, d.z);
 }
 
 export function worldToGrid(grid: GridData, point: Vector3Data): { col: number; row: number } {
-  const halfW = (grid.cols * grid.cellSize) / 2;
-  const halfH = (grid.rows * grid.cellSize) / 2;
-  return {
-    col: (point.x + halfW) / grid.cellSize,
-    row: (point.z + halfH) / grid.cellSize
-  };
+  return worldToGridData(grid, point);
 }
 
-export function sampleHeight(heightmap: number[][] | undefined | null, grid: GridData, col: number, row: number, bilinear = false): number {
-  const maxRow = Math.max(0, grid.rows - 1);
-  const maxCol = Math.max(0, grid.cols - 1);
-  if (!bilinear) {
-    const rIdx = Math.max(0, Math.min(maxRow, Math.round(row)));
-    const cIdx = Math.max(0, Math.min(maxCol, Math.round(col)));
-    const val = Number(heightmap?.[rIdx]?.[cIdx]);
-    return Number.isFinite(val) ? val : 0;
-  }
-  const clampedRow = Math.max(0, Math.min(maxRow, row));
-  const clampedCol = Math.max(0, Math.min(maxCol, col));
-  const r0 = Math.floor(clampedRow);
-  const r1 = Math.min(maxRow, Math.ceil(clampedRow));
-  const c0 = Math.floor(clampedCol);
-  const c1 = Math.min(maxCol, Math.ceil(clampedCol));
-  const fr = clampedRow - r0;
-  const fc = clampedCol - c0;
-  const h00 = Number(heightmap?.[r0]?.[c0]) || 0;
-  const h10 = Number(heightmap?.[r1]?.[c0]) || 0;
-  const h01 = Number(heightmap?.[r0]?.[c1]) || 0;
-  const h11 = Number(heightmap?.[r1]?.[c1]) || 0;
-  const h0 = h00 * (1 - fc) + h01 * fc;
-  const h1 = h10 * (1 - fc) + h11 * fc;
-  return h0 * (1 - fr) + h1 * fr;
-}
+export const sampleHeight = sampleHeightPure;
 
-export function computeHeightRange(heightmap: number[][] | undefined): { minH: number; maxH: number } {
-  let minH = Infinity;
-  let maxH = -Infinity;
-  for (const row of heightmap || []) {
-    for (const raw of row || []) {
-      const value = Number(raw);
-      if (!Number.isFinite(value)) continue;
-      minH = Math.min(minH, value);
-      maxH = Math.max(maxH, value);
-    }
-  }
-  if (minH === Infinity || maxH === -Infinity) return { minH: 0, maxH: 1 };
-  if (minH === maxH) return { minH, maxH: minH + 1 };
-  return { minH, maxH };
-}
+export { computeHeightRange };

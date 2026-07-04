@@ -7,10 +7,13 @@
     "client"
   ],
   "scripts": {
-    "dev": "npm run db:setup && concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev": "npm --workspace shared run build && npm run dev:db:up && concurrently -k -n server,client,db -c blue,magenta,yellow \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:db:logs\"",
     "dev:server": "npm --workspace server run dev",
     "dev:client": "npm --workspace client run dev",
-    "build": "npm --workspace server run build && npm --workspace client run build",
+    "dev:db:up": "docker compose up -d --wait postgres redis && npm run migrate",
+    "dev:db:logs": "docker compose logs -f postgres redis",
+    "dev:down": "docker compose down",
+    "build": "npm --workspace shared run build && npm --workspace server run build && npm --workspace client run build",
     "typecheck": "npm --workspace shared run typecheck && npm --workspace server run typecheck && npm --workspace client run typecheck",
     "start": "npm --workspace server run start",
     "db:up": "docker compose up -d --wait postgres redis",

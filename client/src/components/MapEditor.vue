@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { PointerEventTypes, type ArcRotateCamera, type Engine, type Mesh, type Scene } from 'babylonjs';
+import { DEFAULT_ENEMY_TYPES, DEFAULT_WAVES } from '@tower/shared';
+import type { Wave, WaveGroup } from '@tower/shared';
 import type { AssetRecord } from '../services/api';
 import type { GridData, MapDocument, PlacedObject, Vector3Data } from '../domain/map';
 import type { BrushMode, EditorTool } from '../domain/editor';
 import { createEngine, createScene, gridToWorld, makePreviewMesh, makeTerrainBrushMesh, sampleHeight, setGridVisible, updateFreePlacementPreview, updateHeightmapTexture } from '../babylon/createScene';
 import { addPlacedObject } from '../babylon/object-renderer';
+import { LevelOverlay } from '../babylon/level-renderer';
 import { pickGrid, pickSceneObject, pickWorld } from '../babylon/picking';
 import { canPlaceObject } from '../domain/placement';
 import { useMapStore } from '../stores/map-store';
@@ -52,8 +55,9 @@ let previewMesh: Mesh | null = null;
 let terrainBrushMesh: Mesh | null = null;
 let isPaintingTerrain = false;
 let cameraDetachedForBrush = false;
+let levelOverlay: LevelOverlay | null = null;
 
-const modeOptions: EditorTool[] = ['select', 'place', 'move', 'rotate', 'scale', 'remove', 'terrain'];
+const modeOptions: EditorTool[] = ['select', 'place', 'move', 'rotate', 'scale', 'remove', 'terrain', 'path', 'spawn', 'base'];
 const modeLabels: Record<EditorTool, string> = {
   select: 'Выбор',
   place: 'Разместить',
@@ -61,8 +65,13 @@ const modeLabels: Record<EditorTool, string> = {
   rotate: 'Вращать',
   scale: 'Масштаб',
   remove: 'Удалять',
-  terrain: 'Рельеф'
+  terrain: 'Рельеф',
+  path: 'Путь',
+  spawn: 'Спавн',
+  base: 'База'
 };
+
+const enemyTypeOptions = DEFAULT_ENEMY_TYPES;
 
 const catalog = ref<CatalogItem[]>([
   { key: 'house_1x1', label: 'Дом 1x1', type: 'house', size: { w: 1, h: 1 }, height: 4, color: { r: 0.6, g: 0.8, b: 0.6 } },
@@ -261,6 +270,64 @@ function restoreCameraAfterBrush(): void {
   cameraDetachedForBrush = false;
 }
 
+function redrawLevelOverlay(): void {
+  const state = babylonRef.value;
+  if (!state) return;
+  levelOverlay?.dispose();
+  levelOverlay = new LevelOverlay(state.scene, map.value);
+}
+
+function clearPath(): void {
+  map.value.path = { waypoints: [] };
+  redrawLevelOverlay();
+}
+
+function setSpawnAt(col: number, row: number): void {
+  map.value.spawnPoint = { col, row };
+  redrawLevelOverlay();
+}
+
+function setBaseAt(col: number, row: number): void {
+  map.value.base = { ...map.value.base, col, row };
+  redrawLevelOverlay();
+}
+
+function addWave(): void {
+  const index = map.value.waves.length;
+  map.value.waves = [...map.value.waves, { index, rewardBonus: 20, groups: [] }];
+}
+
+function removeWave(idx: number): void {
+  map.value.waves = map.value.waves
+    .filter((_, i) => i !== idx)
+    .map((w, i) => ({ ...w, index: i }));
+}
+
+function addGroupToWave(waveIdx: number): void {
+  const wave = map.value.waves[waveIdx];
+  if (!wave) return;
+  const group: WaveGroup = { enemyTypeId: enemyTypeOptions[0].id, count: 5, interval: 0.8, startDelay: 0 };
+  map.value.waves[waveIdx] = { ...wave, groups: [...wave.groups, group] };
+}
+
+function removeGroupFromWave(waveIdx: number, groupIdx: number): void {
+  const wave = map.value.waves[waveIdx];
+  if (!wave) return;
+  map.value.waves[waveIdx] = { ...wave, groups: wave.groups.filter((_, i) => i !== groupIdx) };
+}
+
+function updateGroup(waveIdx: number, groupIdx: number, patch: Partial<WaveGroup>): void {
+  const wave = map.value.waves[waveIdx];
+  if (!wave) return;
+  const groups = wave.groups.slice();
+  groups[groupIdx] = { ...groups[groupIdx], ...patch };
+  map.value.waves[waveIdx] = { ...wave, groups };
+}
+
+function loadDefaultWaves(): void {
+  map.value.waves = DEFAULT_WAVES.map((w) => ({ ...w, groups: w.groups.map((g) => ({ ...g })) }));
+}
+
 async function init(): Promise<void> {
   try {
     await mapStore.loadMap();
@@ -293,6 +360,7 @@ async function init(): Promise<void> {
   previewMesh = makePreviewMesh(state.scene);
   terrainBrushMesh = makeTerrainBrushMesh(state.scene);
   renderAll();
+  redrawLevelOverlay();
   engine.runRenderLoop(() => state.scene.render());
   state.scene.onPointerObservable.add((pointerInfo) => {
     if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
@@ -379,6 +447,19 @@ async function init(): Promise<void> {
         flattenTargetHeight.value = sampleHeight(map.value.heightmap, map.value.grid, cell.col, cell.row, true);
         applyTerrainBrush(cell);
         isPaintingTerrain = true;
+      } else if (mode.value === 'path') {
+        const cell = pickGrid(state.scene, map.value.grid);
+        if (!cell) return;
+        map.value.path = { waypoints: [...map.value.path.waypoints, { col: cell.col, row: cell.row }] };
+        redrawLevelOverlay();
+      } else if (mode.value === 'spawn') {
+        const cell = pickGrid(state.scene, map.value.grid);
+        if (!cell) return;
+        setSpawnAt(cell.col, cell.row);
+      } else if (mode.value === 'base') {
+        const cell = pickGrid(state.scene, map.value.grid);
+        if (!cell) return;
+        setBaseAt(cell.col, cell.row);
       }
     }
     if (pointerInfo.type === PointerEventTypes.POINTERUP) {
@@ -426,6 +507,8 @@ onMounted(() => init());
 
 onBeforeUnmount(() => {
   restoreCameraAfterBrush();
+  levelOverlay?.dispose();
+  levelOverlay = null;
   engineRef.value?.dispose();
 });
 </script>
@@ -497,6 +580,65 @@ onBeforeUnmount(() => {
             <div class="button-row">
               <button class="btn ghost" :disabled="!lastTerrainCell" @click="pickFlattenHeightFromLast">Взять высоту</button>
               <button class="btn ghost" @click="flattenTargetHeight = null">Сбросить</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-block">
+          <div class="section-title">Поле боя (TD)</div>
+
+          <div class="tool-section">
+            <div class="section-subtitle">Путь и точки</div>
+            <p class="hint">Выберите инструмент «Путь» и кликайте клетки по порядку — это маршрут врагов. «Спавн»/«База» ставят старт и финиш одной точкой.</p>
+            <div class="pill muted">Waypoints: {{ map.path.waypoints.length }}</div>
+            <div class="pill muted">Спавн: {{ map.spawnPoint.col }},{{ map.spawnPoint.row }}</div>
+            <div class="pill muted">База: {{ map.base.col }},{{ map.base.row }} (HP {{ map.base.hp }})</div>
+            <div class="button-row">
+              <button class="btn ghost" @click="clearPath">Очистить путь</button>
+            </div>
+          </div>
+
+          <div class="tool-section">
+            <div class="section-subtitle">Стартовые ресурсы</div>
+            <label class="field">
+              <span>Стартовое золото</span>
+              <input v-model.number="map.startingGold" type="number" min="0" step="10" />
+            </label>
+            <label class="field">
+              <span>HP базы (жизни)</span>
+              <input v-model.number="map.base.hp" type="number" min="1" step="1" />
+            </label>
+          </div>
+
+          <div class="tool-section">
+            <div class="section-subtitle">Волны</div>
+            <div class="button-row">
+              <button class="btn ghost" @click="addWave">Добавить волну</button>
+              <button class="btn ghost" @click="loadDefaultWaves">Дефолт (10)</button>
+            </div>
+            <div v-for="(wave, wi) in map.waves" :key="wi" class="wave-card">
+              <div class="wave-head">
+                <span class="wave-title">Волна {{ wi + 1 }}</span>
+                <label class="inline-check">
+                  <input type="checkbox" :checked="!!wave.isBoss" @change="map.waves[wi] = { ...wave, isBoss: ($event.target as HTMLInputElement).checked }" />
+                  <span>босс</span>
+                </label>
+                <button class="btn danger tiny" @click="removeWave(wi)">×</button>
+              </div>
+              <label class="field">
+                <span>Бонус золота</span>
+                <input :value="wave.rewardBonus" type="number" min="0" step="5" @input="map.waves[wi] = { ...wave, rewardBonus: Number(($event.target as HTMLInputElement).value) || 0 }" />
+              </label>
+              <div v-for="(g, gi) in wave.groups" :key="gi" class="group-row">
+                <select :value="g.enemyTypeId" @change="updateGroup(wi, gi, { enemyTypeId: ($event.target as HTMLSelectElement).value })">
+                  <option v-for="et in enemyTypeOptions" :key="et.id" :value="et.id">{{ et.name }}</option>
+                </select>
+                <input :value="g.count" type="number" min="1" title="кол-во" @input="updateGroup(wi, gi, { count: Math.max(1, Number(($event.target as HTMLInputElement).value) || 1) })" />
+                <input :value="g.interval" type="number" min="0.01" step="0.1" title="интервал, с" @input="updateGroup(wi, gi, { interval: Math.max(0.01, Number(($event.target as HTMLInputElement).value) || 0.01) })" />
+                <input :value="g.startDelay" type="number" min="0" step="0.5" title="задержка, с" @input="updateGroup(wi, gi, { startDelay: Math.max(0, Number(($event.target as HTMLInputElement).value) || 0) })" />
+                <button class="btn danger tiny" @click="removeGroupFromWave(wi, gi)">×</button>
+              </div>
+              <button class="btn ghost small" @click="addGroupToWave(wi)">+ группа</button>
             </div>
           </div>
         </section>
@@ -729,6 +871,50 @@ onBeforeUnmount(() => {
 }
 .status.success {
   color: #22c55e;
+}
+.wave-card {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.wave-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wave-title {
+  font-weight: 800;
+  color: #f8fafc;
+  flex: 1;
+}
+.group-row {
+  display: grid;
+  grid-template-columns: 1fr 56px 64px 64px 28px;
+  gap: 6px;
+  margin: 6px 0;
+  align-items: center;
+}
+.group-row select,
+.group-row input {
+  padding: 5px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+  font-size: 12px;
+  width: 100%;
+}
+.btn.tiny {
+  padding: 2px 7px;
+  font-size: 14px;
+  line-height: 1;
+  min-width: 26px;
+}
+.btn.small {
+  padding: 5px 9px;
+  font-size: 12px;
 }
 @media (max-width: 980px) {
   .workspace {

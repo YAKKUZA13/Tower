@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "$comment": "Каталог моделей TD (ADR-5). Записи без glbPath рендерятся процедурными воксель-моделями (client/src/babylon/voxel). Чтобы подключить реальные CC0 GLB — положите файлы в соответствующие подпапки и добавьте glbPath. Процедурные модели авторства проекта (CC0-эквивалент).",
+  "entries": [
+    { "catalogId": "tower:arrow",  "kind": "tower",      "builder": "tower:arrow",  "baseColor": [0.27, 0.18, 0.10], "emissive": [0.95, 0.45, 0.12] },
+    { "catalogId": "tower:cannon", "kind": "tower",      "builder": "tower:cannon", "baseColor": [0.34, 0.35, 0.40], "emissive": [1.00, 0.85, 0.40] },
+    { "catalogId": "tower:arcane", "kind": "tower",      "builder": "tower:arcane", "baseColor": [0.30, 0.30, 0.33], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "tower:ice",    "kind": "tower",      "builder": "tower:ice",    "baseColor": [0.55, 0.55, 0.58], "emissive": [0.45, 0.82, 0.95] },
+    { "catalogId": "enemy:skeleton", "kind": "enemy",    "builder": "enemy:skeleton", "baseColor": [0.74, 0.71, 0.62], "emissive": [1.00, 0.18, 0.12] },
+    { "catalogId": "enemy:goblin",   "kind": "enemy",    "builder": "enemy:goblin",   "baseColor": [0.36, 0.40, 0.32], "emissive": [1.00, 0.55, 0.10] },
+    { "catalogId": "enemy:zombie",   "kind": "enemy",    "builder": "enemy:zombie",   "baseColor": [0.24, 0.28, 0.22], "emissive": [1.00, 0.18, 0.12] },
+    { "catalogId": "enemy:demon",    "kind": "enemy",    "builder": "enemy:demon",    "baseColor": [0.16, 0.17, 0.20], "emissive": [1.00, 0.55, 0.10] },
+    { "catalogId": "enemy:boss",     "kind": "enemy",    "builder": "enemy:boss",     "baseColor": [0.16, 0.17, 0.20], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "base:altar",     "kind": "base",     "builder": "base:altar",     "baseColor": [0.30, 0.30, 0.33], "emissive": [0.45, 1.00, 0.75] },
+    { "catalogId": "spawn:portal",   "kind": "spawn",    "builder": "spawn:portal",   "baseColor": [0.16, 0.17, 0.20], "emissive": [0.95, 0.45, 0.12] },
+    { "catalogId": "projectile:bolt","kind": "projectile","builder": "projectile:bolt","baseColor": [0.52, 0.53, 0.58], "emissive": [1.00, 0.85, 0.40] }
+  ]
+}

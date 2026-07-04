@@ -5,6 +5,7 @@ import LoginForm from './components/LoginForm.vue';
 // Тяжёлые 3D-компоненты грузятся лениво (Babylon.js выносится в отдельный чанк).
 const MapEditor = defineAsyncComponent(() => import('./components/MapEditor.vue'));
 const Play = defineAsyncComponent(() => import('./components/Play.vue'));
+const Game = defineAsyncComponent(() => import('./components/Game.vue'));
 import { useSessionSocket } from './composables/use-session-socket';
 import { useAuthStore } from './stores/auth-store';
 import { useGameSessionStore } from './stores/game-session-store';
@@ -78,7 +79,8 @@ onMounted(async () => {
         <div v-if="isAuthed && sessionId" class="app-nav">
           <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Лобби</button>
           <button v-if="role === 'gm'" class="nav-button" :class="{ active: view === 'editor' }" @click="view='editor'">Редактор карты</button>
-          <button class="nav-button" :class="{ active: view === 'play' }" @click="view='play'">Игровой экран</button>
+          <button class="nav-button" :class="{ active: view === 'game' }" @click="view='game'">Играть (TD)</button>
+          <button class="nav-button" :class="{ active: view === 'play' }" @click="view='play'">Просмотр карты</button>
         </div>
       </div>
       <div v-if="isAuthed" class="app-header-right">
@@ -122,6 +124,7 @@ onMounted(async () => {
         </div>
 
         <MapEditor v-else-if="view==='editor'" />
+        <Game v-else-if="view==='game'" />
         <Play v-else />
       </template>
     </div>

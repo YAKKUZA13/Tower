@@ -10,7 +10,10 @@ export default defineConfig(({ mode }) => ({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(__dirname, './src'),
+      // shared импортируется как runtime (каталоги/типы); резолвим в собранную dist.
+      // shared собирается раньше client в корневых dev/build скриптах.
+      '@tower/shared': path.resolve(__dirname, '../shared/dist/index.js')
     }
   },
   server: {

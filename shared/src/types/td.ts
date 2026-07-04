@@ -52,6 +52,7 @@ export interface Tower {
   upgradePathIndex: number;
   cooldown: number;          // до след. выстрела (сек)
   rotationY: number;         // визуальный поворот к цели
+  targetingMode?: TargetingMode; // per-instance режим (override дефолта TowerType)
 }
 
 // ── Враги и волны ─────────────────────────────────────────
@@ -79,6 +80,7 @@ export interface Enemy {
   position: { x: number; y: number; z: number };
   alive: boolean;
   slowUntilTick?: number;
+  slowFactor?: number;       // множитель скорости пока действует slow (0..1)
 }
 
 export interface WaveGroup {
