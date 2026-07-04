@@ -1,14 +1,21 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { listAssets, uploadAsset, deleteAsset } from '../services/api';
+import { listAssets, uploadAsset, deleteAsset, type AssetRecord } from '../services/api';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-const assets = ref([]);
+const props = defineProps<{
+  selectedAssetId?: string | null;
+}>();
+const emit = defineEmits<{
+  assetSelected: [asset: AssetRecord];
+}>();
+
+const assets = ref<AssetRecord[]>([]);
 const status = ref('');
 const uploading = ref(false);
 const isDragging = ref(false);
-const fileInputRef = ref(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
 
 async function refresh() {
   try {
@@ -18,19 +25,20 @@ async function refresh() {
   }
 }
 
-async function handleFile(event) {
-  const file = event.target.files?.[0];
+async function handleFile(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
   await uploadFile(file);
-  event.target.value = '';
+  target.value = '';
 }
 
-async function handleDrop(event) {
+async function handleDrop(event: DragEvent) {
   isDragging.value = false;
   const file = event.dataTransfer?.files?.[0];
   await uploadFile(file);
 }
 
-async function uploadFile(file) {
+async function uploadFile(file?: File) {
   if (!file) return;
   if (file.size > MAX_FILE_SIZE) {
     status.value = 'Файл больше 10 MB';
@@ -54,7 +62,7 @@ async function uploadFile(file) {
   }
 }
 
-function toBase64(file) {
+function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -71,7 +79,7 @@ function toBase64(file) {
   });
 }
 
-async function removeAsset(id) {
+async function removeAsset(id: string) {
   try {
     await deleteAsset(id);
     await refresh();
@@ -84,7 +92,11 @@ function openFilePicker() {
   if (!uploading.value) fileInputRef.value?.click();
 }
 
-function formatAssetSize(bytes) {
+function selectAsset(asset: AssetRecord) {
+  emit('assetSelected', asset);
+}
+
+function formatAssetSize(bytes: number) {
   const size = Number(bytes) || 0;
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   return `${(size / 1024).toFixed(1)} KB`;
@@ -127,7 +139,14 @@ onMounted(() => refresh());
     </div>
 
     <div v-else class="asset-list">
-      <div v-for="a in assets" :key="a.id" class="asset-item">
+      <button
+        v-for="a in assets"
+        :key="a.id"
+        type="button"
+        class="asset-item"
+        :class="{ selected: props.selectedAssetId === a.id }"
+        @click="selectAsset(a)"
+      >
         <div class="asset-preview">
           {{ a.name?.split('.').pop()?.slice(0, 3)?.toUpperCase() || '3D' }}
         </div>
@@ -135,8 +154,8 @@ onMounted(() => refresh());
           <div class="asset-name" :title="a.name">{{ a.name }}</div>
           <div class="asset-meta">{{ formatAssetSize(a.size) }} · {{ a.mime || 'тип не задан' }}</div>
         </div>
-        <button type="button" class="delete-button" @click="removeAsset(a.id)">Удалить</button>
-      </div>
+        <button type="button" class="delete-button" @click.stop="removeAsset(a.id)">Удалить</button>
+      </button>
     </div>
   </div>
 </template>
@@ -246,6 +265,15 @@ onMounted(() => refresh());
   border-radius: 12px;
   padding: 9px;
   background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.asset-item.selected {
+  border-color: rgba(96, 165, 250, 0.75);
+  background: rgba(59, 130, 246, 0.16);
 }
 
 .asset-preview {

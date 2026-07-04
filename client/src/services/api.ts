@@ -5,6 +5,16 @@ import { clearStoredGameRole, clearStoredSessionId, getAuthToken, getStoredSessi
 
 const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
 
+export interface AssetRecord {
+  id: string;
+  ownerUserId?: string | null;
+  name: string;
+  mime: string;
+  file?: string;
+  size: number;
+  createdAt?: number;
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -135,18 +145,18 @@ export async function resetSession(sessionId: string): Promise<{ ok: boolean }> 
   return await readJsonOrThrow<{ ok: boolean }>(res, 'session_reset_failed');
 }
 
-export async function listAssets(): Promise<Array<Record<string, unknown>>> {
+export async function listAssets(): Promise<AssetRecord[]> {
   const res = await fetch(`${BASE}/assets`, { headers: authHeaders() });
-  return await readJsonOrThrow<Array<Record<string, unknown>>>(res, 'assets_list_failed');
+  return await readJsonOrThrow<AssetRecord[]>(res, 'assets_list_failed');
 }
 
-export async function uploadAsset({ name, dataBase64, mime }: { name: string; dataBase64: string; mime: string }): Promise<Record<string, unknown>> {
+export async function uploadAsset({ name, dataBase64, mime }: { name: string; dataBase64: string; mime: string }): Promise<AssetRecord> {
   const res = await fetch(`${BASE}/assets/upload`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ name, dataBase64, mime })
   });
-  return await readJsonOrThrow<Record<string, unknown>>(res, 'asset_upload_failed');
+  return await readJsonOrThrow<AssetRecord>(res, 'asset_upload_failed');
 }
 
 export async function deleteAsset(id: string): Promise<{ ok: boolean }> {
@@ -155,4 +165,8 @@ export async function deleteAsset(id: string): Promise<{ ok: boolean }> {
     headers: authHeaders()
   });
   return await readJsonOrThrow<{ ok: boolean }>(res, 'asset_delete_failed');
+}
+
+export function getAssetModelUrl(asset: Pick<AssetRecord, 'id' | 'name'>): string {
+  return `${BASE}/assets/${asset.id}/${encodeURIComponent(asset.name)}`;
 }

@@ -52,12 +52,15 @@ const assetsRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(record);
   });
 
-  app.get('/:id', async (req: FastifyRequest<{ Params: AssetParams }>, reply) => {
+  async function sendAsset(req: FastifyRequest<{ Params: AssetParams }>, reply: FastifyReply) {
     const asset = await getAssetWithDataById(req.params.id);
     if (!asset?.data) return reply.code(404).send({ error: 'not_found' });
     reply.type(asset.mime || 'application/octet-stream');
     return reply.send(asset.data);
-  });
+  }
+
+  app.get('/:id', sendAsset);
+  app.get('/:id/:filename', sendAsset);
 
   app.delete('/:id', async (req: FastifyRequest<{ Params: AssetParams }>, reply) => {
     const ok = await deleteAsset(req.params.id);

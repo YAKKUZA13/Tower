@@ -1,120 +1,79 @@
-<script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { getMap, saveMap } from '../services/api';
-import { createEngine, createScene, drawPath, gridToWorld } from '../babylon/createScene.js';
-import { addPlacedObject, updateFreePlacementPreview } from '../babylon/object-renderer.js';
-import { updateHeightmapTexture, sampleHeight } from '../babylon/terrain-renderer.js';
-import { pickGrid, pickSceneObject, pickWorld } from '../babylon/picking.js';
-import { makePreviewMesh, makeTerrainBrushMesh, setGridVisible } from '../babylon/editor-gizmos.js';
-import { PointerEventTypes } from 'babylonjs';
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import { PointerEventTypes, type ArcRotateCamera, type Engine, type Mesh, type Scene } from 'babylonjs';
+import { getMap, saveMap, type AssetRecord } from '../services/api';
+import type { GridData, MapDocument, PlacedObject, Vector3Data } from '../domain/map';
+import type { BrushMode, EditorTool } from '../domain/editor';
+import { createEngine, createScene, gridToWorld, makePreviewMesh, makeTerrainBrushMesh, sampleHeight, setGridVisible, updateFreePlacementPreview, updateHeightmapTexture } from '../babylon/createScene';
+import { addPlacedObject } from '../babylon/object-renderer';
+import { pickGrid, pickSceneObject, pickWorld } from '../babylon/picking';
+import { canPlaceObject } from '../domain/placement';
 import AssetManager from './AssetManager.vue';
 
-const canvasRef = ref(null);
-const engineRef = ref(null);
-const babylonRef = ref(null);
+interface BabylonState {
+  scene: Scene;
+  camera: ArcRotateCamera;
+  ground: Mesh;
+}
+
+interface CatalogItem {
+  key: string;
+  label: string;
+  type: string;
+  size: { w: number; h: number };
+  height: number;
+  color: { r: number; g: number; b: number };
+}
 
 const MIN_HEIGHT = -50;
 const MAX_HEIGHT = 200;
-const MAX_SLOPE_DELTA = 1.5;
 
-function createFlatHeightmap(rows, cols, fill = 0) {
-  const safeRows = Math.max(1, Number(rows) || 1);
-  const safeCols = Math.max(1, Number(cols) || 1);
-  return Array.from({ length: safeRows }, () => Array.from({ length: safeCols }, () => fill));
-}
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+const engineRef = shallowRef<Engine | null>(null);
+const babylonRef = shallowRef<BabylonState | null>(null);
+const saving = ref(false);
+const status = ref('');
+const selectedObjectId = ref<string | null>(null);
+const selectedAsset = ref<AssetRecord | null>(null);
+const mode = ref<EditorTool>('select');
+const showGrid = ref(false);
+const snapEnabled = ref(true);
+const snapStep = ref(0.5);
+const brushMode = ref<BrushMode>('raise');
+const brushRadius = ref(1.2);
+const brushStrength = ref(0.35);
+const flattenTargetHeight = ref<number | null>(null);
+const cursorHeight = ref(0);
+const lastTerrainCell = ref<{ col: number; row: number } | null>(null);
 
-function clampHeight(v) {
-  const num = Number(v);
-  if (!Number.isFinite(num)) return 0;
-  return Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, num));
-}
+let previewMesh: Mesh | null = null;
+let terrainBrushMesh: Mesh | null = null;
+let isPaintingTerrain = false;
+let cameraDetachedForBrush = false;
 
-function normalizeHeightmap(grid, hm) {
-  const rows = Math.max(1, Number(grid?.rows) || 1);
-  const cols = Math.max(1, Number(grid?.cols) || 1);
-  const result = createFlatHeightmap(rows, cols, 0);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const val = hm && Array.isArray(hm[r]) ? hm[r][c] : null;
-      result[r][c] = clampHeight(val);
-    }
-  }
-  return result;
-}
+const modeOptions: EditorTool[] = ['select', 'place', 'move', 'rotate', 'scale', 'remove', 'terrain'];
+const modeLabels: Record<EditorTool, string> = {
+  select: 'Выбор',
+  place: 'Разместить',
+  move: 'Двигать',
+  rotate: 'Вращать',
+  scale: 'Масштаб',
+  remove: 'Удалять',
+  terrain: 'Рельеф'
+};
 
-function valueNoise(x, y, seed = 1) {
-  const h = Math.sin(seed + x * 127.1 + y * 311.7) * 43758.5453;
-  return h - Math.floor(h);
-}
+const catalog = ref<CatalogItem[]>([
+  { key: 'house_1x1', label: 'Дом 1x1', type: 'house', size: { w: 1, h: 1 }, height: 4, color: { r: 0.6, g: 0.8, b: 0.6 } },
+  { key: 'house_2x2', label: 'Дом 2x2', type: 'house', size: { w: 2, h: 2 }, height: 3, color: { r: 0.5, g: 0.7, b: 0.5 } },
+  { key: 'tower_3x3', label: 'Башня 3x3', type: 'tower', size: { w: 3, h: 3 }, height: 6, color: { r: 0.4, g: 0.6, b: 0.9 } }
+]);
+const selectedKey = ref(catalog.value[0].key);
 
-function fbmNoise(x, y, seed = 1, octaves = 4, persistence = 0.5, lacunarity = 2) {
-  let amp = 1;
-  let freq = 1;
-  let sum = 0;
-  let norm = 0;
-  for (let i = 0; i < octaves; i++) {
-    const xf = x * freq;
-    const yf = y * freq;
-    const x0 = Math.floor(xf);
-    const y0 = Math.floor(yf);
-    const tx = xf - x0;
-    const ty = yf - y0;
-    const v00 = valueNoise(x0, y0, seed);
-    const v10 = valueNoise(x0 + 1, y0, seed);
-    const v01 = valueNoise(x0, y0 + 1, seed);
-    const v11 = valueNoise(x0 + 1, y0 + 1, seed);
-    const vx0 = v00 * (1 - tx) + v10 * tx;
-    const vx1 = v01 * (1 - tx) + v11 * tx;
-    const blended = vx0 * (1 - ty) + vx1 * ty;
-
-    sum += blended * amp;
-    norm += amp;
-    amp *= persistence;
-    freq *= lacunarity;
-  }
-  return norm > 0 ? sum / norm : 0;
-}
-
-function generateDefaultHeightmap(rows, cols, seed = 11) {
-  const safeRows = Math.max(1, Number(rows) || 1);
-  const safeCols = Math.max(1, Number(cols) || 1);
-  const hm = [];
-  const scale = 0.08;
-  const amplitude = 8;
-  for (let r = 0; r < safeRows; r++) {
-    const row = [];
-    for (let c = 0; c < safeCols; c++) {
-      const nx = c * scale;
-      const ny = r * scale;
-      row.push(fbmNoise(nx, ny, seed, 4, 0.55, 2.1) * amplitude);
-    }
-    hm.push(row);
-  }
-  return hm;
-}
-
-function isFlatHeightmap(hm) {
-  if (!Array.isArray(hm) || !hm.length || !Array.isArray(hm[0])) return true;
-  let min = Infinity;
-  let max = -Infinity;
-  for (let r = 0; r < hm.length; r++) {
-    const row = hm[r];
-    for (let c = 0; c < (row?.length || 0); c++) {
-      const v = Number(row[c]);
-      if (!Number.isFinite(v)) continue;
-      if (v < min) min = v;
-      if (v > max) max = v;
-    }
-  }
-  if (min === Infinity || max === -Infinity) return true;
-  return Math.abs(max - min) < 0.05;
-}
-
-const map = ref({
+const map = ref<MapDocument>({
   version: 1,
   grid: { cols: 32, rows: 18, cellSize: 1.5 },
-  heightmap: generateDefaultHeightmap(18, 32, 11),
-  terrain: { heightmap: generateDefaultHeightmap(18, 32, 11), materialLayers: [], water: [], biome: 'temperate' },
+  heightmap: createDefaultHeightmap(18, 32, 11),
+  terrain: { heightmap: createDefaultHeightmap(18, 32, 11), materialLayers: [], water: [], biome: 'temperate' },
   objects: [],
   paths: [],
   encounters: [],
@@ -125,59 +84,72 @@ const map = ref({
   base: { hp: 20 },
   waves: []
 });
-const mode = ref('select'); // select | place | move | rotate | scale | remove | path | terrain
-const saving = ref(false);
-const status = ref('');
-const selectedObjectId = ref(null);
-const snapEnabled = ref(true);
-const snapStep = ref(0.5);
 
-const brushMode = ref('raise'); // raise | lower | smooth | flatten
-const brushRadius = ref(1.2);
-const brushStrength = ref(0.35);
-const flattenTargetHeight = ref(null);
-const cursorHeight = ref(0);
-const lastTerrainCell = ref(null);
-let isPaintingTerrain = false;
-const modeOptions = ['select', 'place', 'move', 'rotate', 'scale', 'remove', 'path', 'terrain'];
-const modeLabels = {
-  select: 'Выбор',
-  place: 'Строить',
-  move: 'Двигать',
-  rotate: 'Вращать',
-  scale: 'Масштаб',
-  remove: 'Удалять',
-  path: 'Путь',
-  terrain: 'Рельеф'
-};
+function createDefaultHeightmap(rows: number, cols: number, seed = 11): number[][] {
+  return Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: cols }, (_, col) => {
+      const noise = Math.sin(seed + col * 0.71 + row * 1.37) * 0.5 + Math.cos(seed + col * 0.24 - row * 0.61) * 0.5;
+      return noise * 3;
+    })
+  );
+}
 
-// Catalog at bottom menu
-const catalog = ref([
-  { key: 'house_1x1', label: 'Дом 1x1', type: 'house', size: { w: 1, h: 1 }, height: 4, color: { r: 0.6, g: 0.8, b: 0.6 }, props: {} },
-  { key: 'house_2x2', label: 'Дом 2x2', type: 'house', size: { w: 2, h: 2 }, height: 3, color: { r: 0.5, g: 0.7, b: 0.5 }, props: {} },
-  { key: 'tower_3x3', label: 'Башня 3x3', type: 'tower', size: { w: 3, h: 3 }, height: 6, color: { r: 0.4, g: 0.6, b: 0.9 }, props: {} },
-]);
-const selectedKey = ref(catalog.value[0].key);
+function normalizeHeightmap(grid: GridData, heightmap: unknown): number[][] {
+  const rows = Math.max(1, Number(grid.rows) || 1);
+  const cols = Math.max(1, Number(grid.cols) || 1);
+  const source = Array.isArray(heightmap) ? heightmap : [];
+  return Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: cols }, (_, col) => {
+      const value = Number((source[row] as unknown[] | undefined)?.[col]);
+      if (!Number.isFinite(value)) return 0;
+      return Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, value));
+    })
+  );
+}
 
-function snapValue(value) {
+function snapValue(value: number): number {
   if (!snapEnabled.value) return value;
   const step = Math.max(0.01, Number(snapStep.value) || 0.5);
   return Math.round(value / step) * step;
 }
 
-function createObjectFromCatalog(point) {
-  const def = getSelectedDef();
+function getSelectedCatalogItem(): CatalogItem {
+  return catalog.value.find((item) => item.key === selectedKey.value) || catalog.value[0];
+}
+
+function getSelectedObject(): PlacedObject | null {
+  return map.value.objects?.find((obj) => obj.id === selectedObjectId.value) || null;
+}
+
+function createObjectAtPoint(point: Vector3Data): PlacedObject {
   const cellSize = map.value.grid.cellSize;
+  if (selectedAsset.value) {
+    return {
+      id: crypto.randomUUID(),
+      type: 'asset',
+      assetId: selectedAsset.value.id,
+      primitiveType: 'box',
+      transform: {
+        position: { x: snapValue(point.x), y: Number(point.y || 0), z: snapValue(point.z) },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: cellSize * 2, y: cellSize * 2, z: cellSize * 2 }
+      },
+      collision: { blocking: true, selectable: true },
+      tags: ['asset'],
+      properties: {
+        assetName: selectedAsset.value.name,
+        mime: selectedAsset.value.mime,
+        color: { r: 0.45, g: 0.75, b: 0.9 }
+      }
+    };
+  }
+  const def = getSelectedCatalogItem();
   return {
     id: crypto.randomUUID(),
     type: def.type,
     primitiveType: 'box',
     transform: {
-      position: {
-        x: snapValue(point.x),
-        y: Number(point.y || 0),
-        z: snapValue(point.z)
-      },
+      position: { x: snapValue(point.x), y: Number(point.y || 0), z: snapValue(point.z) },
       rotation: { x: 0, y: 0, z: 0 },
       scale: {
         x: Math.max(0.2, def.size.w * cellSize),
@@ -187,386 +159,269 @@ function createObjectFromCatalog(point) {
     },
     collision: { blocking: true, selectable: true },
     tags: [def.type],
-    properties: {
-      color: def.color,
-      catalogKey: def.key,
-      props: def.props || {}
-    }
+    properties: { color: def.color, catalogKey: def.key }
   };
 }
 
-function getSelectedObject() {
-  return map.value.objects?.find(obj => obj.id === selectedObjectId.value) || null;
-}
-
-function getSelectedDef() {
-  return catalog.value.find(c => c.key === selectedKey.value) || catalog.value[0];
-}
-
-function rectanglesOverlap(a, b) {
-  return !(a.col + a.size.w <= b.col || b.col + b.size.w <= a.col || a.row + a.size.h <= b.row || b.row + b.size.h <= a.row);
-}
-
-function isTerrainFlatEnough(col, row, size) {
-  const hm = map.value.heightmap;
-  if (!hm || !Array.isArray(hm)) return true;
-  let minH = Infinity;
-  let maxH = -Infinity;
-  for (let r = row; r < row + size.h; r++) {
-    for (let c = col; c < col + size.w; c++) {
-      const val = hm?.[r]?.[c];
-      if (!Number.isFinite(val)) continue;
-      if (val < minH) minH = val;
-      if (val > maxH) maxH = val;
-    }
-  }
-  if (minH === Infinity || maxH === -Infinity) return true;
-  return (maxH - minH) <= MAX_SLOPE_DELTA;
-}
-
-function canPlace(col, row, size) {
-  // Bounds
-  if (col < 0 || row < 0) return false;
-  if (col + size.w > map.value.grid.cols) return false;
-  if (row + size.h > map.value.grid.rows) return false;
-  // Forbid path cells
-  const pathCells = new Set();
-  const wps = map.value?.path?.waypoints || [];
-  for (let i = 0; i < wps.length; i++) {
-    const a = wps[i];
-    const b = wps[i + 1];
-    if (!a) continue;
-    pathCells.add(`${a.col}:${a.row}`);
-    if (!b) continue;
-    const dCol = Math.sign(b.col - a.col);
-    const dRow = Math.sign(b.row - a.row);
-    for (let c = a.col + dCol; c !== b.col + dCol && dCol !== 0; c += dCol) pathCells.add(`${c}:${a.row}`);
-    for (let r = a.row + dRow; r !== b.row + dRow && dRow !== 0; r += dRow) pathCells.add(`${b.col}:${r}`);
-  }
-  for (let cx = col; cx < col + size.w; cx++) {
-    for (let cy = row; cy < row + size.h; cy++) {
-      if (pathCells.has(`${cx}:${cy}`)) return false;
-    }
-  }
-  if (!isTerrainFlatEnough(col, row, size)) return false;
-  // Collision with existing
-  const candidate = { col, row, size };
-  for (const t of map.value.towers) {
-    const sz = t.size ? t.size : { w: 1, h: 1 };
-    if (rectanglesOverlap(candidate, { col: t.col, row: t.row, size: sz })) return false;
-  }
-  return true;
-}
-
-function findBuildingAtCell(col, row) {
-  for (const t of map.value.towers) {
-    const sz = t.size ? t.size : { w: 1, h: 1 };
-    if (col >= t.col && col < t.col + sz.w && row >= t.row && row < t.row + sz.h) return t;
-  }
-  return null;
-}
-
-function addNewBuilding(col, row) {
-  const def = getSelectedDef();
-  if (!canPlace(col, row, def.size)) return null;
-  const b = {
-    id: crypto.randomUUID(),
-    type: def.type,
-    col,
-    row,
-    level: 1,
-    size: { w: def.size.w, h: def.size.h },
-    height: def.height,
-    color: def.color,
-    props: def.props || {}
-  };
-  map.value.towers.push(b);
-  return b;
-}
-
-function removeBuildingByCell(col, row) {
-  const t = findBuildingAtCell(col, row);
-  if (!t) return;
-  const idx = map.value.towers.findIndex(x => x.id === t.id);
-  if (idx >= 0) map.value.towers.splice(idx, 1);
-}
-
-function renderAll() {
-  const { scene } = babylonRef.value;
-  const heightmap = map.value.heightmap;
-  scene.meshes.filter(m => m.name.startsWith('object-') || m.name.startsWith('building-') || m.name.startsWith('tower-')).forEach(m => m.dispose());
+function renderAll(): void {
+  const state = babylonRef.value;
+  if (!state) return;
+  state.scene.meshes
+    .filter((mesh) => mesh.name.startsWith('object-'))
+    .forEach((mesh) => mesh.dispose(false, true));
   if (!Array.isArray(map.value.objects)) map.value.objects = [];
   for (const obj of map.value.objects) {
-    const mesh = addPlacedObject(scene, obj, heightmap, map.value.grid);
-    if (obj.id === selectedObjectId.value && mesh.material?.emissiveColor) {
-      mesh.material.emissiveColor.set(0.08, 0.18, 0.35);
-    }
+    addPlacedObject(state.scene, obj, map.value.heightmap, map.value.grid);
   }
 }
 
-let previewMesh = null;
-let terrainBrushMesh = null;
+function updatePlacementPreview(): void {
+  const state = babylonRef.value;
+  if (!state || !previewMesh) return;
+  if (mode.value !== 'place') {
+    previewMesh.setEnabled(false);
+    return;
+  }
+  const point = pickWorld(state.scene);
+  if (!point) {
+    previewMesh.setEnabled(false);
+    return;
+  }
+  const candidate = createObjectAtPoint(point);
+  const valid = canPlaceObject(candidate, map.value.objects || []);
+  updateFreePlacementPreview(previewMesh, candidate, valid, map.value.heightmap, map.value.grid);
+}
 
-function applyTerrainBrush(cell) {
+function applyTerrainBrush(cell: { col: number; row: number }): void {
   const grid = map.value.grid;
-  map.value.heightmap = normalizeHeightmap(grid, map.value.heightmap);
-  const hm = map.value.heightmap;
+  const heightmap = normalizeHeightmap(grid, map.value.heightmap);
   const radius = Math.max(0.1, Number(brushRadius.value) || 0.1);
   const strength = Math.max(0.01, Number(brushStrength.value) || 0.01);
-  const rows = grid.rows;
-  const cols = grid.cols;
   const targetHeight = brushMode.value === 'flatten'
-    ? (Number.isFinite(flattenTargetHeight.value) ? flattenTargetHeight.value : (hm?.[cell.row]?.[cell.col] ?? 0))
+    ? (Number.isFinite(flattenTargetHeight.value) ? flattenTargetHeight.value : heightmap[cell.row]?.[cell.col] || 0)
     : null;
-
-  const rMin = Math.max(0, Math.floor(cell.row - radius));
-  const rMax = Math.min(rows - 1, Math.ceil(cell.row + radius));
-  const cMin = Math.max(0, Math.floor(cell.col - radius));
-  const cMax = Math.min(cols - 1, Math.ceil(cell.col + radius));
-
-  for (let r = rMin; r <= rMax; r++) {
-    for (let c = cMin; c <= cMax; c++) {
-      const dx = c - cell.col;
-      const dy = r - cell.row;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > radius + 0.001) continue;
-      // Smooth falloff to avoid hard steps
-      const falloff = Math.max(0, 1 - dist / radius);
-      const weight = falloff * falloff; // quadratic falloff
-      const current = Number(hm?.[r]?.[c]) || 0;
+  for (let row = Math.max(0, Math.floor(cell.row - radius)); row <= Math.min(grid.rows - 1, Math.ceil(cell.row + radius)); row++) {
+    for (let col = Math.max(0, Math.floor(cell.col - radius)); col <= Math.min(grid.cols - 1, Math.ceil(cell.col + radius)); col++) {
+      const dist = Math.hypot(col - cell.col, row - cell.row);
+      if (dist > radius) continue;
+      const weight = Math.max(0, 1 - dist / radius) ** 2;
+      const current = Number(heightmap[row]?.[col]) || 0;
       let next = current;
-      if (brushMode.value === 'raise') {
-        next = current + strength * weight;
-      } else if (brushMode.value === 'lower') {
-        next = current - strength * weight;
-      } else if (brushMode.value === 'smooth') {
-        let acc = 0;
-        let totalW = 0;
-        for (let nr = Math.max(0, r - Math.ceil(radius)); nr <= Math.min(rows - 1, r + Math.ceil(radius)); nr++) {
-          for (let nc = Math.max(0, c - Math.ceil(radius)); nc <= Math.min(cols - 1, c + Math.ceil(radius)); nc++) {
-            const ddx = nc - c;
-            const ddy = nr - r;
-            const nd = Math.sqrt(ddx * ddx + ddy * ddy);
-            if (nd > radius) continue;
-            const nv = hm?.[nr]?.[nc];
-            if (!Number.isFinite(nv)) continue;
-            const nw = Math.max(0, 1 - nd / radius);
-            acc += nv * nw;
-            totalW += nw;
+      if (brushMode.value === 'raise') next = current + strength * weight;
+      if (brushMode.value === 'lower') next = current - strength * weight;
+      if (brushMode.value === 'flatten') next = current + ((targetHeight ?? current) - current) * Math.min(1, strength * weight);
+      if (brushMode.value === 'smooth') {
+        let total = 0;
+        let count = 0;
+        for (let nr = Math.max(0, row - 1); nr <= Math.min(grid.rows - 1, row + 1); nr++) {
+          for (let nc = Math.max(0, col - 1); nc <= Math.min(grid.cols - 1, col + 1); nc++) {
+            total += Number(heightmap[nr]?.[nc]) || 0;
+            count += 1;
           }
         }
-        const avg = totalW > 0 ? acc / totalW : current;
+        const avg = count ? total / count : current;
         next = current + (avg - current) * Math.min(1, strength * weight);
-      } else if (brushMode.value === 'flatten') {
-        const target = Number.isFinite(targetHeight) ? targetHeight : current;
-        next = current + (target - current) * Math.min(1, strength * weight);
       }
-      hm[r][c] = clampHeight(next);
+      heightmap[row][col] = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, next));
     }
   }
-  updateHeightmapTexture(babylonRef.value?.ground, grid, hm);
+  map.value.heightmap = heightmap;
+  map.value.terrain = { ...(map.value.terrain || {}), heightmap };
+  updateHeightmapTexture(babylonRef.value?.ground, grid, heightmap);
   renderAll();
-  drawPath(babylonRef.value.scene, map.value.grid, map.value?.path?.waypoints || [], map.value.heightmap);
 }
 
-function updateTerrainPreview(cell) {
+function updateTerrainPreview(cell: { col: number; row: number }): void {
   if (!terrainBrushMesh) return;
   const diameter = Math.max(0.4, brushRadius.value * 2 * map.value.grid.cellSize);
-  const h = 0.08;
   const pos = gridToWorld(map.value.grid, cell.col, cell.row);
   const groundHeight = sampleHeight(map.value.heightmap, map.value.grid, cell.col, cell.row, true);
   cursorHeight.value = groundHeight;
   lastTerrainCell.value = cell;
-  pos.y = groundHeight + h / 2 + 0.05;
   terrainBrushMesh.scaling.set(diameter, 1, diameter);
   terrainBrushMesh.position = pos;
-  if (terrainBrushMesh.material?.diffuseColor) {
-    terrainBrushMesh.material.diffuseColor.set(0.16, 0.64, 1);
-  }
+  terrainBrushMesh.position.y = groundHeight + 0.09;
   terrainBrushMesh.setEnabled(true);
 }
 
-function pickFlattenHeight(cell) {
-  const h = sampleHeight(map.value.heightmap, map.value.grid, cell.col, cell.row, true);
-  flattenTargetHeight.value = h;
+function detachCameraForBrush(): void {
+  const state = babylonRef.value;
+  const canvas = canvasRef.value;
+  if (!state || !canvas || cameraDetachedForBrush) return;
+  state.camera.detachControl();
+  cameraDetachedForBrush = true;
 }
 
-function pickFlattenHeightFromLast() {
-  if (lastTerrainCell.value) {
-    pickFlattenHeight(lastTerrainCell.value);
-  }
+function restoreCameraAfterBrush(): void {
+  const state = babylonRef.value;
+  const canvas = canvasRef.value;
+  if (!state || !canvas || !cameraDetachedForBrush) return;
+  state.camera.attachControl(canvas, true);
+  cameraDetachedForBrush = false;
 }
 
-async function init() {
+async function init(): Promise<void> {
   try {
     const data = await getMap();
     const grid = data?.grid || map.value.grid;
-    const normalizedHm = normalizeHeightmap(grid, data?.heightmap);
-    const needsGeneration = isFlatHeightmap(normalizedHm);
+    const heightmap = normalizeHeightmap(grid, data?.heightmap);
     map.value = {
       ...map.value,
       ...data,
       grid,
-      heightmap: needsGeneration ? generateDefaultHeightmap(grid.rows, grid.cols, 11) : normalizedHm,
-      terrain: {
-        ...(data?.terrain || {}),
-        heightmap: needsGeneration ? generateDefaultHeightmap(grid.rows, grid.cols, 11) : normalizedHm
-      },
-      objects: Array.isArray(data?.objects) ? data.objects : []
+      heightmap,
+      terrain: { ...(data?.terrain || {}), heightmap },
+      objects: Array.isArray(data?.objects) ? data.objects : [],
+      path: data?.path || { waypoints: [] },
+      towers: Array.isArray(data?.towers) ? data.towers : []
     };
-    if (!map.value.path || !Array.isArray(map.value.path.waypoints)) {
-      map.value.path = { waypoints: [] };
-    }
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    console.error(error);
     status.value = 'Не удалось загрузить карту, использую стандартную.';
   }
-
+  if (!canvasRef.value) return;
   const engine = createEngine(canvasRef.value);
   engineRef.value = engine;
-  const { scene, ground } = createScene(engine, map.value.grid, map.value.heightmap);
-  babylonRef.value = { scene, ground };
-
-  previewMesh = makePreviewMesh(scene, map.value.grid);
-  terrainBrushMesh = makeTerrainBrushMesh(scene);
-
-  engine.runRenderLoop(() => {
-    scene.render();
-  });
-
+  const state = createScene(engine, map.value.grid, map.value.heightmap, { editor: true });
+  babylonRef.value = state;
+  setGridVisible(state.scene, showGrid.value);
+  previewMesh = makePreviewMesh(state.scene);
+  terrainBrushMesh = makeTerrainBrushMesh(state.scene);
   renderAll();
-  drawPath(scene, map.value.grid, map.value?.path?.waypoints || [], map.value.heightmap);
-
-  // Preview update on move (and path ghost)
-  scene.onPointerObservable.add((pointerInfo) => {
-    if (mode.value === 'place') {
-      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
-      const point = pickWorld(scene);
-      if (!point) return;
-      updateFreePlacementPreview(previewMesh, createObjectFromCatalog(point), true, map.value.heightmap, map.value.grid);
-    } else if (mode.value === 'remove' || mode.value === 'select' || mode.value === 'move' || mode.value === 'rotate' || mode.value === 'scale') {
-      // hide preview in remove mode
-      if (previewMesh) previewMesh.setEnabled(false);
-      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
-    } else if (mode.value === 'path') {
-      if (previewMesh) previewMesh.setEnabled(false);
-      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
-    } else if (mode.value === 'terrain') {
-      const cell = pickGrid(scene, map.value.grid);
-      if (!cell) return;
-      if (previewMesh) previewMesh.setEnabled(false);
-      updateTerrainPreview(cell);
-      if (isPaintingTerrain) applyTerrainBrush(cell);
-    } else {
-      if (previewMesh) previewMesh.setEnabled(false);
-      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
-    }
-  }, PointerEventTypes.POINTERMOVE);
-
-  // Place/Remove/Path on click
-  scene.onPointerObservable.add((pointerInfo) => {
-    if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) return;
-    if (mode.value === 'place') {
-      const point = pickWorld(scene);
-      if (!point) return;
-      const obj = createObjectFromCatalog(point);
-      map.value.objects.push(obj);
-      selectedObjectId.value = obj.id;
-      renderAll();
-    } else if (mode.value === 'select') {
-      const picked = pickSceneObject(scene);
-      selectedObjectId.value = picked?.objectId || null;
-      renderAll();
-    } else if (mode.value === 'move') {
-      const selected = getSelectedObject();
-      const point = pickWorld(scene);
-      if (!selected || !point) return;
-      selected.transform.position.x = snapValue(point.x);
-      selected.transform.position.y = Number(point.y || 0);
-      selected.transform.position.z = snapValue(point.z);
-      renderAll();
-    } else if (mode.value === 'rotate') {
-      const selected = getSelectedObject();
-      if (!selected) return;
-      selected.transform.rotation.y = (Number(selected.transform.rotation.y) || 0) + Math.PI / 8;
-      renderAll();
-    } else if (mode.value === 'scale') {
-      const selected = getSelectedObject();
-      if (!selected) return;
-      selected.transform.scale.x = Math.min(30, Number(selected.transform.scale.x || 1) * 1.1);
-      selected.transform.scale.y = Math.min(30, Number(selected.transform.scale.y || 1) * 1.1);
-      selected.transform.scale.z = Math.min(30, Number(selected.transform.scale.z || 1) * 1.1);
-      renderAll();
-    } else if (mode.value === 'remove') {
-      const picked = pickSceneObject(scene);
-      const removeId = picked?.objectId || selectedObjectId.value;
-      if (!removeId) return;
-      const idx = map.value.objects.findIndex(obj => obj.id === removeId);
-      if (idx >= 0) map.value.objects.splice(idx, 1);
-      if (selectedObjectId.value === removeId) selectedObjectId.value = null;
-      renderAll();
-    } else if (mode.value === 'path') {
-      const cell = pickGrid(scene, map.value.grid);
-      if (!cell) return;
-      if (!map.value.path) map.value.path = { waypoints: [] };
-      if (!Array.isArray(map.value.path.waypoints)) map.value.path.waypoints = [];
-      const wps = map.value.path.waypoints;
-      const last = wps[wps.length - 1];
-      if (last && last.col === cell.col && last.row === cell.row) {
-        // toggle remove last if clicking same cell
-        wps.pop();
+  engine.runRenderLoop(() => state.scene.render());
+  state.scene.onPointerObservable.add((pointerInfo) => {
+    if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
+      if (mode.value === 'place') {
+        terrainBrushMesh?.setEnabled(false);
+        updatePlacementPreview();
+      } else if (mode.value === 'terrain') {
+        previewMesh?.setEnabled(false);
+        const cell = pickGrid(state.scene, map.value.grid);
+        if (!cell) return;
+        updateTerrainPreview(cell);
+        if (isPaintingTerrain) applyTerrainBrush(cell);
       } else {
-        wps.push({ col: cell.col, row: cell.row });
+        previewMesh?.setEnabled(false);
+        terrainBrushMesh?.setEnabled(false);
       }
-      drawPath(scene, map.value.grid, wps, map.value.heightmap);
-    } else if (mode.value === 'terrain') {
-      const cell = pickGrid(scene, map.value.grid);
-      if (!cell) return;
-      pickFlattenHeight(cell);
-      applyTerrainBrush(cell);
-      isPaintingTerrain = true;
     }
-  }, PointerEventTypes.POINTERDOWN);
-
-  scene.onPointerObservable.add((pointerInfo) => {
+    if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+      if (mode.value === 'place') {
+        const point = pickWorld(state.scene);
+        if (!point) return;
+        const obj = createObjectAtPoint(point);
+        if (!canPlaceObject(obj, map.value.objects || [])) {
+          status.value = 'Место занято';
+          setTimeout(() => (status.value = ''), 1200);
+          return;
+        }
+        map.value.objects = [...(map.value.objects || []), obj];
+        selectedObjectId.value = obj.id;
+        renderAll();
+      } else if (mode.value === 'select') {
+        selectedObjectId.value = pickSceneObject(state.scene)?.objectId || null;
+        renderAll();
+      } else if (mode.value === 'move') {
+        const selected = getSelectedObject();
+        const point = pickWorld(state.scene);
+        if (!selected || !point) return;
+        const next = {
+          ...selected,
+          transform: {
+            ...selected.transform,
+            position: { x: snapValue(point.x), y: Number(point.y || 0), z: snapValue(point.z) }
+          }
+        };
+        if (!canPlaceObject(next, map.value.objects || [], selected.id)) {
+          status.value = 'Место занято';
+          setTimeout(() => (status.value = ''), 1200);
+          return;
+        }
+        selected.transform = next.transform;
+        renderAll();
+      } else if (mode.value === 'rotate') {
+        const selected = getSelectedObject();
+        if (!selected) return;
+        selected.transform.rotation.y = (Number(selected.transform.rotation.y) || 0) + Math.PI / 8;
+        renderAll();
+      } else if (mode.value === 'scale') {
+        const selected = getSelectedObject();
+        if (!selected) return;
+        const next = {
+          ...selected,
+          transform: {
+            ...selected.transform,
+            scale: {
+              x: Math.min(30, Number(selected.transform.scale.x || 1) * 1.1),
+              y: Math.min(30, Number(selected.transform.scale.y || 1) * 1.1),
+              z: Math.min(30, Number(selected.transform.scale.z || 1) * 1.1)
+            }
+          }
+        };
+        if (!canPlaceObject(next, map.value.objects || [], selected.id)) return;
+        selected.transform = next.transform;
+        renderAll();
+      } else if (mode.value === 'remove') {
+        const removeId = pickSceneObject(state.scene)?.objectId || selectedObjectId.value;
+        if (!removeId) return;
+        map.value.objects = (map.value.objects || []).filter((obj) => obj.id !== removeId);
+        if (selectedObjectId.value === removeId) selectedObjectId.value = null;
+        renderAll();
+      } else if (mode.value === 'terrain') {
+        const cell = pickGrid(state.scene, map.value.grid);
+        if (!cell) return;
+        detachCameraForBrush();
+        flattenTargetHeight.value = sampleHeight(map.value.heightmap, map.value.grid, cell.col, cell.row, true);
+        applyTerrainBrush(cell);
+        isPaintingTerrain = true;
+      }
+    }
     if (pointerInfo.type === PointerEventTypes.POINTERUP) {
       isPaintingTerrain = false;
-    }
-  }, PointerEventTypes.POINTERUP);
-
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (previewMesh) previewMesh.setEnabled(false);
-      if (terrainBrushMesh) terrainBrushMesh.setEnabled(false);
+      restoreCameraAfterBrush();
     }
   });
 }
 
-async function doSave() {
+function selectAsset(asset: AssetRecord): void {
+  selectedAsset.value = asset;
+  mode.value = 'place';
+}
+
+function toggleGrid(): void {
+  const state = babylonRef.value;
+  if (state) setGridVisible(state.scene, showGrid.value);
+}
+
+function pickFlattenHeightFromLast(): void {
+  if (!lastTerrainCell.value) return;
+  flattenTargetHeight.value = sampleHeight(map.value.heightmap, map.value.grid, lastTerrainCell.value.col, lastTerrainCell.value.row, true);
+}
+
+async function doSave(): Promise<void> {
   saving.value = true;
   status.value = '';
   try {
     map.value.heightmap = normalizeHeightmap(map.value.grid, map.value.heightmap);
-    map.value.terrain = {
-      ...(map.value.terrain || {}),
-      heightmap: map.value.heightmap
-    };
-    if (!Array.isArray(map.value.objects)) map.value.objects = [];
+    map.value.terrain = { ...(map.value.terrain || {}), heightmap: map.value.heightmap };
+    map.value.objects = Array.isArray(map.value.objects) ? map.value.objects : [];
+    map.value.version = Number(map.value.version || 1) + 1;
     await saveMap(map.value);
     status.value = 'Сохранено';
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    console.error(error);
     status.value = 'Ошибка сохранения';
   } finally {
     saving.value = false;
-    setTimeout(() => (status.value = ''), 1200);
+    setTimeout(() => (status.value = ''), 1400);
   }
 }
 
 onMounted(() => init());
 
 onBeforeUnmount(() => {
-  if (engineRef.value) engineRef.value.dispose();
+  restoreCameraAfterBrush();
+  engineRef.value?.dispose();
 });
 </script>
 
@@ -574,40 +429,43 @@ onBeforeUnmount(() => {
   <div class="map-editor">
     <header class="toolbar">
       <div class="toolbar-left">
-        <div class="brand">Редактор карты</div>
+        <div class="brand">Редактор D&D карты</div>
+        <div class="grid-pill">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
       </div>
       <div class="toolbar-right">
-        <div class="grid-pill">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
         <button class="btn primary" :disabled="saving" @click="doSave">Сохранить</button>
         <span class="status" :class="{ success: status === 'Сохранено' }">{{ status }}</span>
       </div>
     </header>
 
     <div class="workspace">
-      <aside class="side-panel">
+      <aside class="side-panel" @pointerdown.stop>
         <section class="panel-block">
           <div class="section-title">Инструменты</div>
           <div class="tool-grid">
             <label v-for="opt in modeOptions" :key="opt" :class="['tool-button', mode === opt ? 'active' : '']">
-              <input type="radio" :value="opt" v-model="mode" />
+              <input v-model="mode" type="radio" :value="opt" />
               <span>{{ modeLabels[opt] }}</span>
             </label>
           </div>
 
           <div class="tool-section">
-            <div class="section-subtitle">Свободное размещение</div>
+            <div class="section-subtitle">Размещение</div>
             <label class="inline-check">
-              <input type="checkbox" v-model="snapEnabled" />
+              <input v-model="snapEnabled" type="checkbox" />
               <span>Snap к шагу</span>
+            </label>
+            <label class="inline-check">
+              <input v-model="showGrid" type="checkbox" @change="toggleGrid" />
+              <span>Показывать debug-сетку</span>
             </label>
             <label class="field">
               <span>Шаг snap</span>
-              <input type="number" min="0.1" step="0.1" v-model.number="snapStep" />
+              <input v-model.number="snapStep" type="number" min="0.1" step="0.1" />
             </label>
-            <div class="pill muted">
-              Выбрано: {{ selectedObjectId || 'нет объекта' }}
-            </div>
-            <p class="hint">Place ставит объект в точку мира. Select выбирает объект, Move переносит, Rotate поворачивает, Scale увеличивает.</p>
+            <div class="pill muted">Выбрано: {{ selectedObjectId || 'нет объекта' }}</div>
+            <div class="pill muted">Ассет: {{ selectedAsset?.name || 'не выбран' }}</div>
+            <p class="hint">Выберите шаблон или загруженный ассет, затем инструмент “Разместить”. Красный preview означает пересечение.</p>
           </div>
 
           <div v-if="mode === 'terrain'" class="tool-section">
@@ -618,38 +476,29 @@ onBeforeUnmount(() => {
                 <option value="raise">Поднять</option>
                 <option value="lower">Опустить</option>
                 <option value="smooth">Сгладить</option>
-                <option value="flatten">Выровнять по высоте</option>
+                <option value="flatten">Выровнять</option>
               </select>
             </label>
             <label class="field slider">
-              <div class="field-top">
-                <span>Радиус</span>
-                <span class="value">{{ brushRadius.toFixed(1) }} яч.</span>
-              </div>
-              <input type="range" min="0" max="5" step="0.5" v-model.number="brushRadius" />
+              <span>Радиус: {{ brushRadius.toFixed(1) }} яч.</span>
+              <input v-model.number="brushRadius" type="range" min="0.5" max="5" step="0.5" />
             </label>
             <label class="field slider">
-              <div class="field-top">
-                <span>Сила</span>
-                <span class="value">{{ brushStrength.toFixed(2) }}</span>
-              </div>
-              <input type="range" min="0.05" max="1.2" step="0.05" v-model.number="brushStrength" />
+              <span>Сила: {{ brushStrength.toFixed(2) }}</span>
+              <input v-model.number="brushStrength" type="range" min="0.05" max="1.2" step="0.05" />
             </label>
-            <p class="hint">Зажмите мышь и тяните для изменения рельефа. Постройки требуют ровных площадок.</p>
-            <div class="pill muted" style="margin-top:6px;">Высота под курсором: {{ cursorHeight.toFixed(2) }}</div>
-            <div class="pill muted" style="margin-top:6px;">
-              Высота выравнивания: {{ flattenTargetHeight === null ? 'авто' : flattenTargetHeight.toFixed(2) }}
-            </div>
+            <p class="hint">При рисовании камера временно отключается, чтобы площадка не вращалась.</p>
+            <div class="pill muted">Высота: {{ cursorHeight.toFixed(2) }}</div>
             <div class="button-row">
-              <button class="btn ghost" @click="pickFlattenHeightFromLast" :disabled="!lastTerrainCell">Взять высоту</button>
+              <button class="btn ghost" :disabled="!lastTerrainCell" @click="pickFlattenHeightFromLast">Взять высоту</button>
               <button class="btn ghost" @click="flattenTargetHeight = null">Сбросить</button>
             </div>
           </div>
         </section>
 
         <section class="panel-block">
-          <div class="section-title">Объекты</div>
-          <AssetManager />
+          <div class="section-title">Загруженные модели</div>
+          <AssetManager :selected-asset-id="selectedAsset?.id" @asset-selected="selectAsset" />
         </section>
       </aside>
 
@@ -658,19 +507,17 @@ onBeforeUnmount(() => {
           <canvas ref="canvasRef"></canvas>
         </div>
         <div class="catalog">
-          <div
+          <button
             v-for="item in catalog"
             :key="item.key"
             class="catalog-card"
-            :class="{ active: selectedKey === item.key }"
-            @click="selectedKey = item.key"
+            :class="{ active: !selectedAsset && selectedKey === item.key }"
+            @click="selectedAsset = null; selectedKey = item.key; mode = 'place'"
           >
-            <div class="card-header">
-              <div class="card-title">{{ item.label }}</div>
-              <div class="card-meta">{{ item.size.w }}x{{ item.size.h }} · высота {{ item.height }}</div>
-            </div>
+            <div class="card-title">{{ item.label }}</div>
+            <div class="card-meta">{{ item.size.w }}x{{ item.size.h }} · высота {{ item.height }}</div>
             <div class="swatch" :style="{ background: `rgb(${Math.floor(item.color.r*255)}, ${Math.floor(item.color.g*255)}, ${Math.floor(item.color.b*255)})` }"></div>
-          </div>
+          </button>
         </div>
       </main>
     </div>
@@ -684,316 +531,203 @@ onBeforeUnmount(() => {
   height: 100%;
   background: #0b1021;
   color: #e5e7eb;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
 }
-
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 12px 16px;
-  gap: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(8px);
-  position: sticky;
-  top: 0;
-  z-index: 3;
+  background: rgba(15, 23, 42, 0.96);
 }
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  color: #f8fafc;
-}
-
+.toolbar-left,
 .toolbar-right {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-
-.grid-pill {
-  padding: 6px 10px;
+.brand {
+  font-weight: 800;
+  color: #f8fafc;
+}
+.grid-pill,
+.pill {
+  padding: 7px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
   color: #cbd5e1;
   font-size: 13px;
 }
-
-.btn {
-  border: none;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.2s ease;
-}
-
-.btn.ghost {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e5e7eb;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.btn.primary {
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-  color: #f8fafc;
-  box-shadow: 0 10px 25px rgba(59, 130, 246, 0.25);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.status {
-  min-width: 60px;
-  font-size: 13px;
-  color: #cbd5e1;
-}
-
-.status.success {
-  color: #22c55e;
-}
-
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 300px 1fr;
+  min-height: 0;
   gap: 12px;
   padding: 12px;
-  overflow: hidden;
 }
-
 .side-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: auto;
 }
-
+.panel-block,
+.stage {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
 .panel-block {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
   padding: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
 }
-
 .section-title {
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #e2e8f0;
+  margin-bottom: 10px;
+  font-weight: 800;
 }
-
 .section-subtitle {
   margin: 14px 0 10px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   color: #cbd5e1;
 }
-
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-
 .tool-button {
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   min-height: 38px;
-  border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
   color: #cbd5e1;
-  font-size: 13px;
-  font-weight: 700;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  font-size: 13px;
+  font-weight: 750;
 }
-
 .tool-button input {
   display: none;
 }
-
 .tool-button.active {
   border-color: rgba(96, 165, 250, 0.9);
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.38), rgba(14, 165, 233, 0.16));
-  color: #f8fafc;
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.16);
+  background: rgba(59, 130, 246, 0.25);
+  color: #fff;
 }
-
-.tool-section {
-  margin-top: 12px;
-  padding-top: 2px;
-}
-
-.field {
+.field,
+.inline-check {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 10px;
   color: #cbd5e1;
 }
-
-.field select,
-.field input[type="number"] {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: #e5e7eb;
-  box-sizing: border-box;
-}
-
 .inline-check {
-  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  color: #cbd5e1;
-  font-size: 13px;
 }
-
-.field.slider input {
-  width: 100%;
+.field input,
+.field select {
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
 }
-
-.field-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 13px;
-}
-
-.field .value {
-  color: #94a3b8;
-}
-
 .hint {
-  font-size: 12px;
   color: #94a3b8;
-  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.pill.muted {
-  color: #cbd5e1;
-  font-size: 13px;
-}
-
 .button-row {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
-
 .stage {
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
+  min-width: 0;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
-
 .canvas-wrap {
   flex: 1;
-  position: relative;
-  background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.08), transparent 25%), #0b1021;
+  min-height: 360px;
+  background: #15162a;
 }
-
 .canvas-wrap canvas {
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
 }
-
 .catalog {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
   padding: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-
 .catalog-card {
   padding: 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.1s ease, background-color 0.15s ease;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e5e7eb;
+  text-align: left;
 }
-
 .catalog-card.active {
   border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: 0 12px 35px rgba(59, 130, 246, 0.15);
+  background: rgba(59, 130, 246, 0.14);
 }
-
-.card-header {
-  flex: 1;
-}
-
 .card-title {
-  font-weight: 600;
+  font-weight: 800;
+}
+.card-meta {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.swatch {
+  margin-top: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 750;
+}
+.btn.primary {
+  background: #2563eb;
+  color: #fff;
+}
+.btn.ghost {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.07);
   color: #e5e7eb;
 }
-
-.card-meta {
-  font-size: 12px;
-  color: #94a3b8;
+.btn:disabled {
+  opacity: 0.55;
 }
-
-.swatch {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35);
+.status {
+  min-width: 96px;
+  color: #cbd5e1;
+  font-size: 13px;
 }
-
-@media (max-width: 1024px) {
+.status.success {
+  color: #22c55e;
+}
+@media (max-width: 980px) {
   .workspace {
     grid-template-columns: 1fr;
-  }
-
-  .side-panel {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .panel-block {
-    flex: 1;
-    min-width: 240px;
   }
 }
 </style>
