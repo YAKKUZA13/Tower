@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { PointerEventTypes, type ArcRotateCamera, type Engine, type Mesh, type Scene } from 'babylonjs';
-import { getMap, saveMap, type AssetRecord } from '../services/api';
+import type { AssetRecord } from '../services/api';
 import type { GridData, MapDocument, PlacedObject, Vector3Data } from '../domain/map';
 import type { BrushMode, EditorTool } from '../domain/editor';
 import { createEngine, createScene, gridToWorld, makePreviewMesh, makeTerrainBrushMesh, sampleHeight, setGridVisible, updateFreePlacementPreview, updateHeightmapTexture } from '../babylon/createScene';
 import { addPlacedObject } from '../babylon/object-renderer';
 import { pickGrid, pickSceneObject, pickWorld } from '../babylon/picking';
 import { canPlaceObject } from '../domain/placement';
+import { useMapStore } from '../stores/map-store';
 import AssetManager from './AssetManager.vue';
 
 interface BabylonState {
@@ -33,6 +34,7 @@ const engineRef = shallowRef<Engine | null>(null);
 const babylonRef = shallowRef<BabylonState | null>(null);
 const saving = ref(false);
 const status = ref('');
+const mapStore = useMapStore();
 const selectedObjectId = ref<string | null>(null);
 const selectedAsset = ref<AssetRecord | null>(null);
 const mode = ref<EditorTool>('select');
@@ -261,7 +263,8 @@ function restoreCameraAfterBrush(): void {
 
 async function init(): Promise<void> {
   try {
-    const data = await getMap();
+    await mapStore.loadMap();
+    const data = mapStore.document;
     const grid = data?.grid || map.value.grid;
     const heightmap = normalizeHeightmap(grid, data?.heightmap);
     map.value = {
@@ -408,7 +411,7 @@ async function doSave(): Promise<void> {
     map.value.terrain = { ...(map.value.terrain || {}), heightmap: map.value.heightmap };
     map.value.objects = Array.isArray(map.value.objects) ? map.value.objects : [];
     map.value.version = Number(map.value.version || 1) + 1;
-    await saveMap(map.value);
+    await mapStore.saveCurrentMap(map.value);
     status.value = 'Сохранено';
   } catch (error) {
     console.error(error);
