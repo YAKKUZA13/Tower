@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import LoginForm from './components/LoginForm.vue';
-import MapEditor from './components/MapEditor.vue';
-import Play from './components/Play.vue';
+// Тяжёлые 3D-компоненты грузятся лениво (Babylon.js выносится в отдельный чанк).
+const MapEditor = defineAsyncComponent(() => import('./components/MapEditor.vue'));
+const Play = defineAsyncComponent(() => import('./components/Play.vue'));
 import { useSessionSocket } from './composables/use-session-socket';
 import { useAuthStore } from './stores/auth-store';
 import { useGameSessionStore } from './stores/game-session-store';
