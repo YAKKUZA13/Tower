@@ -1,10 +1,9 @@
 import crypto from 'crypto';
-import type { GridData, MapDocument } from '../types/map.js';
+import type { BaseDef, MapDocument, Waypoint } from '../types/map.js';
 
 const DEFAULT_GRID = { cols: 32, rows: 18, cellSize: 1.5 };
 
 type MapInput = Partial<MapDocument> & Record<string, any>;
-type LegacyTower = Record<string, any>;
 
 function valueNoise(x: number, y: number, seed = 1): number {
   const h = Math.sin(seed + x * 127.1 + y * 311.7) * 43758.5453;
@@ -88,39 +87,10 @@ export function createDefaultMap(): MapDocument {
       version: 1
     },
     path: { waypoints: [] },
-    base: { hp: 20 },
-    waves: [],
-    towers: []
-  };
-}
-
-export function towerToPlacedObject(tower: LegacyTower, grid: GridData) {
-  const size = tower?.size || { w: 1, h: 1 };
-  const cellSize = Number(grid?.cellSize) || 1;
-  const col = Number(tower?.col) || 0;
-  const row = Number(tower?.row) || 0;
-  const x = (col + size.w / 2) * cellSize - ((grid?.cols || 1) * cellSize) / 2;
-  const z = (row + size.h / 2) * cellSize - ((grid?.rows || 1) * cellSize) / 2;
-  return {
-    id: String(tower?.id || crypto.randomUUID()),
-    type: String(tower?.type || 'object'),
-    primitiveType: 'box',
-    transform: {
-      position: { x, y: 0, z },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: {
-        x: Math.max(0.1, Number(size.w || 1) * cellSize),
-        y: Math.max(0.1, Number(tower?.height || 2)),
-        z: Math.max(0.1, Number(size.h || 1) * cellSize)
-      }
-    },
-    tags: [String(tower?.type || 'object')],
-    properties: {
-      legacyTower: true,
-      level: Math.max(1, Number(tower?.level || 1)),
-      color: tower?.color || { r: 0.6, g: 0.6, b: 0.6 },
-      props: tower?.props || {}
-    }
+    spawnPoint: { col: 0, row: 0 },
+    base: { col: DEFAULT_GRID.cols - 1, row: DEFAULT_GRID.rows - 1, hp: 20 },
+    startingGold: 100,
+    waves: []
   };
 }
 
@@ -145,7 +115,12 @@ export function normalizeMapDocument(input: MapInput = {}): MapDocument {
       tags: Array.isArray(obj.tags) ? obj.tags : [],
       properties: obj.properties || {}
     }))
-    : (Array.isArray(input.towers) ? input.towers.map(tower => towerToPlacedObject(tower as LegacyTower, grid)) : []);
+    : [];
+
+  const lastCol = Math.max(0, grid.cols - 1);
+  const lastRow = Math.max(0, grid.rows - 1);
+  const spawnPoint: Waypoint = clampWaypoint(input.spawnPoint, lastCol, lastRow, { col: 0, row: 0 });
+  const base: BaseDef = normalizeBase(input.base, lastCol, lastRow);
 
   return {
     ...fallback,
@@ -161,9 +136,35 @@ export function normalizeMapDocument(input: MapInput = {}): MapDocument {
     objects,
     lighting: { ...fallback.lighting, ...(input.lighting || {}) },
     metadata: { ...fallback.metadata, ...(input.metadata || {}) },
-    towers: Array.isArray(input.towers) ? input.towers : [],
-    path: input.path || { waypoints: [] },
-    base: input.base || { hp: 20 },
+    path: normalizePath(input.path, lastCol, lastRow),
+    spawnPoint,
+    base,
+    startingGold: Math.max(0, Number(input.startingGold) || 100),
     waves: Array.isArray(input.waves) ? input.waves : []
   };
+}
+
+function clampWaypoint(input: any, maxCol: number, maxRow: number, fallback: Waypoint): Waypoint {
+  const col = clampInt(input?.col, 0, maxCol, fallback.col);
+  const row = clampInt(input?.row, 0, maxRow, fallback.row);
+  return { col, row };
+}
+
+function normalizeBase(input: any, maxCol: number, maxRow: number): BaseDef {
+  return {
+    col: clampInt(input?.col, 0, maxCol, maxCol),
+    row: clampInt(input?.row, 0, maxRow, maxRow),
+    hp: Math.max(1, Number(input?.hp) || 20)
+  };
+}
+
+function normalizePath(input: any, maxCol: number, maxRow: number): { waypoints: Waypoint[] } {
+  const raw = Array.isArray(input?.waypoints) ? input.waypoints : [];
+  return { waypoints: raw.map((wp: any) => clampWaypoint(wp, maxCol, maxRow, { col: 0, row: 0 })) };
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
 }

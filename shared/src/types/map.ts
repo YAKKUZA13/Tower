@@ -3,6 +3,8 @@
  * См. ADR-3 в docs/adr.md.
  */
 
+import type { Wave } from './td.js';
+
 export interface Vector3Data {
   x: number;
   y: number;
@@ -42,6 +44,17 @@ export interface GridData {
   cellSize: number;
 }
 
+export interface Waypoint {
+  col: number;
+  row: number;
+}
+
+export interface BaseDef {
+  col: number;
+  row: number;
+  hp: number;
+}
+
 export interface MapDocument {
   version: number;
   grid: GridData;
@@ -50,9 +63,10 @@ export interface MapDocument {
   objects?: PlacedObject[];
   lighting?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
-  // TD-поля (типизируются в Фазе 0.3):
-  towers: unknown[];
-  path: { waypoints: Array<{ col: number; row: number }> };
-  base: { hp: number };
-  waves: unknown[];
+  // ── TD level definition (поле боя) ──
+  path: { waypoints: Waypoint[] };
+  spawnPoint: Waypoint;
+  base: BaseDef;
+  startingGold: number;
+  waves: Wave[];
 }

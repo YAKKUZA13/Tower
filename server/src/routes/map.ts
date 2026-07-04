@@ -122,58 +122,46 @@ const mapRoutes: FastifyPluginAsync = async (app) => {
               }
             }
           },
+          spawnPoint: {
+            type: 'object',
+            required: ['col', 'row'],
+            properties: {
+              col: { type: 'integer', minimum: 0 },
+              row: { type: 'integer', minimum: 0 }
+            }
+          },
           base: {
             type: 'object',
-            required: [],
+            required: ['col', 'row', 'hp'],
             properties: {
+              col: { type: 'integer', minimum: 0 },
+              row: { type: 'integer', minimum: 0 },
               hp: { type: 'integer', minimum: 1, maximum: 100000 }
             }
           },
+          startingGold: { type: 'integer', minimum: 0, maximum: 1000000 },
           waves: {
             type: 'array',
             items: {
               type: 'object',
-              required: ['count', 'interval', 'type', 'hp', 'speed', 'reward'],
+              required: ['index', 'groups'],
               properties: {
-                count: { type: 'integer', minimum: 1, maximum: 10000 },
-                interval: { type: 'number', minimum: 0.01, maximum: 3600 },
-                type: { type: 'string' },
-                hp: { type: 'number', minimum: 1, maximum: 1e9 },
-                speed: { type: 'number', minimum: 0.01, maximum: 1000 },
-                reward: { type: 'integer', minimum: 0, maximum: 1e9 }
-              }
-            }
-          },
-          towers: {
-            type: 'array',
-            items: {
-              type: 'object',
-              required: ['id', 'type', 'col', 'row', 'level'],
-              properties: {
-                id: { type: 'string' },
-                type: { type: 'string' },
-                col: { type: 'integer', minimum: 0 },
-                row: { type: 'integer', minimum: 0 },
-                level: { type: 'integer', minimum: 1 },
-                size: {
-                  type: 'object',
-                  required: [],
-                  properties: {
-                    w: { type: 'integer', minimum: 1, maximum: 1000 },
-                    h: { type: 'integer', minimum: 1, maximum: 1000 }
+                index: { type: 'integer', minimum: 0 },
+                rewardBonus: { type: 'integer', minimum: 0, maximum: 1000000 },
+                isBoss: { type: 'boolean' },
+                groups: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['enemyTypeId', 'count', 'interval', 'startDelay'],
+                    properties: {
+                      enemyTypeId: { type: 'string', minLength: 1 },
+                      count: { type: 'integer', minimum: 1, maximum: 10000 },
+                      interval: { type: 'number', minimum: 0.01, maximum: 3600 },
+                      startDelay: { type: 'number', minimum: 0, maximum: 3600 }
+                    }
                   }
-                },
-                height: { type: 'number', minimum: 0.1, maximum: 10000 },
-                color: {
-                  type: 'object',
-                  required: [],
-                  properties: {
-                    r: { type: 'number', minimum: 0, maximum: 1 },
-                    g: { type: 'number', minimum: 0, maximum: 1 },
-                    b: { type: 'number', minimum: 0, maximum: 1 }
-                  }
-                },
-                props: { type: 'object', additionalProperties: true }
+                }
               }
             }
           },

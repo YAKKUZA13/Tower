@@ -77,9 +77,10 @@ const map = ref<MapDocument>({
   objects: [],
   lighting: { timeOfDay: 'day', fog: 0.02 },
   metadata: { name: 'Новая карта', setting: '', version: 1 },
-  towers: [],
   path: { waypoints: [] },
-  base: { hp: 20 },
+  spawnPoint: { col: 0, row: 0 },
+  base: { col: 31, row: 17, hp: 20 },
+  startingGold: 100,
   waves: []
 });
 
@@ -271,7 +272,10 @@ async function init(): Promise<void> {
       terrain: { ...(data?.terrain || {}), heightmap },
       objects: Array.isArray(data?.objects) ? data.objects : [],
       path: data?.path || { waypoints: [] },
-      towers: Array.isArray(data?.towers) ? data.towers : []
+      spawnPoint: data?.spawnPoint || { col: 0, row: 0 },
+      base: data?.base || { col: 31, row: 17, hp: 20 },
+      startingGold: Number(data?.startingGold) || 100,
+      waves: Array.isArray(data?.waves) ? data.waves : []
     };
   } catch (error) {
     console.error(error);
