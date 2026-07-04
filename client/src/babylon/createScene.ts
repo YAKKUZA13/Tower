@@ -5,7 +5,6 @@ import {
   Engine,
   HemisphericLight,
   Constants,
-  Effect,
   Mesh,
   MeshBuilder,
   RawTexture,
@@ -20,7 +19,11 @@ import {
   VertexBuffer,
   VertexData
 } from 'babylonjs';
-import type { GridData, MapDocument, PlacedObject, Vector3Data } from '../domain/map';
+import type { GridData, MapDocument, PlacedObject } from '../domain/map';
+import { gridToWorld, worldToGrid, sampleHeight, computeHeightRange } from './terrain/terrain-math';
+import { ensureTerrainShaders } from './terrain/terrain-shaders';
+// re-export pure geometry helpers for consumers (MapEditor etc.)
+export { gridToWorld, worldToGrid, sampleHeight } from './terrain/terrain-math';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
 
@@ -43,46 +46,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   return engine;
 }
 
-export function gridToWorld(grid: GridData, col: number, row: number): Vector3 {
-  const x = (col + 0.5) * grid.cellSize - (grid.cols * grid.cellSize) / 2;
-  const z = (row + 0.5) * grid.cellSize - (grid.rows * grid.cellSize) / 2;
-  return new Vector3(x, 0, z);
-}
-
-export function worldToGrid(grid: GridData, point: Vector3Data): { col: number; row: number } {
-  const halfW = (grid.cols * grid.cellSize) / 2;
-  const halfH = (grid.rows * grid.cellSize) / 2;
-  return {
-    col: (point.x + halfW) / grid.cellSize,
-    row: (point.z + halfH) / grid.cellSize
-  };
-}
-
-export function sampleHeight(heightmap: number[][] | undefined | null, grid: GridData, col: number, row: number, bilinear = false): number {
-  const maxRow = Math.max(0, grid.rows - 1);
-  const maxCol = Math.max(0, grid.cols - 1);
-  if (!bilinear) {
-    const rIdx = Math.max(0, Math.min(maxRow, Math.round(row)));
-    const cIdx = Math.max(0, Math.min(maxCol, Math.round(col)));
-    const val = Number(heightmap?.[rIdx]?.[cIdx]);
-    return Number.isFinite(val) ? val : 0;
-  }
-  const clampedRow = Math.max(0, Math.min(maxRow, row));
-  const clampedCol = Math.max(0, Math.min(maxCol, col));
-  const r0 = Math.floor(clampedRow);
-  const r1 = Math.min(maxRow, Math.ceil(clampedRow));
-  const c0 = Math.floor(clampedCol);
-  const c1 = Math.min(maxCol, Math.ceil(clampedCol));
-  const fr = clampedRow - r0;
-  const fc = clampedCol - c0;
-  const h00 = Number(heightmap?.[r0]?.[c0]) || 0;
-  const h10 = Number(heightmap?.[r1]?.[c0]) || 0;
-  const h01 = Number(heightmap?.[r0]?.[c1]) || 0;
-  const h11 = Number(heightmap?.[r1]?.[c1]) || 0;
-  const h0 = h00 * (1 - fc) + h01 * fc;
-  const h1 = h10 * (1 - fc) + h11 * fc;
-  return h0 * (1 - fr) + h1 * fr;
-}
+// gridToWorld / worldToGrid / sampleHeight / computeHeightRange РІС‹РЅРµСЃРµРЅС‹ РІ ./terrain/terrain-math
 
 function heightToColor(height: number, minH: number, maxH: number): Color3 {
   const range = Math.max(1e-3, maxH - minH);
@@ -93,21 +57,7 @@ function heightToColor(height: number, minH: number, maxH: number): Color3 {
   return new Color3(0.72, 0.74, 0.72);
 }
 
-function computeHeightRange(heightmap: number[][] | undefined): { minH: number; maxH: number } {
-  let minH = Infinity;
-  let maxH = -Infinity;
-  for (const row of heightmap || []) {
-    for (const raw of row || []) {
-      const value = Number(raw);
-      if (!Number.isFinite(value)) continue;
-      minH = Math.min(minH, value);
-      maxH = Math.max(maxH, value);
-    }
-  }
-  if (minH === Infinity || maxH === -Infinity) return { minH: 0, maxH: 1 };
-  if (minH === maxH) return { minH, maxH: minH + 1 };
-  return { minH, maxH };
-}
+// computeHeightRange РІС‹РЅРµСЃРµРЅ РІ ./terrain/terrain-math
 
 function applyHeightmapToGroundCpu(ground: Mesh, grid: GridData, heightmap: number[][] = []): void {
   const positions = ground.getVerticesData(VertexBuffer.PositionKind);
@@ -141,90 +91,8 @@ function applyHeightmapToGroundCpu(ground: Mesh, grid: GridData, heightmap: numb
   ground.refreshBoundingInfo();
 }
 
-function ensureTerrainShaders(): void {
-  if (Effect.ShadersStore.terrainVertexShader) return;
-  Effect.ShadersStore.terrainVertexShader = `
-    precision highp float;
-    attribute vec3 position;
-    uniform mat4 worldViewProjection;
-    uniform vec2 groundSize;
-    uniform vec2 heightmapSize;
-    uniform vec2 heightStep;
-    uniform sampler2D heightmapSampler;
-    uniform float heightMin;
-    uniform float heightMax;
-    varying vec3 vNormal;
-    varying float vHeight;
+// ensureTerrainShaders moved to ./terrain/terrain-shaders
 
-    vec2 worldToUv(vec2 worldXZ) {
-      return clamp(worldXZ / groundSize + 0.5, vec2(0.0), vec2(1.0));
-    }
-
-    float sampleHeight(vec2 uv) {
-      float h = texture2D(heightmapSampler, uv).r;
-      return mix(heightMin, heightMax, h);
-    }
-
-    vec3 computeNormal(vec2 uv) {
-      vec2 texel = vec2(1.0) / heightmapSize;
-      float hL = sampleHeight(uv - vec2(texel.x, 0.0));
-      float hR = sampleHeight(uv + vec2(texel.x, 0.0));
-      float hD = sampleHeight(uv - vec2(0.0, texel.y));
-      float hU = sampleHeight(uv + vec2(0.0, texel.y));
-      float dhdx = (hR - hL) / max(0.001, 2.0 * heightStep.x);
-      float dhdz = (hU - hD) / max(0.001, 2.0 * heightStep.y);
-      return normalize(vec3(-dhdx, 1.0, -dhdz));
-    }
-
-    void main() {
-      vec2 uv = worldToUv(position.xz);
-      float h = sampleHeight(uv);
-      vec3 displaced = vec3(position.x, h, position.z);
-      vNormal = computeNormal(uv);
-      vHeight = h;
-      gl_Position = worldViewProjection * vec4(displaced, 1.0);
-    }
-  `;
-  Effect.ShadersStore.terrainFragmentShader = `
-    precision highp float;
-    uniform vec3 lightDir;
-    uniform vec3 lightSky;
-    uniform vec3 lightGround;
-    uniform float lightIntensity;
-    uniform float heightMin;
-    uniform float heightMax;
-    varying vec3 vNormal;
-    varying float vHeight;
-
-    vec3 heightToColor(float height, float minH, float maxH) {
-      float range = max(1e-3, maxH - minH);
-      float t = clamp((height - minH) / range, 0.0, 1.0);
-      if (t < 0.25) {
-        float k = t / 0.25;
-        return vec3(mix(0.10, 0.15, k), mix(0.12, 0.22, k), mix(0.08, 0.12, k));
-      }
-      if (t < 0.55) {
-        float k = (t - 0.25) / 0.30;
-        return vec3(mix(0.15, 0.35, k), mix(0.22, 0.65, k), mix(0.12, 0.30, k));
-      }
-      if (t < 0.8) {
-        float k = (t - 0.55) / 0.25;
-        return vec3(mix(0.35, 0.55, k), mix(0.40, 0.55, k), mix(0.30, 0.55, k));
-      }
-      float k = (t - 0.8) / 0.2;
-      return vec3(mix(0.55, 0.9, k), mix(0.55, 0.9, k), mix(0.55, 0.95, k));
-    }
-
-    void main() {
-      vec3 n = normalize(vNormal);
-      vec3 l = normalize(lightDir);
-      float hemi = dot(n, l) * 0.5 + 0.5;
-      vec3 lightColor = mix(lightGround, lightSky, hemi);
-      vec3 base = heightToColor(vHeight, heightMin, heightMax);
-      gl_FragColor = vec4(base * lightColor * lightIntensity, 1.0);
-    }
-  `;
-}
 
 function buildHeightmapTextureData(heightmap: number[][], grid: GridData, type: number) {
   const rows = Math.min(512, Math.max(1, grid.rows * 2));
