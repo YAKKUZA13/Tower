@@ -1,6 +1,7 @@
-node_modules
-*.log   
+﻿node_modules
+*.log
 dist
 .cursor
 TD-MVP-PLAN.md
 redy.md
+docs
