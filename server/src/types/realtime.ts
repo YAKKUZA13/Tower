@@ -17,11 +17,3 @@ export interface ClientMessage {
   type?: string;
   [key: string]: unknown;
 }
-
-export interface LiveSessionState {
-  entities: unknown[];
-  turn: {
-    order: unknown[];
-    current: number;
-  };
-}

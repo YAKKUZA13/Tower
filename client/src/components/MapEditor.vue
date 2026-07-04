@@ -75,8 +75,6 @@ const map = ref<MapDocument>({
   heightmap: createDefaultHeightmap(18, 32, 11),
   terrain: { heightmap: createDefaultHeightmap(18, 32, 11), materialLayers: [], water: [], biome: 'temperate' },
   objects: [],
-  paths: [],
-  encounters: [],
   lighting: { timeOfDay: 'day', fog: 0.02 },
   metadata: { name: 'Новая карта', setting: '', version: 1 },
   towers: [],
@@ -429,7 +427,7 @@ onBeforeUnmount(() => {
   <div class="map-editor">
     <header class="toolbar">
       <div class="toolbar-left">
-        <div class="brand">Редактор D&D карты</div>
+        <div class="brand">Редактор карты</div>
         <div class="grid-pill">Колонки {{ map.grid.cols }} · Ряды {{ map.grid.rows }} · Размер {{ map.grid.cellSize }}</div>
       </div>
       <div class="toolbar-right">

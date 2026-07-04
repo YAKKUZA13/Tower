@@ -75,8 +75,6 @@ export function createDefaultMap(): MapDocument {
       biome: 'temperate'
     },
     objects: [],
-    paths: [],
-    encounters: [],
     lighting: {
       timeOfDay: 'day',
       fog: 0.02,
@@ -161,8 +159,6 @@ export function normalizeMapDocument(input: MapInput = {}): MapDocument {
       heightmap
     },
     objects,
-    paths: Array.isArray(input.paths) ? input.paths : [],
-    encounters: Array.isArray(input.encounters) ? input.encounters : [],
     lighting: { ...fallback.lighting, ...(input.lighting || {}) },
     metadata: { ...fallback.metadata, ...(input.metadata || {}) },
     towers: Array.isArray(input.towers) ? input.towers : [],

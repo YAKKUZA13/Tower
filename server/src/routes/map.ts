@@ -205,8 +205,6 @@ const mapRoutes: FastifyPluginAsync = async (app) => {
             }
           },
           terrain: { type: 'object', additionalProperties: true },
-          paths: { type: 'array', items: { type: 'object', additionalProperties: true } },
-          encounters: { type: 'array', items: { type: 'object', additionalProperties: true } },
           lighting: { type: 'object', additionalProperties: true },
           metadata: { type: 'object', additionalProperties: true }
         }

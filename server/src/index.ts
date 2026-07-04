@@ -10,7 +10,7 @@ import mapRoutes from './routes/map.js';
 import sessionRoutes from './routes/session.js';
 import assetsRoutes from './routes/assets.js';
 import type { FastifyRequest } from 'fastify';
-import type { LiveSessionState, ServerMessage, WsClient } from './types/realtime.js';
+import type { ServerMessage, WsClient } from './types/realtime.js';
 import type { ClientMessage } from './types/realtime.js';
 import type { GameRole } from './types/game-session.js';
 
@@ -39,14 +39,6 @@ async function start() {
   await app.register(websocket);
 
   const clients = new Set<WsClient>();
-  const liveState = new Map<string, LiveSessionState>();
-  const ensureState = (sessionId: string | null): LiveSessionState | null => {
-    if (!sessionId) return null;
-    if (!liveState.has(sessionId)) {
-      liveState.set(sessionId, { entities: [], turn: { order: [], current: 0 } });
-    }
-    return liveState.get(sessionId) || null;
-  };
 
   app.decorate('wsClients', clients);
   app.decorate('broadcast', (sessionId: string | null, payload: ServerMessage) => {
@@ -107,45 +99,8 @@ async function start() {
       try { data = JSON.parse(String(raw)) as ClientMessage; } catch {}
       if (data?.type === 'ping') {
         send({ type: 'pong', t: Date.now() });
-        return;
       }
-      if (!client.sessionId) return;
-      const state = ensureState(client.sessionId);
-      if (!state) return;
-      switch (data?.type) {
-        case 'chat_send':
-          app.broadcast(client.sessionId, { type: 'chat', from: user.username, text: String(data.text || '').slice(0, 500), ts: Date.now() });
-          break;
-        case 'dice_roll': {
-          const sides = Math.max(2, Math.min(1000, Number(data.sides || 20)));
-          const count = Math.max(1, Math.min(10, Number(data.count || 1)));
-          const results = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
-          app.broadcast(client.sessionId, { type: 'dice_roll', from: user.username, sides, count, results, ts: Date.now() });
-          break;
-        }
-        case 'entity_update':
-          if (client.role !== 'gm') break;
-          state.entities = Array.isArray(data.entities) ? data.entities : state.entities;
-          app.broadcast(client.sessionId, { type: 'entity_update', entities: state.entities, ts: Date.now() });
-          break;
-        case 'turn_set':
-          if (client.role !== 'gm') break;
-          state.turn = { order: Array.isArray(data.order) ? data.order : [], current: 0 };
-          app.broadcast(client.sessionId, { type: 'turn_update', turn: state.turn, ts: Date.now() });
-          break;
-        case 'turn_next':
-          if (client.role !== 'gm') break;
-          if (state.turn.order.length) {
-            state.turn.current = (state.turn.current + 1) % state.turn.order.length;
-            app.broadcast(client.sessionId, { type: 'turn_update', turn: state.turn, ts: Date.now() });
-          }
-          break;
-        case 'request_state':
-          send({ type: 'state', entities: state.entities, turn: state.turn });
-          break;
-        default:
-          break;
-      }
+      // D&D-сообщения (chat/dice/entity/turn) удалены в Фазе 0.2; TD realtime (co-op) появится в Фазе 7.
     });
     socket.on('close', () => {
       clients.delete(client);

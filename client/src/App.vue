@@ -73,7 +73,7 @@ onMounted(async () => {
   <div class="app">
     <header class="app-header">
       <div class="app-header-left">
-        <div class="app-brand">D&D Battle Tabletop</div>
+        <div class="app-brand">Tower Defense</div>
         <div v-if="isAuthed && sessionId" class="app-nav">
           <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Лобби</button>
           <button v-if="role === 'gm'" class="nav-button" :class="{ active: view === 'editor' }" @click="view='editor'">Редактор карты</button>

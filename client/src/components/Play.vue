@@ -48,7 +48,7 @@ onBeforeUnmount(() => engineRef.value?.dispose());
 <template>
   <div class="play-layout">
     <aside class="play-sidebar">
-      <div class="panel-title">D&D карта</div>
+      <div class="panel-title">Карта поля боя</div>
       <div class="stat-line">Объектов: {{ map?.objects?.length || 0 }}</div>
       <div class="stat-line">Выбрано: {{ selectedObjectId || 'нет объекта' }}</div>
       <p class="hint">

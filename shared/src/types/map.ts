@@ -48,8 +48,6 @@ export interface MapDocument {
   heightmap: number[][];
   terrain?: TerrainData;
   objects?: PlacedObject[];
-  paths?: unknown[];
-  encounters?: unknown[];
   lighting?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   // TD-поля (типизируются в Фазе 0.3):
