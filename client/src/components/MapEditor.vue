@@ -328,6 +328,25 @@ function loadDefaultWaves(): void {
   map.value.waves = DEFAULT_WAVES.map((w) => ({ ...w, groups: w.groups.map((g) => ({ ...g })) }));
 }
 
+// ── Phase 6: RTS-режим на карте ──
+function setRtsEnabled(enabled: boolean): void {
+  if (enabled) {
+    map.value.rts = {
+      enabled: true,
+      startingResources: map.value.rts?.startingResources ?? { wood: 60, stone: 30, ore: 0, gold: 0 }
+    };
+  } else {
+    map.value.rts = { ...(map.value.rts ?? {}), enabled: false };
+  }
+}
+
+function setRtsResource(key: 'wood' | 'stone' | 'ore' | 'gold', event: Event): void {
+  const value = Math.max(0, Number((event.target as HTMLInputElement).value) || 0);
+  if (!map.value.rts) map.value.rts = { enabled: true };
+  if (!map.value.rts.startingResources) map.value.rts.startingResources = {};
+  map.value.rts.startingResources[key] = value;
+}
+
 async function init(): Promise<void> {
   try {
     await mapStore.loadMap();
@@ -345,7 +364,8 @@ async function init(): Promise<void> {
       spawnPoint: data?.spawnPoint || { col: 0, row: 0 },
       base: data?.base || { col: 31, row: 17, hp: 20 },
       startingGold: Number(data?.startingGold) || 100,
-      waves: Array.isArray(data?.waves) ? data.waves : []
+      waves: Array.isArray(data?.waves) ? data.waves : [],
+      rts: data?.rts ?? map.value.rts
     };
   } catch (error) {
     console.error(error);
@@ -608,6 +628,33 @@ onBeforeUnmount(() => {
               <span>HP базы (жизни)</span>
               <input v-model.number="map.base.hp" type="number" min="1" step="1" />
             </label>
+          </div>
+
+          <div class="tool-section">
+            <div class="section-subtitle">RTS «Тёмная крепость»</div>
+            <label class="inline-check">
+              <input type="checkbox" :checked="!!map.rts?.enabled" @change="setRtsEnabled(($event.target as HTMLInputElement).checked)" />
+              <span>включить RTS-режим (экономика + юниты + командир)</span>
+            </label>
+            <template v-if="map.rts?.enabled">
+              <p class="hint">Дополнительные стартовые ресурсы RTS (wood/stone/ore). Gold прибавится к стартовому золоту карты.</p>
+              <label class="field">
+                <span>Дерево</span>
+                <input :value="map.rts.startingResources?.wood ?? 60" type="number" min="0" step="10" @input="setRtsResource('wood', $event)" />
+              </label>
+              <label class="field">
+                <span>Камень</span>
+                <input :value="map.rts.startingResources?.stone ?? 30" type="number" min="0" step="10" @input="setRtsResource('stone', $event)" />
+              </label>
+              <label class="field">
+                <span>Руда</span>
+                <input :value="map.rts.startingResources?.ore ?? 0" type="number" min="0" step="10" @input="setRtsResource('ore', $event)" />
+              </label>
+              <label class="field">
+                <span>Доп. золото</span>
+                <input :value="map.rts.startingResources?.gold ?? 0" type="number" min="0" step="10" @input="setRtsResource('gold', $event)" />
+              </label>
+            </template>
           </div>
 
           <div class="tool-section">

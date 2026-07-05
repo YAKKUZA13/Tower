@@ -8,6 +8,18 @@
 
 import type { Enemy, EnemyType, Tower, TowerType, Wall, WallMaterial, WallMaterialDef, Wave } from './td.js';
 import type { PlacedRelic, RelicType } from './relic.js';
+import type {
+  CommanderCooldowns,
+  CommanderType,
+  DefenderUnit,
+  DefenderUnitType,
+  ProductionBuilding,
+  ProductionBuildingType,
+  ResourceBag,
+  ResourceId,
+  Spell,
+  UnitStance
+} from './economy.js';
 
 export type SimStatus = 'prep' | 'wave' | 'draft' | 'won' | 'lost';
 export type CoopRole = 'builder' | 'economist' | 'commander' | 'free';
@@ -55,6 +67,17 @@ export interface GameSnapshot {
   relics: PlacedRelic[];
   /** 3 typeId реликвий для драфта (только когда status==='draft'). */
   pendingRelicChoices: string[];
+  // ── RTS «Тёмная крепость» (Фаза 6). Заполняются только если включён rts.enabled. ──
+  /** Текущий запас ресурсов. */
+  resources?: Record<ResourceId, number>;
+  /** Производственные здания (Sawmill/Mine/Smelter/Barracks). */
+  productionBuildings?: ProductionBuilding[];
+  /** Защитные юниты (Knight/Archer/Mage). */
+  defenderUnits?: DefenderUnit[];
+  /** Кулдауны заклинаний командира: spellId → сек до готовности (0 = готов). */
+  commanderCooldowns?: CommanderCooldowns;
+  /** Активные заклинания в обработке (визуал + ещё не погашенные эффекты). */
+  activeSpells?: ActiveSpell[];
   // ── окружение (Фаза 3 использует; заложено с Фазы 1 для детерминированности) ──
   timeOfDay: number; // 0..1
   weather: Weather;
@@ -63,10 +86,28 @@ export interface GameSnapshot {
   players: Array<{ userId: string; role: CoopRole; ready: boolean }>;
 }
 
+export interface PlayerInput {
+  tick: number;
+  userId: string;
+  action: PlayerAction;
+}
+
+/** Активное заклинание в обработке (Phase 6). Хранится в snapshot для интерполяции рендера. */
+export interface ActiveSpell {
+  id: string;
+  spellId: string;
+  /** Центр применения в клетках. */
+  col: number;
+  row: number;
+  /** Сколько тиков эффект ещё активен (для freeze/ring-визуала). */
+  remainingTicks: number;
+}
+
 /**
  * Действия игрока. Phase 1 реализует подмножество (place-tower/sell-tower/
  * start-wave/set-targeting); place-wall/repair-wall — Фаза 4; pick-relic/
- * remove-relic/skip-draft — Фаза 5; остальные в Фазах 6.
+ * remove-relic/skip-draft — Фаза 5; build-production/train-unit/set-unit-stance/
+ * cast-spell — Фаза 6 (RTS).
  */
 export type PlayerAction =
   | { kind: 'place-tower'; typeId: string; col: number; row: number }
@@ -77,13 +118,12 @@ export type PlayerAction =
   | { kind: 'repair-wall'; wallId: string }
   | { kind: 'pick-relic'; relicTypeId: string; col: number; row: number }
   | { kind: 'remove-relic'; relicId: string }
-  | { kind: 'skip-draft' };
-
-export interface PlayerInput {
-  tick: number;
-  userId: string;
-  action: PlayerAction;
-}
+  | { kind: 'skip-draft' }
+  // ── Phase 6: RTS ──
+  | { kind: 'build-production'; typeId: string; col: number; row: number }
+  | { kind: 'train-unit'; typeId: string; col: number; row: number }
+  | { kind: 'set-unit-stance'; unitId: string; stance: UnitStance }
+  | { kind: 'cast-spell'; spellId: string; col: number; row: number };
 
 /** Каталоги правил игры (башни/враги/волны). Источник для sim + UI. */
 export interface GameCatalog {
@@ -94,4 +134,10 @@ export interface GameCatalog {
   walls?: WallMaterialDef[];
   /** Реликвии для драфта (Фаза 5). Опционально для совместимости. */
   relics?: RelicType[];
+  /** Производственные здания RTS (Фаза 6). Опционально — только при включённом режиме. */
+  productionBuildings?: ProductionBuildingType[];
+  /** Типы защитных юнитов RTS (Фаза 6). */
+  defenderUnits?: DefenderUnitType[];
+  /** Командиры-заклинатели RTS (Фаза 6). */
+  commanders?: CommanderType[];
 }

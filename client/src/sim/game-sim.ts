@@ -8,12 +8,19 @@
  */
 
 import type {
+  ActiveSpell,
+  CommanderType,
+  DefenderUnit,
+  DefenderUnitType,
   Enemy,
   GameCatalog,
   GameSnapshot,
   MapDocument,
   PlayerInput,
+  ProductionBuilding,
+  ProductionBuildingType,
   RelicType,
+  Spell,
   Tower,
   TowerType,
   Wall,
@@ -23,10 +30,12 @@ import type {
   Weather,
   Waypoint
 } from '@tower/shared';
+import type { ResourceId } from '@tower/shared';
 import { buildPath, positionAtProgress } from '../domain/path';
 import type { BuiltPath } from '../domain/path';
 import { findGridRoute } from '../domain/pathfinding';
-import { canPlaceWall, canPlaceRelic } from '../domain/placement';
+import { gridToWorldData } from '../domain/grid-math';
+import { canPlaceWall, canPlaceRelic, canPlaceProductionBuilding, canTrainUnit } from '../domain/placement';
 import { mulberry32 } from './rng';
 import { DEFAULT_SEED, FIXED_DT, DAY_LENGTH_SECONDS, BURN_DURATION } from './constants';
 import { allSpawned, createWaveState, tickSpawner } from './systems/spawner';
@@ -36,9 +45,25 @@ import { tickTargeting } from './systems/targeting';
 import { tickProjectiles } from './systems/projectiles';
 import { tickRules } from './systems/rules';
 import { applyEnemyWallDamage, repairCost, tickWalls } from './systems/walls';
-import { canAfford, spend, refund } from './systems/economy';
+import {
+  canAfford,
+  spend,
+  refund,
+  award,
+  ensureResources,
+  canAffordCost,
+  spendCost,
+  tickProduction
+} from './systems/economy';
 import { computeRelicModifiers, rollRelicDraft, EMPTY_MODS } from './systems/relics';
 import type { RelicModifiers } from './systems/relics';
+import {
+  castSpell,
+  isSpellReady,
+  tickActiveSpells,
+  tickCommanderCooldowns,
+  tickUnits
+} from './systems/rts';
 
 export interface GameSimConfig {
   map: MapDocument;
@@ -59,6 +84,11 @@ export class GameSim {
   private readonly relicTypes: Map<string, RelicType>;
   private readonly relicList: RelicType[];
   private readonly waves: Wave[];
+  // ── RTS (Фаза 6) ──
+  private readonly productionTypes: Map<string, ProductionBuildingType>;
+  private readonly unitTypes: Map<string, DefenderUnitType>;
+  private readonly commander: CommanderType | null;
+  private readonly rtsEnabled: boolean;
   /** Текущий маршрут врагов (A* вокруг стен) как polyline клеток-центров. */
   private routePath: BuiltPath;
   private routeWaypoints: Waypoint[];
@@ -82,6 +112,11 @@ export class GameSim {
     this.wallDefs = new Map((config.catalog.walls ?? []).map((w) => [w.material, w]));
     this.relicList = config.catalog.relics ?? [];
     this.relicTypes = new Map(this.relicList.map((r) => [r.id, r]));
+    this.productionTypes = new Map((config.catalog.productionBuildings ?? []).map((p) => [p.id, p]));
+    this.unitTypes = new Map((config.catalog.defenderUnits ?? []).map((u) => [u.id, u]));
+    this.commander = this.resolveCommander(config.map, config.catalog);
+    this.rtsEnabled = !!config.map.rts?.enabled && !!this.commander;
+
     this.routeWaypoints = [];
     this.routeCells = new Set();
     this.routePath = buildPath(config.map.path.waypoints, config.map.grid, config.map.heightmap);
@@ -108,8 +143,61 @@ export class GameSim {
       players: [{ userId: config.ownerId, role: 'free', ready: true }]
     };
 
+    // RTS: инициализировать ресурсы/здания/юниты/кулдауны, если режим включён
+    if (this.rtsEnabled) {
+      this.initRtsState(config.map);
+    }
+
     // начальный маршрут врагов — A* от spawn до base (стен ещё нет)
     this.recomputeRoute(false);
+  }
+
+  /** Детерминированный выбор командира: map.rts.commanderTypeId → каталог → дефолт. */
+  private resolveCommander(map: MapDocument, catalog: GameCatalog): CommanderType | null {
+    const list = catalog.commanders ?? [];
+    if (list.length === 0) return null;
+    const wanted = map.rts?.commanderTypeId;
+    if (wanted) {
+      const found = list.find((c) => c.id === wanted);
+      if (found) return found;
+    }
+    return list[0];
+  }
+
+  /** Инициализирует RTS-поля снапшота: стартовые ресурсы, здания, кулдауны. */
+  private initRtsState(map: MapDocument): void {
+    const rts = map.rts!;
+    // gold живёт в state.gold; в bag — только wood/stone/ore
+    const startBag = ensureResources({
+      wood: rts.startingResources?.wood ?? 60,
+      stone: rts.startingResources?.stone ?? 30,
+      ore: rts.startingResources?.ore ?? 0
+    });
+    // стартовый gold из rts-конфига добавляем к state.gold (поверх startingGold карты)
+    const startGold = rts.startingResources?.gold ?? 0;
+    if (startGold > 0) this.state.gold += startGold;
+    this.state.resources = startBag;
+
+    const buildings: ProductionBuilding[] = [];
+    for (const sb of rts.startBuildings ?? []) {
+      if (!this.productionTypes.has(sb.typeId)) continue;
+      buildings.push({
+        id: this.nextId('pb'),
+        typeId: sb.typeId,
+        col: sb.col,
+        row: sb.row,
+        accum: {}
+      });
+    }
+    this.state.productionBuildings = buildings;
+    this.state.defenderUnits = [];
+
+    if (this.commander) {
+      const cds: Record<string, number> = {};
+      for (const s of this.commander.spells) cds[s.id] = 0;
+      this.state.commanderCooldowns = cds;
+    }
+    this.state.activeSpells = [];
   }
 
   // ── публичный API ────────────────────────────────────────────────
@@ -143,6 +231,18 @@ export class GameSim {
       case 'skip-draft':
         this.skipDraft();
         break;
+      case 'build-production':
+        this.buildProduction(input.action.typeId, input.action.col, input.action.row);
+        break;
+      case 'train-unit':
+        this.trainUnit(input.action.typeId, input.action.col, input.action.row);
+        break;
+      case 'set-unit-stance':
+        this.setUnitStance(input.action.unitId, input.action.stance);
+        break;
+      case 'cast-spell':
+        this.castCommanderSpell(input.action.spellId, input.action.col, input.action.row);
+        break;
     }
   }
 
@@ -165,6 +265,23 @@ export class GameSim {
 
   getTowerType(id: string): TowerType | undefined {
     return this.towerTypes.get(id);
+  }
+
+  /** Включён ли RTS-режим на карте (Фаза 6). */
+  isRtsEnabled(): boolean {
+    return this.rtsEnabled;
+  }
+
+  getCommander(): CommanderType | null {
+    return this.commander;
+  }
+
+  getProductionType(id: string): ProductionBuildingType | undefined {
+    return this.productionTypes.get(id);
+  }
+
+  getUnitType(id: string): DefenderUnitType | undefined {
+    return this.unitTypes.get(id);
   }
 
   /** Клетки, занятые текущим маршрутом врагов (нельзя строить башни). */
@@ -301,6 +418,115 @@ export class GameSim {
     this.state.status = 'prep';
   }
 
+  // ── RTS: экономика, юниты, заклинания (Фаза 6) ──────────────────────
+
+  private buildProduction(typeId: string, col: number, row: number): void {
+    if (!this.rtsEnabled) return;
+    if (this.state.status === 'lost' || this.state.status === 'won') return;
+    const type = this.productionTypes.get(typeId);
+    if (!type) return;
+    if (!this.inBounds(col, row)) return;
+    if (this.isPathCell(col, row)) return;
+    if (!canAffordCost(this.state, type.cost)) return;
+    const ctx = {
+      grid: this.map.grid,
+      spawn: this.map.spawnPoint,
+      base: this.map.base,
+      walls: this.state.walls,
+      towers: this.state.towers,
+      relics: this.state.relics,
+      productionBuildings: this.state.productionBuildings ?? []
+    };
+    if (!canPlaceProductionBuilding(ctx, col, row)) return;
+    spendCost(this.state, type.cost);
+    const b: ProductionBuilding = {
+      id: this.nextId('pb'),
+      typeId,
+      col,
+      row,
+      accum: {}
+    };
+    this.state.productionBuildings ??= [];
+    this.state.productionBuildings.push(b);
+  }
+
+  private trainUnit(typeId: string, col: number, row: number): void {
+    if (!this.rtsEnabled) return;
+    if (this.state.status === 'lost' || this.state.status === 'won') return;
+    const type = this.unitTypes.get(typeId);
+    if (!type) return;
+    if (!this.inBounds(col, row)) return;
+    if (!canAffordCost(this.state, type.cost)) return;
+    const ctx = {
+      grid: this.map.grid,
+      spawn: this.map.spawnPoint,
+      base: this.map.base,
+      walls: this.state.walls,
+      towers: this.state.towers,
+      relics: this.state.relics,
+      productionBuildings: this.state.productionBuildings ?? []
+    };
+    if (!canTrainUnit(ctx, col, row)) return;
+    spendCost(this.state, type.cost);
+    const pos = gridToWorldData(this.map.grid, col, row);
+    const unit: DefenderUnit = {
+      id: this.nextId('unit'),
+      typeId,
+      col,
+      row,
+      position: { x: pos.x, y: 0, z: pos.z },
+      hp: type.hp,
+      maxHp: type.hp,
+      stance: 'guard',
+      cooldown: 0,
+      targetEnemyId: null,
+      homeCol: col,
+      homeRow: row
+    };
+    this.state.defenderUnits ??= [];
+    this.state.defenderUnits.push(unit);
+  }
+
+  private setUnitStance(unitId: string, stance: DefenderUnit['stance']): void {
+    const unit = this.state.defenderUnits?.find((u) => u.id === unitId);
+    if (unit) {
+      unit.stance = stance;
+      // при смене stance — обновляем home (anchor), чтобы guard/patrol держались новой точки
+      unit.homeCol = unit.col;
+      unit.homeRow = unit.row;
+    }
+  }
+
+  private castCommanderSpell(spellId: string, col: number, row: number): void {
+    if (!this.rtsEnabled || !this.commander) return;
+    if (this.state.status === 'lost' || this.state.status === 'won') return;
+    const spell = this.commander.spells.find((s) => s.id === spellId);
+    if (!spell) return;
+    const cds = this.state.commanderCooldowns;
+    if (!cds || !isSpellReady(cds, spellId)) return;
+    if (!this.inBounds(col, row)) return;
+
+    // gold-rush + economy- relics: gold-rush множится на goldMult
+    let effectiveSpell: Spell = spell;
+    if (spell.effect === 'gold-rush') {
+      effectiveSpell = { ...spell, power: spell.power * this.relicMods.goldMult };
+    }
+    const result = castSpell({
+      spell: effectiveSpell,
+      col,
+      row,
+      grid: this.map.grid,
+      enemies: this.state.enemies,
+      walls: this.state.walls,
+      gold: this.state,
+      nextId: () => this.nextId('spell'),
+      tick: this.state.tick
+    });
+    cds[spellId] = spell.cooldown;
+    this.state.activeSpells ??= [];
+    this.state.activeSpells.push(result.active);
+  }
+
   /**
    * Пересчёт кеша модификаторов реликвий. При изменении wallHpMult пропорционально
    * масштабирует hp/maxHp существующих стен (сохраняя долю hp). Детерминировано.
@@ -414,6 +640,44 @@ export class GameSim {
       });
       reached = out.reached;
       damageToBase = out.damageToBase;
+    }
+
+    // 4a. RTS (Фаза 6): защитные юниты атакуют врагов + production-тик + кулдауны
+    if (this.rtsEnabled) {
+      if (state.defenderUnits && state.defenderUnits.length > 0 && state.enemies.length > 0) {
+        const out = tickUnits({
+          units: state.defenderUnits,
+          unitTypes: this.unitTypes,
+          enemies: state.enemies,
+          grid: this.map.grid,
+          dt,
+          tick: state.tick
+        });
+        killed += out.killed;
+        // удаляем павших юнитов (задел — пока враги не атакуют юнитов напрямую)
+        if (out.deadUnits.length > 0 && state.defenderUnits.length > 0) {
+          const dead = new Set(out.deadUnits);
+          state.defenderUnits = state.defenderUnits.filter((u) => !dead.has(u.id));
+        }
+      }
+      if (state.resources && state.productionBuildings && state.productionBuildings.length > 0) {
+        const goldDelta = tickProduction({
+          bag: state.resources,
+          buildings: state.productionBuildings,
+          buildingTypes: this.productionTypes,
+          dt
+        });
+        // золото из RTS-добычи идёт в общий кошелёк
+        if (goldDelta > 0) {
+          state.gold += goldDelta;
+        }
+      }
+      if (state.commanderCooldowns) {
+        tickCommanderCooldowns(state.commanderCooldowns, dt);
+      }
+      if (state.activeSpells && state.activeSpells.length > 0) {
+        state.activeSpells = tickActiveSpells(state.activeSpells);
+      }
     }
 
     // 4b. стены: горение (DoT) + урон от врагов по соседним стенам (maze-bashing)

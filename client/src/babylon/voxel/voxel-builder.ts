@@ -551,6 +551,220 @@ export function relicBloodTotem(): Voxel[] {
   return v;
 }
 
+// ── RTS: производственные здания (Фаза 6, концепция 3) ──────────────────
+// Здания крупнее юнитов, ниже силуэтом, «приземлены» к земле. Высота ≈ 1.0.
+
+/** Лесопилка — деревянский навес с бревном и пилой. */
+export function sawmillBuilding(): Voxel[] {
+  const v: Voxel[] = [];
+  const w = PALETTE.wood, wd = PALETTE.woodDark, wl = PALETTE.woodLight;
+  // фундамент-плашка
+  fill(v, -0.42, 0.42, -0.50, -0.40, -0.42, 0.42, 0.16, PALETTE.earth);
+  // 4 угловых столба навеса
+  for (const sx of [-0.34, 0.34]) for (const sz of [-0.30, 0.30]) {
+    box(v, sx, -0.20, sz, 0.10, 0.50, 0.10, wd);
+  }
+  // крыша-навес (наклонная ≈ ступеньки)
+  for (let i = 0; i < 3; i++) {
+    fill(v, -0.40 + i * 0.04, 0.40 - i * 0.04, 0.06 + i * 0.06, 0.18 + i * 0.06, -0.34, 0.34, 0.10, shade(wd, 0.85));
+  }
+  // бревно (заготовка)
+  fill(v, -0.20, 0.20, -0.34, -0.18, -0.18, 0.18, 0.12, w);
+  // пила-диск (металл)
+  box(v, 0, -0.20, 0.22, 0.22, 0.04, 0.04, PALETTE.metalLight);
+  box(v, 0, -0.20, 0.24, 0.04, 0.04, 0.04, ACCENT.gold);
+  // маленький костёр у входа (тёплый акцент)
+  box(v, -0.30, -0.38, 0.10, 0.06, 0.06, 0.06, ACCENT.fire);
+  box(v, 0.30, -0.20, 0, 0.05, 0.50, 0.05, wl); // подпорка
+  return v;
+}
+
+/** Шахта — тёмный ствол в горе с деревянной крепью. */
+export function mineBuilding(): Voxel[] {
+  const v: Voxel[] = [];
+  const s = PALETTE.stone, sd = PALETTE.stoneDark, wd = PALETTE.woodDark;
+  // скалистое основание
+  fill(v, -0.42, 0.42, -0.50, -0.36, -0.42, 0.42, 0.16, sd);
+  // куча камней (горка)
+  fill(v, -0.36, 0.36, -0.36, -0.20, -0.36, 0.36, 0.16, s);
+  fill(v, -0.26, 0.26, -0.30, 0.0, -0.30, 0.30, 0.14, shade(s, 0.92));
+  // чёрный провал шахты
+  fill(v, -0.18, 0.18, -0.30, 0.10, -0.14, 0.14, 0.10, PALETTE.metalDark);
+  // деревянная крепь (рама)
+  box(v, -0.22, -0.10, 0, 0.06, 0.50, 0.06, wd);
+  box(v, 0.22, -0.10, 0, 0.06, 0.50, 0.06, wd);
+  box(v, 0, 0.30, 0, 0.50, 0.06, 0.06, wd);
+  // руда (золотые крупицы) — намёк на добычу
+  box(v, -0.14, -0.30, 0.16, 0.04, 0.04, 0.04, ACCENT.gold);
+  box(v, 0.10, -0.28, 0.20, 0.04, 0.04, 0.04, ACCENT.gold);
+  box(v, 0.04, -0.34, 0.10, 0.04, 0.04, 0.04, ACCENT.gold);
+  // фонарь у входа
+  box(v, 0, 0.18, 0.20, 0.06, 0.06, 0.06, ACCENT.fireCore);
+  return v;
+}
+
+/** Плавильня — каменная печь с огненным жерлом. */
+export function smelterBuilding(): Voxel[] {
+  const v: Voxel[] = [];
+  const s = PALETTE.stone, sd = PALETTE.stoneDark, md = PALETTE.metalDark;
+  // фундамент
+  fill(v, -0.42, 0.42, -0.50, -0.42, -0.42, 0.42, 0.16, sd);
+  // основание печи (квадратное)
+  fill(v, -0.34, 0.34, -0.42, 0.10, -0.34, 0.34, 0.16, s);
+  // корпус печи
+  fill(v, -0.30, 0.30, 0.10, 0.28, -0.30, 0.30, 0.14, shade(s, 0.88));
+  // труба (вверх)
+  fill(v, -0.10, 0.10, 0.28, 0.40, -0.10, 0.10, 0.10, md);
+  // огненное жерло (чёрный провал + огонь внутри)
+  fill(v, -0.16, 0.16, -0.05, 0.20, -0.10, 0.10, 0.10, PALETTE.metalDark);
+  box(v, 0, 0.05, 0.12, 0.18, 0.10, 0.04, ACCENT.fire);
+  box(v, 0, 0.10, 0.14, 0.10, 0.06, 0.02, ACCENT.fireCore);
+  // анвил/кованная плита
+  box(v, 0.30, -0.30, 0, 0.16, 0.10, 0.16, md);
+  box(v, 0.30, -0.20, 0, 0.20, 0.04, 0.20, PALETTE.metal);
+  // искры
+  box(v, 0.20, 0.20, 0.20, 0.03, 0.03, 0.03, ACCENT.fireCore);
+  return v;
+}
+
+/** Казармы — приземистый бункер с оружием у входа. */
+export function barracksBuilding(): Voxel[] {
+  const v: Voxel[] = [];
+  const s = PALETTE.stone, sd = PALETTE.stoneDark, wd = PALETTE.woodDark, m = PALETTE.metal;
+  // фундамент
+  fill(v, -0.42, 0.42, -0.50, -0.42, -0.42, 0.42, 0.16, sd);
+  // стены бункера
+  fill(v, -0.40, 0.40, -0.42, -0.10, -0.40, 0.40, 0.16, s);
+  // бойницы (горизонтальные тёмные щели)
+  fill(v, -0.36, 0.36, -0.30, -0.24, -0.05, -0.05, 0.06, PALETTE.metalDark);
+  fill(v, -0.36, 0.36, -0.30, -0.24, 0.05, 0.05, 0.06, PALETTE.metalDark);
+  // крыша-зубцы
+  for (const sx of [-0.36, -0.12, 0.12, 0.36]) {
+    box(v, sx, -0.06, 0, 0.10, 0.10, 0.84, shade(sd, 0.9));
+  }
+  // дверь-проём (тёмная)
+  fill(v, -0.10, 0.10, -0.42, -0.30, 0, 0, 0.10, PALETTE.metalDark);
+  // стойка с оружием у входа
+  box(v, 0.24, -0.30, 0.20, 0.04, 0.40, 0.04, wd); // древко
+  box(v, 0.24, 0.10, 0.20, 0.10, 0.10, 0.02, m); // наконечник
+  box(v, 0.30, -0.30, 0.24, 0.02, 0.30, 0.02, m); // лезвие меча
+  box(v, 0.30, -0.42, 0.24, 0.06, 0.04, 0.06, ACCENT.gold); // руны
+  // факел по углу
+  box(v, -0.34, -0.10, 0.34, 0.04, 0.20, 0.04, wd);
+  box(v, -0.34, 0.04, 0.34, 0.06, 0.06, 0.06, ACCENT.fire);
+  return v;
+}
+
+// ── RTS: защитные юниты (Фаза 6) ───────────────────────────────────────
+// Юниты мельче зданий, но заметнее врагов; оружие/щит отличают классы.
+
+/** Рыцарь — латник со щитом и мечом. */
+export function knightUnit(): Voxel[] {
+  const v: Voxel[] = [];
+  const m = PALETTE.metal, md = PALETTE.metalDark, ml = PALETTE.metalLight, wd = PALETTE.woodDark;
+  // ноги (в доспехе)
+  box(v, -0.09, -0.42, 0, 0.08, 0.26, 0.10, md);
+  box(v, 0.09, -0.42, 0, 0.08, 0.26, 0.10, md);
+  // торс (нагрудник)
+  fill(v, -0.16, 0.16, -0.16, 0.10, -0.12, 0.12, 0.14, m);
+  box(v, 0, -0.04, 0.13, 0.18, 0.18, 0.04, ml); // грудь
+  // наплечники
+  box(v, -0.20, -0.04, 0, 0.08, 0.10, 0.14, md);
+  box(v, 0.20, -0.04, 0, 0.08, 0.10, 0.14, md);
+  // голова в шлеме
+  box(v, 0, 0.18, 0, 0.16, 0.16, 0.16, md);
+  box(v, 0, 0.28, 0, 0.04, 0.08, 0.04, ACCENT.gold); // гребень
+  // щит (левая рука)
+  box(v, -0.22, -0.06, 0.10, 0.06, 0.22, 0.18, shade(m, 0.9));
+  box(v, -0.22, -0.06, 0.20, 0.02, 0.06, 0.06, ACCENT.gold); // эмблема
+  // меч в правой руке
+  box(v, 0.24, -0.10, 0.10, 0.04, 0.16, 0.04, wd); // рукоять
+  fill(v, 0.24, 0.10, 0.10, 0.03, 0.30, 0.03, 0.04, ml); // клинок
+  return v;
+}
+
+/** Лучник — лёгкий боец с луком. */
+export function archerUnit(): Voxel[] {
+  const v: Voxel[] = [];
+  const f = PALETTE.flesh, fd = PALETTE.fleshDark, w = PALETTE.wood, wl = PALETTE.woodLight;
+  // ноги (кожаные поножи)
+  box(v, -0.08, -0.42, 0, 0.08, 0.26, 0.10, fd);
+  box(v, 0.08, -0.42, 0, 0.08, 0.26, 0.10, fd);
+  // торс (туника)
+  fill(v, -0.14, 0.14, -0.16, 0.08, -0.10, 0.10, 0.12, shade(f, 0.85));
+  // капюшон
+  box(v, 0, 0.06, -0.04, 0.20, 0.10, 0.18, fd);
+  // голова
+  box(v, 0, 0.16, 0, 0.14, 0.14, 0.14, f);
+  box(v, -0.04, 0.18, 0.08, 0.03, 0.03, 0.02, ACCENT.soul); // глаза
+  box(v, 0.04, 0.18, 0.08, 0.03, 0.03, 0.02, ACCENT.soul);
+  // колчан за спиной
+  box(v, 0, -0.04, -0.16, 0.06, 0.20, 0.04, w);
+  box(v, 0, 0.08, -0.16, 0.03, 0.10, 0.02, wl); // стрелы
+  // лук (в левой руке, дугой)
+  box(v, -0.22, -0.06, 0.10, 0.04, 0.30, 0.04, w);
+  box(v, -0.26, -0.06, 0.10, 0.02, 0.06, 0.02, w);
+  box(v, -0.26, 0.10, 0.10, 0.02, 0.06, 0.02, w);
+  box(v, -0.24, 0.02, 0.10, 0.10, 0.02, 0.02, wl); // тетива/стрела
+  return v;
+}
+
+/** Маг — в мантии с посохом и капюшоном. */
+export function mageUnit(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
+  // ноги (скрыты мантией)
+  fill(v, -0.14, 0.14, -0.42, -0.30, -0.10, 0.10, 0.16, shade(sd, 0.7));
+  // мантия-квадрат
+  fill(v, -0.18, 0.18, -0.30, 0.10, -0.14, 0.14, 0.14, sl);
+  fill(v, -0.20, 0.20, 0.10, 0.20, -0.16, 0.16, 0.12, shade(sd, 0.8));
+  // рукава
+  box(v, -0.24, -0.10, 0, 0.08, 0.30, 0.10, shade(sd, 0.7));
+  box(v, 0.24, -0.10, 0, 0.08, 0.30, 0.10, shade(sd, 0.7));
+  // капюшон + лицо (тень)
+  box(v, 0, 0.16, 0, 0.20, 0.18, 0.20, sd);
+  box(v, 0, 0.16, 0.10, 0.10, 0.06, 0.02, PALETTE.metalDark); // тень-лицо
+  box(v, -0.04, 0.18, 0.12, 0.03, 0.03, 0.02, ACCENT.arcaneCore); // глаза-магия
+  box(v, 0.04, 0.18, 0.12, 0.03, 0.03, 0.02, ACCENT.arcaneCore);
+  // посох с кристаллом
+  box(v, 0.24, -0.20, 0.16, 0.04, 0.50, 0.04, PALETTE.woodDark);
+  box(v, 0.24, 0.20, 0.16, 0.10, 0.10, 0.10, ACCENT.arcane); // кристалл
+  box(v, 0.24, 0.26, 0.16, 0.05, 0.06, 0.05, ACCENT.arcaneCore);
+  // руны на мантии
+  box(v, 0, -0.04, 0.15, 0.04, 0.10, 0.02, ACCENT.arcane);
+  return v;
+}
+
+/** Командир-некромант — увеличенный маг с короной и рунами. */
+export function commanderUnit(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight, bo = PALETTE.bone;
+  // основание/плащ шире
+  fill(v, -0.18, 0.18, -0.44, -0.30, -0.12, 0.12, 0.16, shade(sd, 0.6));
+  fill(v, -0.22, 0.22, -0.30, 0.08, -0.18, 0.18, 0.14, sl);
+  fill(v, -0.24, 0.24, 0.08, 0.18, -0.20, 0.20, 0.12, shade(sd, 0.75));
+  // рукава-рога
+  box(v, -0.28, -0.10, 0, 0.08, 0.32, 0.10, shade(sd, 0.7));
+  box(v, 0.28, -0.10, 0, 0.08, 0.32, 0.10, shade(sd, 0.7));
+  // капюшон крупнее
+  box(v, 0, 0.16, -0.02, 0.24, 0.22, 0.24, sd);
+  box(v, 0, 0.30, 0, 0.16, 0.06, 0.16, bo); // корона из кости
+  box(v, -0.06, 0.34, 0, 0.03, 0.06, 0.03, ACCENT.gold);
+  box(v, 0.06, 0.34, 0, 0.03, 0.06, 0.03, ACCENT.gold);
+  // горящие глаза-магия
+  box(v, 0, 0.18, 0.10, 0.10, 0.06, 0.02, PALETTE.metalDark);
+  box(v, -0.04, 0.20, 0.12, 0.04, 0.04, 0.02, ACCENT.arcaneCore);
+  box(v, 0.04, 0.20, 0.12, 0.04, 0.04, 0.02, ACCENT.arcaneCore);
+  // посох-жезл с двумя кристаллами
+  box(v, 0.28, -0.20, 0.16, 0.05, 0.56, 0.05, PALETTE.boneDark);
+  box(v, 0.28, 0.24, 0.16, 0.12, 0.12, 0.12, ACCENT.arcane);
+  box(v, 0.28, 0.32, 0.16, 0.06, 0.06, 0.06, ACCENT.arcaneCore);
+  box(v, 0.28, 0.08, 0.16, 0.06, 0.06, 0.06, ACCENT.blood); // второй кристалл (кровавый)
+  // рунный пояс
+  fill(v, -0.20, 0.20, -0.06, -0.02, -0.16, 0.16, 0.04, ACCENT.arcane);
+  return v;
+}
+
 /** Реестр процедурных билдеров по имени (используется asset-catalog). */
 export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'tower:arrow': arrowTower,
@@ -572,7 +786,16 @@ export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'relic:totem-arcane': relicArcaneTotem,
   'relic:totem-gold': relicGoldTotem,
   'relic:totem-ice': relicIceTotem,
-  'relic:totem-blood': relicBloodTotem
+  'relic:totem-blood': relicBloodTotem,
+  // ── Phase 6: RTS здания и юниты ──
+  'building:sawmill': sawmillBuilding,
+  'building:mine': mineBuilding,
+  'building:smelter': smelterBuilding,
+  'building:barracks': barracksBuilding,
+  'unit:knight': knightUnit,
+  'unit:archer': archerUnit,
+  'unit:mage': mageUnit,
+  'unit:commander': commanderUnit
 };
 
 /** Emissive-акцент модели по имени билдера (для материала). */
@@ -593,6 +816,15 @@ export function builderEmissive(builderName: string): RGB | undefined {
     case 'relic:totem-gold': return ACCENT.gold;
     case 'relic:totem-ice': return ACCENT.ice;
     case 'relic:totem-blood': return ACCENT.blood;
+    // ── Phase 6: RTS ──
+    case 'building:sawmill': return ACCENT.fire;
+    case 'building:mine': return ACCENT.gold;
+    case 'building:smelter': return ACCENT.fireCore;
+    case 'building:barracks': return ACCENT.blood;
+    case 'unit:knight': return ACCENT.soul;
+    case 'unit:archer': return ACCENT.gold;
+    case 'unit:mage': return ACCENT.arcane;
+    case 'unit:commander': return ACCENT.arcaneCore;
     default: return undefined;
   }
 }

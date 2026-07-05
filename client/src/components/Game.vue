@@ -3,9 +3,19 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { PointerEventTypes } from 'babylonjs';
 import type { Engine, Mesh, Scene } from 'babylonjs';
 import { DEFAULT_CATALOG, DEFAULT_RELICS } from '@tower/shared';
-import type { MapDocument, PlayerInput, RelicType, TargetingMode, TowerType } from '@tower/shared';
+import type {
+  CommanderType,
+  DefenderUnitType,
+  MapDocument,
+  PlayerInput,
+  ProductionBuildingType,
+  RelicType,
+  TargetingMode,
+  TowerType,
+  UnitStance
+} from '@tower/shared';
 import { getMap } from '../services/api';
-import { canPlaceWall, canPlaceRelic } from '../domain/placement';
+import { canPlaceWall, canPlaceRelic, canPlaceProductionBuilding, canTrainUnit } from '../domain/placement';
 import { createEngine, createScene, gridToWorld, makePreviewMesh, sampleHeight, setGridVisible } from '../babylon/createScene';
 import { pickGrid } from '../babylon/picking';
 import { LevelOverlay } from '../babylon/level-renderer';
@@ -14,6 +24,7 @@ import { TowerRenderer } from '../babylon/towers/tower-renderer';
 import { ProjectilePool } from '../babylon/projectiles/projectile-pool';
 import { WallRenderer } from '../babylon/walls/wall-renderer';
 import { RelicRenderer } from '../babylon/relics/relic-renderer';
+import { UnitRenderer } from '../babylon/units/unit-renderer';
 import { AssetCatalog } from '../babylon/asset-catalog';
 import { AtmosphereRenderer } from '../babylon/atmosphere';
 import { startGameLoop } from '../babylon/game-loop';
@@ -24,6 +35,7 @@ import { useAuthStore } from '../stores/auth-store';
 import EconomyBar from './EconomyBar.vue';
 import TowerShop from './TowerShop.vue';
 import RelicDraft from './RelicDraft.vue';
+import ProductionPanel from './ProductionPanel.vue';
 import type { WallMaterial, WallMaterialDef } from '@tower/shared';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -32,12 +44,14 @@ const sceneRef = shallowRef<Scene | null>(null);
 const simRef = shallowRef<GameSim | null>(null);
 const towerRendererRef = shallowRef<TowerRenderer | null>(null);
 const relicRendererRef = shallowRef<RelicRenderer | null>(null);
+const unitRendererRef = shallowRef<UnitRenderer | null>(null);
 let catalog: AssetCatalog | null = null;
 let overlay: LevelOverlay | null = null;
 let enemyRenderer: EnemyRenderer | null = null;
 let projectilePool: ProjectilePool | null = null;
 let wallRenderer: WallRenderer | null = null;
 let relicRenderer: RelicRenderer | null = null;
+let unitRenderer: UnitRenderer | null = null;
 let atmosphere: AtmosphereRenderer | null = null;
 let loop: GameLoopHandle | null = null;
 let previewMesh: Mesh | null = null;
@@ -60,6 +74,24 @@ const selectedWallMaterial = ref<WallMaterial>(wallMaterials[0]?.material ?? 'wo
 const relicCatalog: RelicType[] = DEFAULT_RELICS;
 /** typeId реликвии, которую игрок выбрал в драфте и теперь размещает на поле. */
 const relicPlaceTypeId = ref<string | null>(null);
+
+// ── RTS-режим (Фаза 6) ──
+const rtsEnabled = ref(false);
+const productionBuildings: ProductionBuildingType[] = DEFAULT_CATALOG.productionBuildings ?? [];
+const defenderUnits: DefenderUnitType[] = DEFAULT_CATALOG.defenderUnits ?? [];
+const commander: CommanderType | null = DEFAULT_CATALOG.commanders?.[0] ?? null;
+/** Активный RTS-режим мыши. */
+const rtsMode = ref<'idle' | 'build' | 'train' | 'cast'>('idle');
+/** TypeId выбранного здания/юнита либо spellId заклинания. */
+const rtsSelectedId = ref<string | null>(null);
+/** Id выбранного юнита (для смены stance). */
+const selectedUnitId = ref<string | null>(null);
+const selectedUnitStance = ref<UnitStance>('guard');
+const stanceOptions: { mode: UnitStance; label: string }[] = [
+  { mode: 'guard', label: 'Оборона' },
+  { mode: 'patrol', label: 'Патруль' },
+  { mode: 'aggressive', label: 'Атака' }
+];
 
 const gameStore = useGameStore();
 const authStore = useAuthStore();
@@ -146,6 +178,50 @@ function canPlaceRelicAt(col: number, row: number): boolean {
   );
 }
 
+// ── RTS: проверка размещения зданий/юнитов (Фаза 6) ──
+function canPlaceBuildingAt(col: number, row: number): boolean {
+  const sim = simRef.value;
+  if (!sim || !rtsSelectedId.value || rtsMode.value !== 'build') return false;
+  const type = sim.getProductionType(rtsSelectedId.value);
+  if (!type) return false;
+  const grid = sim.map.grid;
+  if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false;
+  if (sim.isPathCell(col, row)) return false;
+  return canPlaceProductionBuilding(
+    {
+      grid,
+      spawn: sim.map.spawnPoint,
+      base: sim.map.base,
+      walls: sim.state.walls,
+      towers: sim.state.towers,
+      relics: sim.state.relics,
+      productionBuildings: sim.state.productionBuildings ?? []
+    },
+    col,
+    row
+  );
+}
+
+function canTrainUnitAt(col: number, row: number): boolean {
+  const sim = simRef.value;
+  if (!sim || !rtsSelectedId.value || rtsMode.value !== 'train') return false;
+  const grid = sim.map.grid;
+  if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false;
+  return canTrainUnit(
+    {
+      grid,
+      spawn: sim.map.spawnPoint,
+      base: sim.map.base,
+      walls: sim.state.walls,
+      towers: sim.state.towers,
+      relics: sim.state.relics,
+      productionBuildings: sim.state.productionBuildings ?? []
+    },
+    col,
+    row
+  );
+}
+
 function pickRelicInstance(): string | null {
   const scene = sceneRef.value;
   const renderer = relicRendererRef.value;
@@ -164,7 +240,7 @@ function updatePreview(): void {
   const scene = sceneRef.value;
   const sim = simRef.value;
   if (!scene || !sim || !previewMesh) return;
-  if (repairMode.value || sellMode.value || (!selectedTypeId.value && !wallBuildMode.value && !relicPlaceTypeId.value)) {
+  if (repairMode.value || sellMode.value || (!selectedTypeId.value && !wallBuildMode.value && !relicPlaceTypeId.value && rtsMode.value === 'idle')) {
     previewMesh.setEnabled(false);
     return;
   }
@@ -178,6 +254,15 @@ function updatePreview(): void {
   if (relicPlaceTypeId.value) {
     valid = canPlaceRelicAt(cell.col, cell.row);
     color = valid ? [0.55, 0.35, 0.85] : [0.9, 0.18, 0.18];
+  } else if (rtsMode.value === 'cast') {
+    valid = true;
+    color = [0.96, 0.62, 0.10];
+  } else if (rtsMode.value === 'build') {
+    valid = canPlaceBuildingAt(cell.col, cell.row);
+    color = valid ? [0.55, 0.35, 0.85] : [0.9, 0.18, 0.18];
+  } else if (rtsMode.value === 'train') {
+    valid = canTrainUnitAt(cell.col, cell.row);
+    color = valid ? [0.25, 0.65, 0.95] : [0.9, 0.18, 0.18];
   } else if (wallBuildMode.value) {
     valid = canPlaceWallAt(cell.col, cell.row, selectedWallMaterial.value);
     color = valid ? [0.55, 0.42, 0.20] : [0.9, 0.18, 0.18];
@@ -251,6 +336,36 @@ function setupPointerHandlers(): void {
           return;
         }
       }
+      // ── Фаза 6: RTS-режимы мыши ──
+      if (rtsMode.value === 'cast' && rtsSelectedId.value) {
+        const sim = simRef.value;
+        if (!sim) return;
+        const cell = pickGrid(scene, sim.map.grid);
+        if (cell) {
+          applyAction({ kind: 'cast-spell', spellId: rtsSelectedId.value, col: cell.col, row: cell.row });
+          rtsMode.value = 'idle';
+          rtsSelectedId.value = null;
+        }
+        return;
+      }
+      if (rtsMode.value === 'build' && rtsSelectedId.value) {
+        const sim = simRef.value;
+        if (!sim) return;
+        const cell = pickGrid(scene, sim.map.grid);
+        if (cell && canPlaceBuildingAt(cell.col, cell.row)) {
+          applyAction({ kind: 'build-production', typeId: rtsSelectedId.value, col: cell.col, row: cell.row });
+        }
+        return;
+      }
+      if (rtsMode.value === 'train' && rtsSelectedId.value) {
+        const sim = simRef.value;
+        if (!sim) return;
+        const cell = pickGrid(scene, sim.map.grid);
+        if (cell && canTrainUnitAt(cell.col, cell.row)) {
+          applyAction({ kind: 'train-unit', typeId: rtsSelectedId.value, col: cell.col, row: cell.row });
+        }
+        return;
+      }
       if (repairMode.value) {
         const sim = simRef.value;
         if (!sim) return;
@@ -286,22 +401,49 @@ function setupPointerHandlers(): void {
         return;
       }
       // выбор существующей башни
-      const id = pickTower();
-      selectedTowerId.value = id;
-      syncSelectedTowerFromSnapshot();
+      const towerId = pickTower();
+      if (towerId) {
+        selectedTowerId.value = towerId;
+        syncSelectedTowerFromSnapshot();
+        return;
+      }
+      // ── Фаза 6: выбор юнита для смены stance ──
+      const unitId = pickUnit();
+      if (unitId) {
+        selectedUnitId.value = unitId;
+        const sim = simRef.value;
+        if (sim) {
+          const u = sim.state.defenderUnits?.find((x) => x.id === unitId);
+          selectedUnitStance.value = u?.stance ?? 'guard';
+        }
+      }
     }
   });
+}
+
+function pickUnit(): string | null {
+  const scene = sceneRef.value;
+  const renderer = unitRendererRef.value;
+  if (!scene || !renderer) return null;
+  const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh.name.startsWith('unit-inst-'));
+  return renderer.pickUnitId(pick?.pickedMesh ?? null);
 }
 
 function buildSim(map: MapDocument): void {
   const playable = ensurePlayableMap(map);
   const sim = new GameSim({ map: playable, catalog: DEFAULT_CATALOG, ownerId: userId.value });
   simRef.value = sim;
+  rtsEnabled.value = sim.isRtsEnabled();
+  gameStore.setRtsEnabled(rtsEnabled.value);
   gameStore.setMaxLives(playable.base.hp);
   const waveCount = (playable.waves?.length ?? 0) > 0 ? playable.waves.length : DEFAULT_CATALOG.waves.length;
   gameStore.setTotalWaves(waveCount);
   gameStore.setSnapshot(sim.serialize());
   selectedTowerId.value = null;
+  selectedUnitId.value = null;
+  rtsMode.value = 'idle';
+  rtsSelectedId.value = null;
+  relicPlaceTypeId.value = null;
   gameOver.value = false;
 }
 
@@ -324,8 +466,9 @@ async function init(): Promise<void> {
   setGridVisible(scene, true);
 
   buildSim(map);
-
   const sim = simRef.value!;
+  rtsEnabled.value = sim.isRtsEnabled();
+  gameStore.setRtsEnabled(rtsEnabled.value);
   catalog = await AssetCatalog.create(scene);
 
   // ── атмосфера (Фаза 3): день/ночь, тени, туман, погода, пост-процесс ──
@@ -349,6 +492,24 @@ async function init(): Promise<void> {
   relicRenderer = rRenderer;
   relicRendererRef.value = rRenderer;
 
+  // ── Фаза 6: RTS-рендер (только если режим включён) ──
+  if (sim.isRtsEnabled()) {
+    const commanderCatalogId = sim.getCommander()?.modelRef.catalogId ?? null;
+    const uRenderer = new UnitRenderer(
+      scene,
+      DEFAULT_CATALOG.defenderUnits ?? [],
+      DEFAULT_CATALOG.productionBuildings ?? [],
+      playable.grid,
+      playable.heightmap,
+      catalog,
+      commanderCatalogId,
+      playable.base
+    );
+    unitRenderer = uRenderer;
+    unitRendererRef.value = uRenderer;
+    for (const m of uRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
+  }
+
   // тени — только башни, враги и реликвии (юниты добавятся в Фазе 6). receiveShadows=false на террейне.
   for (const m of towerRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
   for (const m of enemyRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
@@ -366,6 +527,7 @@ async function init(): Promise<void> {
       projectiles: projectilePool,
       walls: wallRenderer,
       relics: rRenderer,
+      units: unitRenderer ?? undefined,
       atmosphere
     },
     (snap) => {
@@ -385,7 +547,7 @@ function restart(): void {
   if (!sim) return;
   const map = sim.map;
   buildSim(map);
-  // перерисуем башни/врагов/стены/реликвии с нового состояния сразу
+  // перерисуем башни/врагов/стены/реликвии/юнитов с нового состояния сразу
   const scene = sceneRef.value;
   if (scene) {
     const s = simRef.value!;
@@ -394,6 +556,7 @@ function restart(): void {
     projectilePool?.sync(s.state);
     wallRenderer?.sync(s.state);
     relicRenderer?.sync(s.state);
+    unitRenderer?.sync(s.state, 0);
     overlay?.updateRoute(s.getRouteWaypoints());
   }
   relicPlaceTypeId.value = null;
@@ -472,6 +635,54 @@ function cancelRelicPlace(): void {
   updatePreview();
 }
 
+// ── Фаза 6: RTS-обработчики ──
+function onSelectBuilding(typeId: string): void {
+  selectedTypeId.value = null;
+  selectedTowerId.value = null;
+  wallBuildMode.value = false;
+  repairMode.value = false;
+  sellMode.value = false;
+  relicPlaceTypeId.value = null;
+  rtsMode.value = 'build';
+  rtsSelectedId.value = typeId;
+  updatePreview();
+}
+
+function onSelectUnit(typeId: string): void {
+  selectedTypeId.value = null;
+  selectedTowerId.value = null;
+  wallBuildMode.value = false;
+  repairMode.value = false;
+  sellMode.value = false;
+  relicPlaceTypeId.value = null;
+  rtsMode.value = 'train';
+  rtsSelectedId.value = typeId;
+  updatePreview();
+}
+
+function onSelectSpell(spellId: string): void {
+  selectedTypeId.value = null;
+  wallBuildMode.value = false;
+  repairMode.value = false;
+  sellMode.value = false;
+  relicPlaceTypeId.value = null;
+  rtsMode.value = 'cast';
+  rtsSelectedId.value = spellId;
+  updatePreview();
+}
+
+function cancelRtsMode(): void {
+  rtsMode.value = 'idle';
+  rtsSelectedId.value = null;
+  updatePreview();
+}
+
+function setUnitStance(mode: UnitStance): void {
+  if (!selectedUnitId.value) return;
+  selectedUnitStance.value = mode;
+  applyAction({ kind: 'set-unit-stance', unitId: selectedUnitId.value, stance: mode });
+}
+
 function setTargeting(mode: TargetingMode): void {
   if (!selectedTowerId.value) return;
   selectedTowerMode.value = mode;
@@ -493,6 +704,7 @@ onBeforeUnmount(() => {
   projectilePool?.dispose();
   wallRenderer?.dispose();
   relicRenderer?.dispose();
+  unitRenderer?.dispose();
   atmosphere?.dispose();
   catalog?.dispose();
   engineRef.value?.dispose();
@@ -512,6 +724,14 @@ onBeforeUnmount(() => {
         <div v-if="relicPlaceTypeId" class="relic-place-banner">
           <span>Разместите реликвию в свободной клетке</span>
           <button class="btn ghost" @click="cancelRelicPlace">Отмена</button>
+        </div>
+
+        <!-- Фаза 6: индикатор RTS-режима мыши -->
+        <div v-if="rtsMode !== 'idle'" class="rts-mode-banner">
+          <span v-if="rtsMode === 'cast'">Цель заклинания — кликните по полю</span>
+          <span v-else-if="rtsMode === 'build'">Строительство здания — кликните по свободной клетке</span>
+          <span v-else-if="rtsMode === 'train'">Тренировка юнита — кликните по свободной клетке</span>
+          <button class="btn ghost" @click="cancelRtsMode">Отмена</button>
         </div>
 
         <!-- Фаза 5: драфт реликвий между волнами -->
@@ -588,6 +808,38 @@ onBeforeUnmount(() => {
         <section class="hint-block">
           <div class="info-title">Подсказка</div>
           <p class="hint">Выберите башню слева и кликните по клетке возле пути. Кнопка «Старт волны» запускает врагов. Цель — защитить базу (зелёный куб) от всех волн.</p>
+        </section>
+
+        <!-- Фаза 6: RTS-режим «Тёмная крепость» -->
+        <ProductionPanel
+          v-if="rtsEnabled"
+          :buildings="productionBuildings"
+          :units="defenderUnits"
+          :commander="commander"
+          :active-mode="rtsMode"
+          :selected-id="rtsSelectedId"
+          :resources="gameStore.resources"
+          :gold="gameStore.gold"
+          :cooldowns="gameStore.commanderCooldowns"
+          @select-building="onSelectBuilding"
+          @select-unit="onSelectUnit"
+          @select-spell="onSelectSpell"
+          @cancel="cancelRtsMode"
+        />
+
+        <!-- Фаза 6: выбор юнита → смена stance -->
+        <section v-if="rtsEnabled && selectedUnitId" class="unit-info">
+          <div class="info-title">Юнит</div>
+          <div class="stance-row">
+            <button
+              v-for="m in stanceOptions"
+              :key="m.mode"
+              class="btn ghost stance-btn"
+              :class="{ active: selectedUnitStance === m.mode }"
+              @click="setUnitStance(m.mode)"
+            >{{ m.label }}</button>
+          </div>
+          <p class="hint">Оборона — стоит на точке. Патруль — ходит вокруг. Атака — гонит врагов по всему полю.</p>
         </section>
       </aside>
     </div>
@@ -671,6 +923,24 @@ onBeforeUnmount(() => {
   z-index: 4;
 }
 .relic-place-banner .btn.ghost { margin: 0; }
+.rts-mode-banner {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 10px;
+  color: #fcd34d;
+  font-weight: 700;
+  font-size: 13px;
+  z-index: 4;
+}
+.rts-mode-banner .btn.ghost { margin: 0; }
 .game-side {
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.6);
@@ -682,6 +952,20 @@ onBeforeUnmount(() => {
 .tower-info, .hint-block {
   padding: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.unit-info {
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.stance-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.stance-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
 }
 .wall-shop {
   padding: 12px;

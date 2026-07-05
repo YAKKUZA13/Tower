@@ -1,5 +1,15 @@
 import { defineStore } from 'pinia';
-import type { GameSnapshot, PlacedRelic, SimStatus, TowerType, Weather } from '@tower/shared';
+import type {
+  CommanderCooldowns,
+  GameSnapshot,
+  PlacedRelic,
+  ProductionBuilding,
+  DefenderUnit,
+  ResourceId,
+  SimStatus,
+  TowerType,
+  Weather
+} from '@tower/shared';
 
 interface GameState {
   tick: number;
@@ -18,7 +28,20 @@ interface GameState {
   relics: PlacedRelic[];
   /** TypeId реликвий для драфта (когда status==='draft'). */
   pendingRelicChoices: string[];
+  // ── RTS (Фаза 6) ──
+  /** Включён ли RTS-режим. */
+  rtsEnabled: boolean;
+  /** Запас ресурсов (wood/stone/ore; gold живёт в `gold`). */
+  resources: Record<ResourceId, number>;
+  /** Производственные здания (для UI счётчиков). */
+  productionBuildings: ProductionBuilding[];
+  /** Защитные юниты (для UI счётчиков). */
+  defenderUnits: DefenderUnit[];
+  /** Кулдауны заклинаний командира: spellId → сек до готовности. */
+  commanderCooldowns: CommanderCooldowns;
 }
+
+const EMPTY_RESOURCES: Record<ResourceId, number> = { wood: 0, stone: 0, ore: 0, gold: 0 };
 
 export const useGameStore = defineStore('game', {
   state: (): GameState => ({
@@ -35,7 +58,12 @@ export const useGameStore = defineStore('game', {
     timeOfDay: 0.5,
     weather: 'clear',
     relics: [],
-    pendingRelicChoices: []
+    pendingRelicChoices: [],
+    rtsEnabled: false,
+    resources: { ...EMPTY_RESOURCES },
+    productionBuildings: [],
+    defenderUnits: [],
+    commanderCooldowns: {}
   }),
   getters: {
     waveLabel: (s): string => {
@@ -59,11 +87,21 @@ export const useGameStore = defineStore('game', {
         case 'storm': return 'Гроза';
         default: return 'Ясно';
       }
-    }
+    },
+    /** Форматированная строка ресурсов для UI (только RTS). */
+    resourcesLabel(s): string {
+      if (!s.rtsEnabled) return '';
+      return `🪵${Math.floor(s.resources.wood)} 🪨${Math.floor(s.resources.stone)} ⛏${Math.floor(s.resources.ore)}`;
+    },
+    /** Готовность заклинания по spellId. */
+    isSpellReady: (s) => (spellId: string): boolean => (s.commanderCooldowns[spellId] ?? 0) <= 0
   },
   actions: {
     setTotalWaves(n: number): void {
       this.totalWaves = n;
+    },
+    setRtsEnabled(enabled: boolean): void {
+      this.rtsEnabled = enabled;
     },
     setSnapshot(snap: GameSnapshot): void {
       this.tick = snap.tick;
@@ -79,6 +117,16 @@ export const useGameStore = defineStore('game', {
       this.weather = snap.weather;
       this.relics = snap.relics;
       this.pendingRelicChoices = snap.pendingRelicChoices;
+      // RTS
+      this.resources = {
+        wood: Math.floor(snap.resources?.wood ?? 0),
+        stone: Math.floor(snap.resources?.stone ?? 0),
+        ore: Math.floor(snap.resources?.ore ?? 0),
+        gold: 0
+      };
+      this.productionBuildings = snap.productionBuildings ?? [];
+      this.defenderUnits = snap.defenderUnits ?? [];
+      this.commanderCooldowns = { ...(snap.commanderCooldowns ?? {}) };
     },
     setMaxLives(n: number): void {
       this.maxLives = n;

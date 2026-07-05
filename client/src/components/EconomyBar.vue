@@ -4,7 +4,7 @@ import { useGameStore } from '../stores/game-store';
 
 const emit = defineEmits<{ (e: 'start-wave'): void }>();
 const store = useGameStore();
-const { gold, lives, maxLives, waveLabel, status, canStartWave, waveEnemiesRemaining, enemiesAlive, timePhase, weatherLabel } = storeToRefs(store);
+const { gold, lives, maxLives, waveLabel, status, canStartWave, waveEnemiesRemaining, enemiesAlive, timePhase, weatherLabel, rtsEnabled, resources, resourcesLabel } = storeToRefs(store);
 
 const statusLabel: Record<string, string> = {
   prep: 'Подготовка',
@@ -21,6 +21,20 @@ const statusLabel: Record<string, string> = {
       <span class="stat-label">Золото</span>
       <span class="stat-value">{{ gold }}</span>
     </div>
+    <template v-if="rtsEnabled">
+      <div class="stat res">
+        <span class="stat-label">Дерево</span>
+        <span class="stat-value">{{ resources.wood }}</span>
+      </div>
+      <div class="stat res">
+        <span class="stat-label">Камень</span>
+        <span class="stat-value">{{ resources.stone }}</span>
+      </div>
+      <div class="stat res">
+        <span class="stat-label">Руда</span>
+        <span class="stat-value">{{ resources.ore }}</span>
+      </div>
+    </template>
     <div class="stat lives">
       <span class="stat-label">Жизни</span>
       <span class="stat-value">{{ lives }}<span class="muted">/{{ maxLives }}</span></span>
@@ -85,6 +99,7 @@ const statusLabel: Record<string, string> = {
 .stat.status .stat-value.won { color: #22c55e; }
 .stat.status .stat-value.lost { color: #ef4444; }
 .stat.env .stat-value { color: #94a3b8; font-size: 15px; }
+.stat.res .stat-value { color: #86efac; font-size: 15px; }
 .muted { color: #64748b; font-weight: 600; }
 .minor .stat-value { font-size: 14px; color: #cbd5e1; }
 .btn {

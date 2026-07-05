@@ -4,6 +4,7 @@
  */
 
 import type { Wave } from './td.js';
+import type { ResourceBag } from './economy.js';
 
 export interface Vector3Data {
   x: number;
@@ -69,4 +70,20 @@ export interface MapDocument {
   base: BaseDef;
   startingGold: number;
   waves: Wave[];
+  // ── RTS-режим «Тёмная крепость» (Phase 6, концепция 3). Опциональный. ──
+  rts?: RtsConfig;
+}
+
+/**
+ * Конфигурация RTS-режима на карте (Phase 6).
+ * Когда rts отсутствует или enabled=false — карта играется как чистый TD.
+ */
+export interface RtsConfig {
+  enabled: boolean;
+  /** Стартовый запас ресурсов экономки. */
+  startingResources?: ResourceBag;
+  /** Id каталога командира (какой лорд ведёт оборону). Опц. — дефолт = 'commander:necromancer'. */
+  commanderTypeId?: string;
+  /** Стартовые здания (typeId + col/row) — размещаются при инициализации сима. */
+  startBuildings?: Array<{ typeId: string; col: number; row: number }>;
 }

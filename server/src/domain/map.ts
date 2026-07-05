@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { BaseDef, MapDocument, Waypoint } from '../types/map.js';
+import type { BaseDef, MapDocument, RtsConfig, Waypoint } from '../types/map.js';
 
 const DEFAULT_GRID = { cols: 32, rows: 18, cellSize: 1.5 };
 
@@ -122,7 +122,7 @@ export function normalizeMapDocument(input: MapInput = {}): MapDocument {
   const spawnPoint: Waypoint = clampWaypoint(input.spawnPoint, lastCol, lastRow, { col: 0, row: 0 });
   const base: BaseDef = normalizeBase(input.base, lastCol, lastRow);
 
-  return {
+  const result: MapDocument = {
     ...fallback,
     ...input,
     version: Number(input.version || fallback.version),
@@ -142,6 +142,39 @@ export function normalizeMapDocument(input: MapInput = {}): MapDocument {
     startingGold: Math.max(0, Number(input.startingGold) || 100),
     waves: Array.isArray(input.waves) ? input.waves : []
   };
+  const rts = normalizeRts(input.rts, lastCol, lastRow);
+  if (rts) result.rts = rts;
+  return result;
+}
+
+/**
+ * Нормализация RTS-конфигурации (Phase 6). Если поле отсутствует или enabled=false —
+ * возвращаем undefined (карта играется как чистый TD).
+ */
+function normalizeRts(input: any, maxCol: number, maxRow: number): RtsConfig | undefined {
+  if (!input || typeof input !== 'object' || !input.enabled) return undefined;
+  const startingResources = input.startingResources && typeof input.startingResources === 'object'
+    ? {
+      wood: Math.max(0, Number(input.startingResources.wood) || 0),
+      stone: Math.max(0, Number(input.startingResources.stone) || 0),
+      ore: Math.max(0, Number(input.startingResources.ore) || 0),
+      gold: Math.max(0, Number(input.startingResources.gold) || 0)
+    }
+    : undefined;
+  const startBuildings = Array.isArray(input.startBuildings)
+    ? input.startBuildings
+      .filter((b: any) => b && typeof b.typeId === 'string')
+      .map((b: any) => ({
+        typeId: String(b.typeId),
+        col: clampInt(b.col, 0, maxCol, 0),
+        row: clampInt(b.row, 0, maxRow, 0)
+      }))
+    : undefined;
+  const rts: RtsConfig = { enabled: true };
+  if (input.commanderTypeId) rts.commanderTypeId = String(input.commanderTypeId);
+  if (startingResources) rts.startingResources = startingResources;
+  if (startBuildings && startBuildings.length > 0) rts.startBuildings = startBuildings;
+  return rts;
 }
 
 function clampWaypoint(input: any, maxCol: number, maxRow: number, fallback: Waypoint): Waypoint {

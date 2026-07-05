@@ -21,6 +21,14 @@
     { "catalogId": "relic:totem-arcane", "kind": "relic", "builder": "relic:totem-arcane", "baseColor": [0.26, 0.24, 0.34], "emissive": [0.55, 0.28, 0.85] },
     { "catalogId": "relic:totem-gold",   "kind": "relic", "builder": "relic:totem-gold",   "baseColor": [0.40, 0.34, 0.20], "emissive": [0.83, 0.66, 0.22] },
     { "catalogId": "relic:totem-ice",    "kind": "relic", "builder": "relic:totem-ice",    "baseColor": [0.46, 0.52, 0.58], "emissive": [0.45, 0.82, 0.95] },
-    { "catalogId": "relic:totem-blood",  "kind": "relic", "builder": "relic:totem-blood",  "baseColor": [0.32, 0.24, 0.22], "emissive": [0.62, 0.10, 0.10] }
+    { "catalogId": "relic:totem-blood",  "kind": "relic", "builder": "relic:totem-blood",  "baseColor": [0.32, 0.24, 0.22], "emissive": [0.62, 0.10, 0.10] },
+    { "catalogId": "building:sawmill",   "kind": "building", "builder": "building:sawmill",   "baseColor": [0.27, 0.18, 0.10], "emissive": [0.95, 0.45, 0.12] },
+    { "catalogId": "building:mine",      "kind": "building", "builder": "building:mine",      "baseColor": [0.42, 0.42, 0.46], "emissive": [0.83, 0.66, 0.22] },
+    { "catalogId": "building:smelter",   "kind": "building", "builder": "building:smelter",   "baseColor": [0.42, 0.42, 0.46], "emissive": [1.00, 0.85, 0.40] },
+    { "catalogId": "building:barracks",  "kind": "building", "builder": "building:barracks",  "baseColor": [0.42, 0.42, 0.46], "emissive": [0.62, 0.10, 0.10] },
+    { "catalogId": "unit:knight",        "kind": "unit", "builder": "unit:knight",        "baseColor": [0.34, 0.35, 0.40], "emissive": [0.45, 1.00, 0.75] },
+    { "catalogId": "unit:archer",        "kind": "unit", "builder": "unit:archer",        "baseColor": [0.36, 0.40, 0.32], "emissive": [0.83, 0.66, 0.22] },
+    { "catalogId": "unit:mage",          "kind": "unit", "builder": "unit:mage",          "baseColor": [0.30, 0.30, 0.33], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "unit:commander",     "kind": "unit", "builder": "unit:commander",     "baseColor": [0.30, 0.30, 0.33], "emissive": [0.78, 0.55, 1.00] }
   ]
 }

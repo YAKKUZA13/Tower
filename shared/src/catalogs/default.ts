@@ -6,6 +6,12 @@
 
 import type { EnemyType, TowerType, WallMaterialDef, Wave } from '../types/td.js';
 import type { RelicType } from '../types/relic.js';
+import type {
+  CommanderType,
+  DefenderUnitType,
+  ProductionBuildingType,
+  ResourceId
+} from '../types/economy.js';
 import type { GameCatalog } from '../types/sim.js';
 
 // ── Башни (4) ────────────────────────────────────────────────────────
@@ -289,10 +295,141 @@ export const DEFAULT_RELICS: RelicType[] = [
   }
 ];
 
+// ── RTS: Производственные здания (Фаза 6) ─────────────────────────────
+// Цепочки переработки: Sawmill/Mine (добыча) → Smelter (руда→золото) / Barracks (юниты).
+// Симплекс: 4 здания, 4 ресурса. Стоимость зданий в разных ресурсах → нужна экономика.
+export const DEFAULT_PRODUCTION_BUILDINGS: ProductionBuildingType[] = [
+  {
+    id: 'sawmill',
+    name: 'Лесопилка',
+    cost: { wood: 30 },
+    output: [{ resource: 'wood', perSec: 1.2 }],
+    modelRef: { catalogId: 'building:sawmill', scale: 1 },
+    description: 'Добывает дерево. Основа ранней экономики.'
+  },
+  {
+    id: 'mine',
+    name: 'Шахта',
+    cost: { wood: 40 },
+    output: [{ resource: 'stone', perSec: 0.6 }, { resource: 'ore', perSec: 0.6 }],
+    modelRef: { catalogId: 'building:mine', scale: 1 },
+    description: 'Добывает камень и руду.'
+  },
+  {
+    id: 'smelter',
+    name: 'Плавильня',
+    cost: { wood: 50, stone: 30 },
+    input: [{ resource: 'ore', perSec: 0.6 }],
+    output: [{ resource: 'gold', perSec: 0.4 }],
+    modelRef: { catalogId: 'building:smelter', scale: 1 },
+    description: 'Переплавляет руду в золото. Цепочка переработки.'
+  },
+  {
+    id: 'barracks',
+    name: 'Казармы',
+    cost: { wood: 60, stone: 40 },
+    output: [],
+    modelRef: { catalogId: 'building:barracks', scale: 1 },
+    description: 'Тренировочный лагерь для защитных юнитов. Сама не производит ресурсы.'
+  }
+];
+
+// ── RTS: Защитные юниты (Фаза 6) ──────────────────────────────────────
+// Knight — ближний танковый; Archer — дальний скорострельный; Mage — медленный маг.
+export const DEFAULT_DEFENDER_UNITS: DefenderUnitType[] = [
+  {
+    id: 'knight',
+    name: 'Рыцарь',
+    cost: { gold: 25 },
+    hp: 90,
+    damage: 14,
+    range: 1.0,
+    speed: 1.4,
+    fireRate: 1.0,
+    modelRef: { catalogId: 'unit:knight', scale: 1 },
+    description: 'Прочный ближний боец. Принимает удар на себя.'
+  },
+  {
+    id: 'archer',
+    name: 'Лучник',
+    cost: { gold: 30, wood: 10 },
+    hp: 45,
+    damage: 10,
+    range: 3.0,
+    speed: 1.2,
+    fireRate: 1.4,
+    modelRef: { catalogId: 'unit:archer', scale: 1 },
+    description: 'Дальний скорострельный стрелок. Бьёт издали.'
+  },
+  {
+    id: 'mage',
+    name: 'Маг',
+    cost: { gold: 45, ore: 10 },
+    hp: 40,
+    damage: 22,
+    range: 2.6,
+    speed: 1.0,
+    fireRate: 0.7,
+    modelRef: { catalogId: 'unit:mage', scale: 1 },
+    description: 'Медленный, но мощный. Игнорирует броню магией.'
+  }
+];
+
+// ── RTS: Командиры-заклинатели (Фаза 6) ───────────────────────────────
+export const DEFAULT_COMMANDERS: CommanderType[] = [
+  {
+    id: 'commander:necromancer',
+    name: 'Некромант',
+    modelRef: { catalogId: 'unit:commander', scale: 1 },
+    spells: [
+      {
+        id: 'meteor',
+        name: 'Метеор',
+        description: 'Огненный дождь по области: урон всем врагам в радиусе.',
+        effect: 'meteor',
+        cooldown: 22,
+        radius: 2.5,
+        power: 80
+      },
+      {
+        id: 'freeze',
+        name: 'Стужа',
+        description: 'Замораживает врагов в области на короткое время.',
+        effect: 'freeze',
+        cooldown: 18,
+        radius: 3.0,
+        power: 3
+      },
+      {
+        id: 'heal-walls',
+        name: 'Стальная воля',
+        description: 'Восстанавливает 50% прочности всех стен лабиринта.',
+        effect: 'heal-walls',
+        cooldown: 30,
+        power: 0.5
+      },
+      {
+        id: 'gold-rush',
+        name: 'Жатва',
+        description: 'Мгновенно приносит золото в казну крепости.',
+        effect: 'gold-rush',
+        cooldown: 28,
+        power: 60
+      }
+    ]
+  }
+];
+
+/** Все возможные ресурсы RTS в фиксированном порядке (для UI/итерации). */
+export const RESOURCE_ORDER: ResourceId[] = ['wood', 'stone', 'ore', 'gold'];
+
 export const DEFAULT_CATALOG: GameCatalog = {
   towers: DEFAULT_TOWER_TYPES,
   enemies: DEFAULT_ENEMY_TYPES,
   waves: DEFAULT_WAVES,
   walls: DEFAULT_WALL_MATERIALS,
-  relics: DEFAULT_RELICS
+  relics: DEFAULT_RELICS,
+  productionBuildings: DEFAULT_PRODUCTION_BUILDINGS,
+  defenderUnits: DEFAULT_DEFENDER_UNITS,
+  commanders: DEFAULT_COMMANDERS
 };

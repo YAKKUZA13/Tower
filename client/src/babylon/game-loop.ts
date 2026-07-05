@@ -11,6 +11,7 @@ import type { TowerRenderer } from './towers/tower-renderer';
 import type { ProjectilePool } from './projectiles/projectile-pool';
 import type { WallRenderer } from './walls/wall-renderer';
 import type { RelicRenderer } from './relics/relic-renderer';
+import type { UnitRenderer } from './units/unit-renderer';
 import type { AtmosphereRenderer } from './atmosphere';
 
 export interface GameRenderers {
@@ -21,6 +22,8 @@ export interface GameRenderers {
   walls?: WallRenderer;
   /** Реликвии-тотемы (Фаза 5). Опционально. */
   relics?: RelicRenderer;
+  /** RTS юниты/здания/заклинания (Фаза 6). Опционально. */
+  units?: UnitRenderer;
   /** Атмосфера (день/ночь/погода/пост-процесс). Опционально (нет в редакторе). */
   atmosphere?: AtmosphereRenderer;
 }
@@ -50,6 +53,7 @@ export function startGameLoop(
     renderers.projectiles.sync(state);
     renderers.walls?.sync(state);
     renderers.relics?.sync(state);
+    renderers.units?.sync(state, dt);
     renderers.atmosphere?.sync(state, dt);
     if (onRouteChange && state.routeVersion !== lastRouteVersion) {
       lastRouteVersion = state.routeVersion;

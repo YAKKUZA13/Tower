@@ -194,7 +194,37 @@ const mapRoutes: FastifyPluginAsync = async (app) => {
           },
           terrain: { type: 'object', additionalProperties: true },
           lighting: { type: 'object', additionalProperties: true },
-          metadata: { type: 'object', additionalProperties: true }
+          metadata: { type: 'object', additionalProperties: true },
+          rts: {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              enabled: { type: 'boolean' },
+              commanderTypeId: { type: 'string' },
+              startingResources: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  wood: { type: 'number', minimum: 0 },
+                  stone: { type: 'number', minimum: 0 },
+                  ore: { type: 'number', minimum: 0 },
+                  gold: { type: 'number', minimum: 0 }
+                }
+              },
+              startBuildings: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['typeId', 'col', 'row'],
+                  properties: {
+                    typeId: { type: 'string' },
+                    col: { type: 'integer', minimum: 0 },
+                    row: { type: 'integer', minimum: 0 }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

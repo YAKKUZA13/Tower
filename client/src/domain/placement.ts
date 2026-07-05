@@ -8,8 +8,6 @@ import type { PlacedRelic } from '@tower/shared';
 import type { PlacedObject, WorldTransform } from './map';
 import { hasValidRoute } from './pathfinding';
 
-// ── Редактор: размещение свободных объектов в мире (bounds-overlap) ──────────────
-
 export interface PlacementBounds {
   minX: number;
   maxX: number;
@@ -130,4 +128,50 @@ export function canPlaceRelic(ctx: PlacementContext, col: number, row: number): 
   if (!inBounds(grid, col, row)) return false;
   if (cellOccupied(ctx, col, row)) return false;
   return true;
+}
+
+// ── RTS: производственные здания и юниты (Фаза 6) ──────────────────────────────
+
+export interface RtsPlacementContext extends PlacementContext {
+  /** Производственные здания (для взаимного исключения клеток). */
+  productionBuildings?: Array<{ col: number; row: number }>;
+  /** Защитные юниты (для взаимного исключения клеток при training-place). */
+  defenderUnits?: Array<{ col: number; row: number }>;
+}
+
+/**
+ * Можно ли построить производственное здание. Здания НЕ блокируют A*-маршрут
+ * врагов (как реликвии) — это объекты игрока вне коридора. Но нельзя строить на
+ * занятых клетках, на spawn/base и на клетках маршрута (для чистоты поля).
+ */
+export function canPlaceProductionBuilding(ctx: RtsPlacementContext, col: number, row: number): boolean {
+  if (!inBounds(ctx.grid, col, row)) return false;
+  if (rtsCellOccupied(ctx, col, row)) return false;
+  return true;
+}
+
+/**
+ * Можно ли разместить/обучить юнита в клетке. Юниты подвижны и могут делить клетки,
+ * но спавнить лучше в свободной клетке (не стена/не башня/не spawn-портал).
+ * Здесь используем «мягкую» проверку — только на явные блокирующие сущности.
+ */
+export function canTrainUnit(ctx: RtsPlacementContext, col: number, row: number): boolean {
+  if (!inBounds(ctx.grid, col, row)) return false;
+  // юнит не может стоять на стене/башне/здании/spawn/base
+  const { spawn, base, walls, towers, productionBuildings } = ctx;
+  if (col === spawn.col && row === spawn.row) return false;
+  if (col === base.col && row === base.row) return false;
+  for (const w of walls) if (w.col === col && w.row === row) return false;
+  for (const t of towers) if (t.col === col && t.row === row) return false;
+  if (productionBuildings) for (const b of productionBuildings) if (b.col === col && b.row === row) return false;
+  return true;
+}
+
+/** Занята ли клетка любой RTS-сущностью (стена/башня/реликвия/здание/spawn/base). */
+function rtsCellOccupied(ctx: RtsPlacementContext, col: number, row: number): boolean {
+  if (cellOccupied(ctx, col, row)) return true;
+  if (ctx.productionBuildings) {
+    for (const b of ctx.productionBuildings) if (b.col === col && b.row === row) return true;
+  }
+  return false;
 }
