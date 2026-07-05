@@ -5,6 +5,7 @@
  */
 
 import type { EnemyType, TowerType, WallMaterialDef, Wave } from '../types/td.js';
+import type { RelicType } from '../types/relic.js';
 import type { GameCatalog } from '../types/sim.js';
 
 // ── Башни (4) ────────────────────────────────────────────────────────
@@ -183,9 +184,115 @@ export const DEFAULT_WALL_MATERIALS: WallMaterialDef[] = [
   }
 ];
 
+// ── Реликвии (Фаза 5, концепция 1) ───────────────────────────────────
+// 4 common / 5 rare / 3 epic. Визуальная модель тотема подобрана по теме эффекта.
+// catalogId тотемов резолвятся в client/src/babylon/voxel/voxel-builder.ts.
+export const DEFAULT_RELICS: RelicType[] = [
+  // ── Common (мелкие, направленные бонусы) ──
+  {
+    id: 'rune-of-arrows',
+    name: 'Руна стрел',
+    rarity: 'common',
+    description: '+15% урона всем физическим башням.',
+    effect: { target: 'towers-by-category', categoryFilter: 'physical', damageMult: 1.15 },
+    modelRef: { catalogId: 'relic:totem-fire', scale: 1 }
+  },
+  {
+    id: 'glyph-of-haste',
+    name: 'Глиф спешки',
+    rarity: 'common',
+    description: '+12% скорострельности всем башням.',
+    effect: { target: 'all-towers', fireRateMult: 1.12 },
+    modelRef: { catalogId: 'relic:totem-gold', scale: 1 }
+  },
+  {
+    id: 'lucky-coin',
+    name: 'Счастливая монета',
+    rarity: 'common',
+    description: '+1 золота за каждое убийство.',
+    effect: { target: 'economy', goldOnKillBonus: 1 },
+    modelRef: { catalogId: 'relic:totem-gold', scale: 1 }
+  },
+  {
+    id: 'mithril-runes',
+    name: 'Мифриловые руны',
+    rarity: 'common',
+    description: '+20% к прочности всех новых и существующих стен.',
+    effect: { target: 'walls', wallHpMult: 1.20 },
+    modelRef: { catalogId: 'relic:totem-ice', scale: 1 }
+  },
+  // ── Rare (заметные, узконаправленные) ──
+  {
+    id: 'blood-frenzy',
+    name: 'Кровавый раж',
+    rarity: 'rare',
+    description: '+25% урона всем башням.',
+    effect: { target: 'all-towers', damageMult: 1.25 },
+    modelRef: { catalogId: 'relic:totem-blood', scale: 1 }
+  },
+  {
+    id: 'eagle-eye',
+    name: 'Орлиный глаз',
+    rarity: 'rare',
+    description: '+18% дальности всем башням.',
+    effect: { target: 'all-towers', rangeMult: 1.18 },
+    modelRef: { catalogId: 'relic:totem-ice', scale: 1 }
+  },
+  {
+    id: 'greed-pact',
+    name: 'Пакт жадности',
+    rarity: 'rare',
+    description: '+15% золота за убийства и зачистку волн.',
+    effect: { target: 'economy', goldMult: 1.15 },
+    modelRef: { catalogId: 'relic:totem-gold', scale: 1 }
+  },
+  {
+    id: 'frost-shard',
+    name: 'Осколок льда',
+    rarity: 'rare',
+    description: 'Попадания всех башень замедляют врагов на 20%.',
+    effect: { target: 'all-towers', slowOnHit: 0.8 },
+    modelRef: { catalogId: 'relic:totem-ice', scale: 1 }
+  },
+  {
+    id: 'arcane-surge',
+    name: 'Магический всплеск',
+    rarity: 'rare',
+    description: '+30% урона всем магическим башням.',
+    effect: { target: 'towers-by-category', categoryFilter: 'magic', damageMult: 1.30 },
+    modelRef: { catalogId: 'relic:totem-arcane', scale: 1 }
+  },
+  // ── Epic (мощные, многоэффектные) ──
+  {
+    id: 'war-drums',
+    name: 'Боевые барабаны',
+    rarity: 'epic',
+    description: '+20% урона и +10% скорострельности всем башням.',
+    effect: { target: 'all-towers', damageMult: 1.20, fireRateMult: 1.10 },
+    modelRef: { catalogId: 'relic:totem-blood', scale: 1 }
+  },
+  {
+    id: 'siege-breaker',
+    name: 'Разрушитель осад',
+    rarity: 'epic',
+    description: '+35% урона осадным башням и +0.4 к радиусу взрыва снарядов.',
+    effect: { target: 'towers-by-category', categoryFilter: 'siege', damageMult: 1.35, splashAdded: 0.4 },
+    modelRef: { catalogId: 'relic:totem-fire', scale: 1 }
+  },
+  {
+    id: 'overcharge',
+    name: 'Перегрузка',
+    rarity: 'epic',
+    description: '+25% урона, +15% дальности всем башням и +1 золота за убийство.',
+    effect: { target: 'global', damageMult: 1.25, rangeMult: 1.15, goldOnKillBonus: 1 },
+    modelRef: { catalogId: 'relic:totem-arcane', scale: 1 }
+  }
+];
+
 export const DEFAULT_CATALOG: GameCatalog = {
   towers: DEFAULT_TOWER_TYPES,
   enemies: DEFAULT_ENEMY_TYPES,
   waves: DEFAULT_WAVES,
-  walls: DEFAULT_WALL_MATERIALS
+  walls: DEFAULT_WALL_MATERIALS,
+  relics: DEFAULT_RELICS
 };

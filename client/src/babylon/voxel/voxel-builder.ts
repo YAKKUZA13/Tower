@@ -450,6 +450,107 @@ export function boneWall(): Voxel[] {
   return v;
 }
 
+// ── Реликвии-тотемы (Фаза 5, концепция 1) ────────────────────────────────
+// Общий силуэт: каменный пьедестал + парящий/остроконечный кристалл со свечением.
+// Высота ≈ 1.0 (y ∈ [-0.5, 0.5]), отцентрировано в (0,0,0). Цвет кристалла = тема эффекта.
+
+/** Огненный тотем — чёрный обелиск с пламенем на вершине. */
+export function relicFireTotem(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, s = PALETTE.stone;
+  // пьедестал
+  fill(v, -0.30, 0.30, -0.50, -0.40, -0.30, 0.30, 0.14, sd);
+  fill(v, -0.26, 0.26, -0.40, -0.26, -0.24, 0.24, 0.12, s);
+  // обелиск
+  for (let i = 0; i < 4; i++) {
+    const half = 0.16 - i * 0.02;
+    const y = -0.26 + i * 0.16;
+    fill(v, -half, half, y, y + 0.14, -half, half, 0.12, i % 2 ? s : sd);
+  }
+  // огненное ядро (языки пламени)
+  box(v, 0, 0.06, 0, 0.14, 0.18, 0.14, ACCENT.fire);
+  box(v, 0, 0.24, 0, 0.10, 0.16, 0.10, ACCENT.fireCore);
+  box(v, 0, 0.38, 0, 0.05, 0.10, 0.05, ACCENT.fireCore);
+  // руны у основания
+  box(v, 0, -0.44, 0.16, 0.16, 0.04, 0.02, ACCENT.fire);
+  return v;
+}
+
+/** Магический тотем — осколки обелиска с фиолетовым кристаллом. */
+export function relicArcaneTotem(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
+  fill(v, -0.28, 0.28, -0.50, -0.40, -0.28, 0.28, 0.14, sd);
+  // три наклонных осколка (имитация через смещённые боксы)
+  box(v, -0.14, -0.20, 0, 0.08, 0.50, 0.08, sl);
+  box(v, 0.14, -0.16, 0.04, 0.08, 0.46, 0.08, sd);
+  box(v, 0, -0.10, -0.10, 0.08, 0.42, 0.08, shade(sl, 0.9));
+  // парящий фиолетовый кристалл (ромб)
+  box(v, 0, 0.18, 0, 0.18, 0.22, 0.18, ACCENT.arcane);
+  box(v, 0, 0.34, 0, 0.10, 0.12, 0.10, ACCENT.arcaneCore);
+  box(v, 0, 0.06, 0, 0.10, 0.06, 0.10, ACCENT.arcaneCore);
+  // руны
+  box(v, 0, -0.44, 0.16, 0.14, 0.04, 0.02, ACCENT.arcane);
+  return v;
+}
+
+/** Золотой тотем — колонна с рунным кольцом и золотым шаром. */
+export function relicGoldTotem(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, s = PALETTE.stone;
+  fill(v, -0.30, 0.30, -0.50, -0.42, -0.30, 0.30, 0.14, sd);
+  // колонна
+  fill(v, -0.16, 0.16, -0.30, 0.10, -0.16, 0.16, 0.12, s);
+  fill(v, -0.18, 0.18, 0.10, 0.18, -0.18, 0.18, 0.12, shade(s, 0.92));
+  // рунное кольцо (золото)
+  for (const sy of [-0.18, 0.06]) {
+    fill(v, -0.20, 0.20, sy, sy + 0.05, -0.20, 0.20, 0.10, ACCENT.gold);
+  }
+  // золотой шар-ядро
+  box(v, 0, 0.26, 0, 0.16, 0.16, 0.16, ACCENT.gold);
+  box(v, 0, 0.26, 0, 0.08, 0.08, 0.08, ACCENT.fireCore);
+  return v;
+}
+
+/** Ледяной тотем — обледенелый шпиль с кристаллом льда. */
+export function relicIceTotem(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
+  fill(v, -0.28, 0.28, -0.50, -0.40, -0.28, 0.28, 0.14, sd);
+  // шпиль
+  for (let i = 0; i < 4; i++) {
+    const half = 0.15 - i * 0.025;
+    const y = -0.28 + i * 0.16;
+    fill(v, -half, half, y, y + 0.14, -half, half, 0.12, shade(sl, 0.95 - i * 0.05));
+  }
+  // кристалл льда
+  box(v, 0, 0.24, 0, 0.16, 0.20, 0.16, ACCENT.ice);
+  box(v, 0, 0.38, 0, 0.08, 0.10, 0.08, ACCENT.iceCore);
+  // сосульки
+  box(v, -0.18, -0.18, 0.18, 0.05, 0.14, 0.05, ACCENT.ice);
+  box(v, 0.18, -0.18, -0.18, 0.05, 0.14, 0.05, ACCENT.ice);
+  return v;
+}
+
+/** Кровавый тотем — черепа на столбе с кровавым камнем. */
+export function relicBloodTotem(): Voxel[] {
+  const v: Voxel[] = [];
+  const bo = PALETTE.bone, bod = PALETTE.boneDark, sd = PALETTE.stoneDark;
+  fill(v, -0.28, 0.28, -0.50, -0.42, -0.28, 0.28, 0.14, sd);
+  // костяной столб
+  fill(v, -0.10, 0.10, -0.28, 0.08, -0.10, 0.10, 0.10, bod);
+  fill(v, -0.12, 0.12, 0.08, 0.20, -0.12, 0.12, 0.10, bo);
+  // кровавый камень (пульсирующее ядро)
+  box(v, 0, 0.26, 0, 0.18, 0.18, 0.18, ACCENT.blood);
+  box(v, 0, 0.26, 0.10, 0.06, 0.06, 0.02, ACCENT.eyeRed);
+  // черепа у основания
+  box(v, -0.18, -0.40, 0.12, 0.10, 0.10, 0.10, bo);
+  box(v, 0.18, -0.40, 0.12, 0.10, 0.10, 0.10, bo);
+  box(v, -0.16, -0.40, 0.17, 0.02, 0.02, 0.02, ACCENT.eyeRed);
+  box(v, 0.20, -0.40, 0.17, 0.02, 0.02, 0.02, ACCENT.eyeRed);
+  return v;
+}
+
 /** Реестр процедурных билдеров по имени (используется asset-catalog). */
 export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'tower:arrow': arrowTower,
@@ -466,7 +567,12 @@ export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'projectile:bolt': projectileBolt,
   'wall:wood': woodWall,
   'wall:stone': stoneWall,
-  'wall:bone': boneWall
+  'wall:bone': boneWall,
+  'relic:totem-fire': relicFireTotem,
+  'relic:totem-arcane': relicArcaneTotem,
+  'relic:totem-gold': relicGoldTotem,
+  'relic:totem-ice': relicIceTotem,
+  'relic:totem-blood': relicBloodTotem
 };
 
 /** Emissive-акцент модели по имени билдера (для материала). */
@@ -482,6 +588,11 @@ export function builderEmissive(builderName: string): RGB | undefined {
     case 'spawn:portal': return ACCENT.fire;
     case 'projectile:bolt': return ACCENT.fireCore;
     case 'wall:bone': return ACCENT.eyeRed;
+    case 'relic:totem-fire': return ACCENT.fire;
+    case 'relic:totem-arcane': return ACCENT.arcane;
+    case 'relic:totem-gold': return ACCENT.gold;
+    case 'relic:totem-ice': return ACCENT.ice;
+    case 'relic:totem-blood': return ACCENT.blood;
     default: return undefined;
   }
 }

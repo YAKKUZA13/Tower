@@ -7,6 +7,7 @@
  */
 
 import type { Enemy, EnemyType, Tower, TowerType, Wall, WallMaterial, WallMaterialDef, Wave } from './td.js';
+import type { PlacedRelic, RelicType } from './relic.js';
 
 export type SimStatus = 'prep' | 'wave' | 'draft' | 'won' | 'lost';
 export type CoopRole = 'builder' | 'economist' | 'commander' | 'free';
@@ -50,6 +51,10 @@ export interface GameSnapshot {
   routeVersion: number;
   /** Сколько врагов ещё не убито в текущей волне (pending + живые). Для UI/rules. */
   waveEnemiesRemaining: number;
+  /** Реликвии, размещённые на поле (Фаза 5). */
+  relics: PlacedRelic[];
+  /** 3 typeId реликвий для драфта (только когда status==='draft'). */
+  pendingRelicChoices: string[];
   // ── окружение (Фаза 3 использует; заложено с Фазы 1 для детерминированности) ──
   timeOfDay: number; // 0..1
   weather: Weather;
@@ -60,7 +65,8 @@ export interface GameSnapshot {
 
 /**
  * Действия игрока. Phase 1 реализует подмножество (place-tower/sell-tower/
- * start-wave/set-targeting); place-wall/repair-wall — Фаза 4; остальные в Фазах 5/6.
+ * start-wave/set-targeting); place-wall/repair-wall — Фаза 4; pick-relic/
+ * remove-relic/skip-draft — Фаза 5; остальные в Фазах 6.
  */
 export type PlayerAction =
   | { kind: 'place-tower'; typeId: string; col: number; row: number }
@@ -68,7 +74,10 @@ export type PlayerAction =
   | { kind: 'start-wave' }
   | { kind: 'set-targeting'; towerId: string; mode: TowerType['targetingMode'] }
   | { kind: 'place-wall'; material: WallMaterial; col: number; row: number }
-  | { kind: 'repair-wall'; wallId: string };
+  | { kind: 'repair-wall'; wallId: string }
+  | { kind: 'pick-relic'; relicTypeId: string; col: number; row: number }
+  | { kind: 'remove-relic'; relicId: string }
+  | { kind: 'skip-draft' };
 
 export interface PlayerInput {
   tick: number;
@@ -83,4 +92,6 @@ export interface GameCatalog {
   waves: Wave[];
   /** Материалы стен (Фаза 4). Опционально для совместимости со старыми каталогами. */
   walls?: WallMaterialDef[];
+  /** Реликвии для драфта (Фаза 5). Опционально для совместимости. */
+  relics?: RelicType[];
 }

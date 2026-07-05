@@ -2,10 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { PointerEventTypes } from 'babylonjs';
 import type { Engine, Mesh, Scene } from 'babylonjs';
-import { DEFAULT_CATALOG } from '@tower/shared';
-import type { MapDocument, PlayerInput, TargetingMode, TowerType } from '@tower/shared';
+import { DEFAULT_CATALOG, DEFAULT_RELICS } from '@tower/shared';
+import type { MapDocument, PlayerInput, RelicType, TargetingMode, TowerType } from '@tower/shared';
 import { getMap } from '../services/api';
-import { canPlaceWall } from '../domain/placement';
+import { canPlaceWall, canPlaceRelic } from '../domain/placement';
 import { createEngine, createScene, gridToWorld, makePreviewMesh, sampleHeight, setGridVisible } from '../babylon/createScene';
 import { pickGrid } from '../babylon/picking';
 import { LevelOverlay } from '../babylon/level-renderer';
@@ -13,6 +13,7 @@ import { EnemyRenderer } from '../babylon/enemies/enemy-renderer';
 import { TowerRenderer } from '../babylon/towers/tower-renderer';
 import { ProjectilePool } from '../babylon/projectiles/projectile-pool';
 import { WallRenderer } from '../babylon/walls/wall-renderer';
+import { RelicRenderer } from '../babylon/relics/relic-renderer';
 import { AssetCatalog } from '../babylon/asset-catalog';
 import { AtmosphereRenderer } from '../babylon/atmosphere';
 import { startGameLoop } from '../babylon/game-loop';
@@ -22,6 +23,7 @@ import { useGameStore } from '../stores/game-store';
 import { useAuthStore } from '../stores/auth-store';
 import EconomyBar from './EconomyBar.vue';
 import TowerShop from './TowerShop.vue';
+import RelicDraft from './RelicDraft.vue';
 import type { WallMaterial, WallMaterialDef } from '@tower/shared';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -29,11 +31,13 @@ const engineRef = shallowRef<Engine | null>(null);
 const sceneRef = shallowRef<Scene | null>(null);
 const simRef = shallowRef<GameSim | null>(null);
 const towerRendererRef = shallowRef<TowerRenderer | null>(null);
+const relicRendererRef = shallowRef<RelicRenderer | null>(null);
 let catalog: AssetCatalog | null = null;
 let overlay: LevelOverlay | null = null;
 let enemyRenderer: EnemyRenderer | null = null;
 let projectilePool: ProjectilePool | null = null;
 let wallRenderer: WallRenderer | null = null;
+let relicRenderer: RelicRenderer | null = null;
 let atmosphere: AtmosphereRenderer | null = null;
 let loop: GameLoopHandle | null = null;
 let previewMesh: Mesh | null = null;
@@ -52,9 +56,17 @@ const wallBuildMode = ref(false);
 const repairMode = ref(false);
 const selectedWallMaterial = ref<WallMaterial>(wallMaterials[0]?.material ?? 'wood');
 
+// ── режим размещения реликвий (Фаза 5) ──
+const relicCatalog: RelicType[] = DEFAULT_RELICS;
+/** typeId реликвии, которую игрок выбрал в драфте и теперь размещает на поле. */
+const relicPlaceTypeId = ref<string | null>(null);
+
 const gameStore = useGameStore();
 const authStore = useAuthStore();
 const userId = computed(() => authStore.user?.userId || 'local');
+
+/** Показывать модалку драфта: статус draft и игрок ещё не в режиме размещения. */
+const showDraft = computed(() => gameStore.isDraft && relicPlaceTypeId.value === null);
 
 const targetingModes: { mode: TargetingMode; label: string }[] = [
   { mode: 'first', label: 'Первый' },
@@ -120,6 +132,28 @@ function wallAt(col: number, row: number): { id: string; material: WallMaterial 
   return w ? { id: w.id, material: w.material } : null;
 }
 
+function canPlaceRelicAt(col: number, row: number): boolean {
+  const sim = simRef.value;
+  if (!sim || !relicPlaceTypeId.value) return false;
+  if (sim.state.status !== 'draft') return false;
+  const grid = sim.map.grid;
+  if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false;
+  if (sim.isPathCell(col, row)) return false;
+  return canPlaceRelic(
+    { grid, spawn: sim.map.spawnPoint, base: sim.map.base, walls: sim.state.walls, towers: sim.state.towers, relics: sim.state.relics },
+    col,
+    row
+  );
+}
+
+function pickRelicInstance(): string | null {
+  const scene = sceneRef.value;
+  const renderer = relicRendererRef.value;
+  if (!scene || !renderer) return null;
+  const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh.name.startsWith('relic-inst-'));
+  return renderer.pickRelicId(pick?.pickedMesh ?? null);
+}
+
 function applyAction(action: PlayerInput['action']): void {
   const sim = simRef.value;
   if (!sim) return;
@@ -130,7 +164,7 @@ function updatePreview(): void {
   const scene = sceneRef.value;
   const sim = simRef.value;
   if (!scene || !sim || !previewMesh) return;
-  if (repairMode.value || sellMode.value || (!selectedTypeId.value && !wallBuildMode.value)) {
+  if (repairMode.value || sellMode.value || (!selectedTypeId.value && !wallBuildMode.value && !relicPlaceTypeId.value)) {
     previewMesh.setEnabled(false);
     return;
   }
@@ -141,7 +175,10 @@ function updatePreview(): void {
   }
   let valid: boolean;
   let color: [number, number, number];
-  if (wallBuildMode.value) {
+  if (relicPlaceTypeId.value) {
+    valid = canPlaceRelicAt(cell.col, cell.row);
+    color = valid ? [0.55, 0.35, 0.85] : [0.9, 0.18, 0.18];
+  } else if (wallBuildMode.value) {
     valid = canPlaceWallAt(cell.col, cell.row, selectedWallMaterial.value);
     color = valid ? [0.55, 0.42, 0.20] : [0.9, 0.18, 0.18];
   } else if (selectedTypeId.value) {
@@ -195,6 +232,25 @@ function setupPointerHandlers(): void {
     if (info.type === PointerEventTypes.POINTERMOVE) {
       updatePreview();
     } else if (info.type === PointerEventTypes.POINTERDOWN) {
+      // ── Фаза 5: размещение выбранной реликвии из драфта ──
+      if (relicPlaceTypeId.value) {
+        const sim = simRef.value;
+        if (!sim) return;
+        const cell = pickGrid(scene, sim.map.grid);
+        if (cell && canPlaceRelicAt(cell.col, cell.row)) {
+          applyAction({ kind: 'pick-relic', relicTypeId: relicPlaceTypeId.value, col: cell.col, row: cell.row });
+          relicPlaceTypeId.value = null;
+        }
+        return;
+      }
+      // ── Фаза 5: снятие размещённой реликвии во время драфта (пересмотр доса) ──
+      if (gameStore.isDraft) {
+        const relicId = pickRelicInstance();
+        if (relicId) {
+          applyAction({ kind: 'remove-relic', relicId });
+          return;
+        }
+      }
       if (repairMode.value) {
         const sim = simRef.value;
         if (!sim) return;
@@ -289,10 +345,14 @@ async function init(): Promise<void> {
   towerRendererRef.value = towerRenderer;
   projectilePool = new ProjectilePool(scene, playable.grid.cellSize, catalog);
   wallRenderer = new WallRenderer(scene, DEFAULT_CATALOG.walls ?? [], playable.grid, playable.heightmap, catalog);
+  const rRenderer = new RelicRenderer(scene, DEFAULT_RELICS, playable.grid, playable.heightmap, catalog);
+  relicRenderer = rRenderer;
+  relicRendererRef.value = rRenderer;
 
-  // тени — только башни и враги (юниты добавятся в Фазе 6). receiveShadows=false на террейне.
+  // тени — только башни, враги и реликвии (юниты добавятся в Фазе 6). receiveShadows=false на террейне.
   for (const m of towerRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
   for (const m of enemyRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
+  for (const m of rRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
 
   previewMesh = makePreviewMesh(scene);
 
@@ -305,6 +365,7 @@ async function init(): Promise<void> {
       towers: towerRenderer,
       projectiles: projectilePool,
       walls: wallRenderer,
+      relics: rRenderer,
       atmosphere
     },
     (snap) => {
@@ -324,7 +385,7 @@ function restart(): void {
   if (!sim) return;
   const map = sim.map;
   buildSim(map);
-  // перерисуем башни/врагов/стены с нового состояния сразу
+  // перерисуем башни/врагов/стены/реликвии с нового состояния сразу
   const scene = sceneRef.value;
   if (scene) {
     const s = simRef.value!;
@@ -332,8 +393,10 @@ function restart(): void {
     towerRendererRef.value?.sync(s.state);
     projectilePool?.sync(s.state);
     wallRenderer?.sync(s.state);
+    relicRenderer?.sync(s.state);
     overlay?.updateRoute(s.getRouteWaypoints());
   }
+  relicPlaceTypeId.value = null;
 }
 
 function onSelectType(typeId: string): void {
@@ -389,6 +452,26 @@ function cancelBuildModes(): void {
   updatePreview();
 }
 
+// ── Фаза 5: обработчики драфта реликвий ──
+function onRelicPick(relicTypeId: string): void {
+  relicPlaceTypeId.value = relicTypeId;
+  updatePreview();
+}
+
+function onRelicSkip(): void {
+  applyAction({ kind: 'skip-draft' });
+  relicPlaceTypeId.value = null;
+}
+
+function onRelicRemove(relicId: string): void {
+  applyAction({ kind: 'remove-relic', relicId });
+}
+
+function cancelRelicPlace(): void {
+  relicPlaceTypeId.value = null;
+  updatePreview();
+}
+
 function setTargeting(mode: TargetingMode): void {
   if (!selectedTowerId.value) return;
   selectedTowerMode.value = mode;
@@ -409,6 +492,7 @@ onBeforeUnmount(() => {
   towerRendererRef.value?.dispose();
   projectilePool?.dispose();
   wallRenderer?.dispose();
+  relicRenderer?.dispose();
   atmosphere?.dispose();
   catalog?.dispose();
   engineRef.value?.dispose();
@@ -423,6 +507,24 @@ onBeforeUnmount(() => {
       <main class="game-stage">
         <canvas ref="canvasRef" class="game-canvas"></canvas>
         <div v-if="statusMessage" class="game-alert">{{ statusMessage }}</div>
+
+        <!-- Фаза 5: индикатор режима размещения реликвии -->
+        <div v-if="relicPlaceTypeId" class="relic-place-banner">
+          <span>Разместите реликвию в свободной клетке</span>
+          <button class="btn ghost" @click="cancelRelicPlace">Отмена</button>
+        </div>
+
+        <!-- Фаза 5: драфт реликвий между волнами -->
+        <RelicDraft
+          v-if="showDraft"
+          :choices="gameStore.pendingRelicChoices"
+          :relic-catalog="relicCatalog"
+          :placed-relics="gameStore.relics"
+          @pick="onRelicPick"
+          @skip="onRelicSkip"
+          @remove="onRelicRemove"
+        />
+
         <div v-if="gameOver" class="overlay-modal">
           <div class="modal-card">
             <div class="modal-title" :class="gameStore.status">
@@ -551,6 +653,24 @@ onBeforeUnmount(() => {
 .modal-title.won { color: #22c55e; }
 .modal-title.lost { color: #ef4444; }
 .modal-text { color: #cbd5e1; }
+.relic-place-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(168, 85, 247, 0.5);
+  border-radius: 10px;
+  color: #d8b4fe;
+  font-weight: 700;
+  font-size: 13px;
+  z-index: 4;
+}
+.relic-place-banner .btn.ghost { margin: 0; }
 .game-side {
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.6);

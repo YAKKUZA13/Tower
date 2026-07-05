@@ -5,6 +5,7 @@
 import type { Enemy, Projectile, TargetingMode, Tower, TowerType } from '@tower/shared';
 import { cellToWorld } from '../../domain/path';
 import type { GridData } from '@tower/shared';
+import { combineSlow, type RelicModifiers } from './relics';
 
 export interface TargetOutcome {
   /** Созданные снаряды (нужно добавить в state.projectiles). */
@@ -20,22 +21,29 @@ export interface TargetDeps {
   cellSize: number;
   dt: number;
   nextProjectileId: () => string;
+  /** Модификаторы реликвий (Фаза 5). Опционально. */
+  relicMods?: RelicModifiers;
 }
 
 /** Уменьшает cooldown; башня, готовая стрелять с целью в радиусе, выпускает снаряд. */
 export function tickTargeting(deps: TargetDeps): TargetOutcome {
-  const { towers, towerTypes, enemies, grid, heightmap, cellSize, dt, nextProjectileId } = deps;
+  const { towers, towerTypes, enemies, grid, heightmap, cellSize, dt, nextProjectileId, relicMods } = deps;
   const projectiles: Projectile[] = [];
   for (const tower of towers) {
     tower.cooldown = Math.max(0, tower.cooldown - dt);
     const type = towerTypes.get(tower.typeId);
     if (!type) continue;
-    const target = pickTarget(tower, type, enemies, grid, heightmap, cellSize);
+    const mods = relicMods?.towers.get(tower.typeId);
+    const range = type.range * (mods?.rangeMult ?? 1);
+    const target = pickTarget(tower, enemies, grid, heightmap, cellSize, range);
     if (!target) continue;
     // повернуть башню к цели (визуально)
     tower.rotationY = aimYaw(tower, target, grid, heightmap);
     if (tower.cooldown > 0) continue;
     const origin = cellToWorld(grid, heightmap, tower.col, tower.row);
+    const damage = type.damage * (mods?.damageMult ?? 1);
+    const splashRadius = (type.splashRadius ?? 0) + (mods?.splashAdded ?? 0);
+    const slowFactor = combineSlow(type.slowFactor, mods?.slowOnHit);
     projectiles.push({
       id: nextProjectileId(),
       typeId: tower.typeId,
@@ -43,29 +51,30 @@ export function tickTargeting(deps: TargetDeps): TargetOutcome {
       y: origin.y + 0.8,
       z: origin.z,
       targetEnemyId: target.id,
-      damage: type.damage,
-      splashRadius: type.splashRadius,
-      slowFactor: type.slowFactor,
+      damage,
+      splashRadius: splashRadius > 0 ? splashRadius : undefined,
+      slowFactor,
       category: type.category,
       alive: true
     });
-    tower.cooldown += 1 / Math.max(1e-3, type.fireRate);
+    const fireRate = type.fireRate * (mods?.fireRateMult ?? 1);
+    tower.cooldown += 1 / Math.max(1e-3, fireRate);
   }
   return { projectiles };
 }
 
 function pickTarget(
   tower: Tower,
-  type: TowerType,
   enemies: Enemy[],
   grid: GridData,
   heightmap: number[][] | null,
-  cellSize: number
+  cellSize: number,
+  range: number
 ): Enemy | null {
   const origin = cellToWorld(grid, heightmap, tower.col, tower.row);
-  const radius = type.range * cellSize;
+  const radius = range * cellSize;
   const radius2 = radius * radius;
-  const mode: TargetingMode = tower.targetingMode ?? type.targetingMode;
+  const mode: TargetingMode = tower.targetingMode ?? 'first';
   let best: Enemy | null = null;
   let bestScore = Number.NaN;
   for (const enemy of enemies) {

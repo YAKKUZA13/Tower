@@ -7,9 +7,10 @@
 import type { Enemy, Projectile, TowerType, EnemyType, Wall, GridData } from '@tower/shared';
 import { SLOW_DURATION, PROJECTILE_HIT_RADIUS, FIXED_DT } from '../constants';
 import { gridToWorldData } from '../../domain/grid-math';
+import type { RelicModifiers } from './relics';
 
 export interface ProjectileOutcome {
-  /** Награда золота за этот шаг (сумма reward убитых). */
+  /** Награда золота за этот шаг (сумма reward убитых, с учётом реликвий). */
   goldGained: number;
   /** Сколько врагов убито за этот шаг. */
   killed: number;
@@ -29,10 +30,14 @@ export interface ProjectileDeps {
   walls?: Wall[];
   /** Длительность горения в тиках. */
   burnTicks?: number;
+  /** Модификаторы реликвий (Фаза 5): goldMult/goldOnKillBonus к награде за убийство. */
+  relicMods?: RelicModifiers;
 }
 
 export function tickProjectiles(deps: ProjectileDeps): ProjectileOutcome {
-  const { projectiles, aliveEnemies, enemyTypes, towerTypes, cellSize, dt, tick } = deps;
+  const { projectiles, aliveEnemies, enemyTypes, towerTypes, cellSize, dt, tick, relicMods } = deps;
+  const goldMult = relicMods?.goldMult ?? 1;
+  const goldOnKillBonus = relicMods?.goldOnKillBonus ?? 0;
   let goldGained = 0;
   let killed = 0;
 
@@ -56,7 +61,8 @@ export function tickProjectiles(deps: ProjectileDeps): ProjectileOutcome {
       proj.alive = false;
       if (justDied) {
         killed += 1;
-        goldGained += enemyTypes.get(target.typeId)?.reward ?? 0;
+        const baseReward = enemyTypes.get(target.typeId)?.reward ?? 0;
+        goldGained += baseReward * goldMult + goldOnKillBonus;
       }
       continue;
     }

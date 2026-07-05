@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { GameSnapshot, SimStatus, TowerType, Weather } from '@tower/shared';
+import type { GameSnapshot, PlacedRelic, SimStatus, TowerType, Weather } from '@tower/shared';
 
 interface GameState {
   tick: number;
@@ -14,6 +14,10 @@ interface GameState {
   towerCount: number;
   timeOfDay: number;
   weather: Weather;
+  /** Размещённые реликвии (Фаза 5). */
+  relics: PlacedRelic[];
+  /** TypeId реликвий для драфта (когда status==='draft'). */
+  pendingRelicChoices: string[];
 }
 
 export const useGameStore = defineStore('game', {
@@ -29,7 +33,9 @@ export const useGameStore = defineStore('game', {
     waveEnemiesRemaining: 0,
     towerCount: 0,
     timeOfDay: 0.5,
-    weather: 'clear'
+    weather: 'clear',
+    relics: [],
+    pendingRelicChoices: []
   }),
   getters: {
     waveLabel: (s): string => {
@@ -38,6 +44,7 @@ export const useGameStore = defineStore('game', {
     },
     isOver: (s): boolean => s.status === 'won' || s.status === 'lost',
     canStartWave: (s): boolean => s.status === 'prep' && s.waveIndex + 1 < s.totalWaves,
+    isDraft: (s): boolean => s.status === 'draft',
     /** Фаза суток по timeOfDay (0=полночь, 0.5=полдень). */
     timePhase(s): 'Ночь' | 'Рассвет' | 'День' | 'Сумерки' {
       const t = s.timeOfDay;
@@ -62,13 +69,16 @@ export const useGameStore = defineStore('game', {
       this.tick = snap.tick;
       this.status = snap.status;
       this.waveIndex = snap.waveIndex;
-      this.gold = snap.gold;
+      // золото может быть дробным из-за goldMult-релевий — показываем пол (внутр. точность сохранена в симе)
+      this.gold = Math.floor(snap.gold);
       this.lives = snap.lives;
       this.enemiesAlive = snap.enemies.length;
       this.waveEnemiesRemaining = snap.waveEnemiesRemaining;
       this.towerCount = snap.towers.length;
       this.timeOfDay = snap.timeOfDay;
       this.weather = snap.weather;
+      this.relics = snap.relics;
+      this.pendingRelicChoices = snap.pendingRelicChoices;
     },
     setMaxLives(n: number): void {
       this.maxLives = n;

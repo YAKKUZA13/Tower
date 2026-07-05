@@ -13,6 +13,7 @@ import type {
   GameSnapshot,
   MapDocument,
   PlayerInput,
+  RelicType,
   Tower,
   TowerType,
   Wall,
@@ -25,7 +26,7 @@ import type {
 import { buildPath, positionAtProgress } from '../domain/path';
 import type { BuiltPath } from '../domain/path';
 import { findGridRoute } from '../domain/pathfinding';
-import { canPlaceWall } from '../domain/placement';
+import { canPlaceWall, canPlaceRelic } from '../domain/placement';
 import { mulberry32 } from './rng';
 import { DEFAULT_SEED, FIXED_DT, DAY_LENGTH_SECONDS, BURN_DURATION } from './constants';
 import { allSpawned, createWaveState, tickSpawner } from './systems/spawner';
@@ -36,6 +37,8 @@ import { tickProjectiles } from './systems/projectiles';
 import { tickRules } from './systems/rules';
 import { applyEnemyWallDamage, repairCost, tickWalls } from './systems/walls';
 import { canAfford, spend, refund } from './systems/economy';
+import { computeRelicModifiers, rollRelicDraft, EMPTY_MODS } from './systems/relics';
+import type { RelicModifiers } from './systems/relics';
 
 export interface GameSimConfig {
   map: MapDocument;
@@ -53,6 +56,8 @@ export class GameSim {
   private readonly enemyTypes: Map<string, import('@tower/shared').EnemyType>;
   private readonly towerTypes: Map<string, TowerType>;
   private readonly wallDefs: Map<WallMaterial, WallMaterialDef>;
+  private readonly relicTypes: Map<string, RelicType>;
+  private readonly relicList: RelicType[];
   private readonly waves: Wave[];
   /** Текущий маршрут врагов (A* вокруг стен) как polyline клеток-центров. */
   private routePath: BuiltPath;
@@ -63,6 +68,8 @@ export class GameSim {
   private accumulator = 0;
   private idCounter = 1;
   private prevStatus: GameSnapshot['status'] = 'prep';
+  /** Кеш модификаторов размещённых реликвий (appliedRelicEffects). */
+  private relicMods: RelicModifiers = EMPTY_MODS;
 
   constructor(config: GameSimConfig) {
     this.map = config.map;
@@ -73,6 +80,8 @@ export class GameSim {
     this.enemyTypes = new Map(config.catalog.enemies.map((e) => [e.id, e]));
     this.towerTypes = new Map(config.catalog.towers.map((t) => [t.id, t]));
     this.wallDefs = new Map((config.catalog.walls ?? []).map((w) => [w.material, w]));
+    this.relicList = config.catalog.relics ?? [];
+    this.relicTypes = new Map(this.relicList.map((r) => [r.id, r]));
     this.routeWaypoints = [];
     this.routeCells = new Set();
     this.routePath = buildPath(config.map.path.waypoints, config.map.grid, config.map.heightmap);
@@ -91,6 +100,8 @@ export class GameSim {
       projectiles: [],
       routeVersion: 0,
       waveEnemiesRemaining: 0,
+      relics: [],
+      pendingRelicChoices: [],
       timeOfDay: 0.5,
       weather: 'clear',
       ownerId: config.ownerId,
@@ -122,6 +133,15 @@ export class GameSim {
         break;
       case 'repair-wall':
         this.repairWall(input.action.wallId);
+        break;
+      case 'pick-relic':
+        this.pickRelic(input.action.relicTypeId, input.action.col, input.action.row);
+        break;
+      case 'remove-relic':
+        this.removeRelic(input.action.relicId);
+        break;
+      case 'skip-draft':
+        this.skipDraft();
         break;
     }
   }
@@ -167,6 +187,7 @@ export class GameSim {
     if (this.isPathCell(col, row)) return;
     if (this.state.towers.some((t) => t.col === col && t.row === row)) return;
     if (this.state.walls.some((w) => w.col === col && w.row === row)) return;
+    if (this.state.relics.some((r) => r.col === col && r.row === row)) return;
     if (!canAfford(this.state, type.cost)) return;
     spend(this.state, type.cost);
     const tower: Tower = {
@@ -201,16 +222,24 @@ export class GameSim {
     if (this.state.status === 'lost' || this.state.status === 'won') return;
     const def = this.wallDefs.get(material);
     if (!def) return;
-    const ctx = { grid: this.map.grid, spawn: this.map.spawnPoint, base: this.map.base, walls: this.state.walls, towers: this.state.towers };
+    const ctx = {
+      grid: this.map.grid,
+      spawn: this.map.spawnPoint,
+      base: this.map.base,
+      walls: this.state.walls,
+      towers: this.state.towers,
+      relics: this.state.relics
+    };
     if (!canPlaceWall(ctx, col, row)) return;
     if (!canAfford(this.state, def.cost)) return;
     spend(this.state, def.cost);
+    const maxHp = def.maxHp * this.relicMods.wallHpMult;
     const wall: Wall = {
       id: this.nextId('wall'),
       col,
       row,
-      hp: def.maxHp,
-      maxHp: def.maxHp,
+      hp: maxHp,
+      maxHp,
       material,
       burning: false
     };
@@ -225,12 +254,76 @@ export class GameSim {
     const def = this.wallDefs.get(wall.material);
     if (!def) return;
     if (wall.hp >= wall.maxHp) return;
-    const cost = repairCost(def, wall);
+    // стоимость ремонта считается от эффективного maxHp (с учётом реликвий)
+    const cost = repairCost({ ...def, maxHp: wall.maxHp }, wall);
     if (!canAfford(this.state, cost)) return;
     spend(this.state, cost);
     wall.hp = wall.maxHp;
     wall.burning = false;
     wall.burningUntilTick = undefined;
+  }
+
+  // ── реликвии (Фаза 5) ─────────────────────────────────────────────
+
+  private pickRelic(relicTypeId: string, col: number, row: number): void {
+    if (this.state.status !== 'draft') return;
+    if (!this.state.pendingRelicChoices.includes(relicTypeId)) return;
+    if (!this.relicTypes.has(relicTypeId)) return;
+    if (!this.inBounds(col, row)) return;
+    if (this.isPathCell(col, row)) return;
+    const ctx = {
+      grid: this.map.grid,
+      spawn: this.map.spawnPoint,
+      base: this.map.base,
+      walls: this.state.walls,
+      towers: this.state.towers,
+      relics: this.state.relics
+    };
+    if (!canPlaceRelic(ctx, col, row)) return;
+    this.state.relics.push({ id: this.nextId('relic'), typeId: relicTypeId, col, row });
+    this.state.pendingRelicChoices = [];
+    this.recomputeRelicMods();
+    this.state.status = 'prep';
+  }
+
+  private removeRelic(relicId: string): void {
+    // разрешаем снимать только между волнами (prep/draft) — боевой дос не трогаем
+    if (this.state.status !== 'prep' && this.state.status !== 'draft') return;
+    const idx = this.state.relics.findIndex((r) => r.id === relicId);
+    if (idx < 0) return;
+    this.state.relics.splice(idx, 1);
+    this.recomputeRelicMods();
+  }
+
+  private skipDraft(): void {
+    if (this.state.status !== 'draft') return;
+    this.state.pendingRelicChoices = [];
+    this.state.status = 'prep';
+  }
+
+  /**
+   * Пересчёт кеша модификаторов реликвий. При изменении wallHpMult пропорционально
+   * масштабирует hp/maxHp существующих стен (сохраняя долю hp). Детерминировано.
+   */
+  private recomputeRelicMods(): void {
+    const newMods = computeRelicModifiers(this.state.relics, this.relicTypes, this.towerTypes);
+    const oldMult = this.relicMods.wallHpMult;
+    const newMult = newMods.wallHpMult;
+    if (newMult !== oldMult && this.state.walls.length > 0) {
+      const ratio = newMult / oldMult;
+      for (const w of this.state.walls) {
+        const def = this.wallDefs.get(w.material);
+        if (!def) continue;
+        w.maxHp = def.maxHp * newMult;
+        w.hp = Math.min(w.maxHp, w.hp * ratio);
+      }
+    }
+    this.relicMods = newMods;
+  }
+
+  /** Текущие модификаторы реликвий (для отладки/UI при необходимости). */
+  getRelicMods(): RelicModifiers {
+    return this.relicMods;
   }
 
   private startWave(): void {
@@ -276,7 +369,8 @@ export class GameSim {
         heightmap: this.map.heightmap,
         cellSize: this.map.grid.cellSize,
         dt,
-        nextProjectileId: () => this.nextId('proj')
+        nextProjectileId: () => this.nextId('proj'),
+        relicMods: this.relicMods
       });
       for (const p of projectiles) state.projectiles.push(p);
     }
@@ -298,7 +392,8 @@ export class GameSim {
         dt,
         tick: state.tick,
         walls: state.walls,
-        burnTicks: Math.round(BURN_DURATION / FIXED_DT)
+        burnTicks: Math.round(BURN_DURATION / FIXED_DT),
+        relicMods: this.relicMods
       });
       killed = out.killed;
       goldGained = out.goldGained;
@@ -364,16 +459,31 @@ export class GameSim {
       wave,
       waveFinished: wf,
       damageToBaseThisStep: damageToBase,
-      totalWaves: this.waves.length
+      totalWaves: this.waves.length,
+      relicMods: this.relicMods
     });
     if (state.status !== 'wave') {
       this.waveState = null;
     }
-    // Фаза 3: детерминированная смена погоды между волнами (волна зачищена → prep).
-    if (this.prevStatus === 'wave' && state.status === 'prep') {
+    // Фаза 3: детерминированная смена погоды между волнами (волна зачищена → draft).
+    // Фаза 5: при переходе wave→draft генерируем pendingRelicChoices (seeded rng).
+    if (this.prevStatus === 'wave' && state.status === 'draft') {
       state.weather = this.rollWeather();
+      this.generateRelicDraft();
     }
     this.prevStatus = state.status;
+  }
+
+  /** Детерминированная генерация 3 реликвий для драфта (seeded rng, ADR-2). */
+  private generateRelicDraft(): void {
+    const choices = rollRelicDraft(this.rng, this.relicList, 3);
+    if (choices.length === 0) {
+      // каталог пуст — драфта нет, сразу к следующей волне (без тупика для игрока)
+      this.state.pendingRelicChoices = [];
+      this.state.status = 'prep';
+      return;
+    }
+    this.state.pendingRelicChoices = choices;
   }
 
   private advanceTimeOfDay(dt: number): void {

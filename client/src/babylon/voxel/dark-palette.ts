@@ -91,3 +91,15 @@ export function towerAccent(typeId: string): RGB {
     default:       return ACCENT.gold;
   }
 }
+
+/** Emissive-акцент тотема реликвии по catalogId модели. */
+export function relicAccent(catalogId: string): RGB {
+  switch (catalogId) {
+    case 'relic:totem-fire':   return ACCENT.fire;
+    case 'relic:totem-arcane': return ACCENT.arcane;
+    case 'relic:totem-gold':   return ACCENT.gold;
+    case 'relic:totem-ice':    return ACCENT.ice;
+    case 'relic:totem-blood':  return ACCENT.blood;
+    default:                   return ACCENT.arcane;
+  }
+}
