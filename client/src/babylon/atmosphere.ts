@@ -1,19 +1,16 @@
 /**
- * Тёмная атмосфера дарк-фэнтези (Phase 3, концепция 5).
- * См. TD-MVP-PLAN.md §3 (задачи 3.1–3.6) и §4.5.
+ * Атмосфера TD-сцены.
  *
  * Состав:
  *  - DefaultRenderingPipeline: ACES tonemap, bloom, grain, vignette, chromatic aberration, FXAA/MSAA.
- *  - DirectionalLight (луна/тусклое солнце) + ShadowGenerator (PCF; только акторы).
- *  - HemisphericLight понижен до ambient-fill (дешёвый sky/ground fill).
- *  - DayNightController: по snapshot.timeOfDay считает угол/цвет/интенсивность света,
- *    ambient, fog-цвет, clearColor И обновляет uniform-ы кастомного terrain-шейдера.
+ *  - SSAO2RenderingPipeline: ambient occlusion (crevice-затенение как на воксель-референсе).
+ *  - DirectionalLight (фиксированное яркое солнце) + ShadowGenerator (PCF; только акторы).
+ *  - HemisphericLight как sky/ground ambient-fill.
+ *  - В режиме TD НЕТ смены дня/ночи: всегда яркий день (timeOfDay из сима игнорируется).
  *  - WeatherController: rain/storm → particle system + fog density↑; storm → редкие молнии.
- *  - Цветные PointLight: свечение базы (алтарь) + «глаза» боссов.
+ *  - Цветные PointLight: свечение базы (алтарь) + «глаза» боссов + тёплый фокальный fill.
  *
- * ADR (Фаза 3): тени рендерятся ТОЛЬКО между акторами (receiveShadows=false на террейне,
- * т.к. у него собственный ShaderMaterial без shadow-pass) — это литеральная трактовка
- * плана (§3.2/§8) и самый дешёвый стабильный вариант без правки GLSL террейна.
+ * ADR: тени рендерятся между акторами и воксельным полом (receiveShadows=true на ground).
  */
 import {
   Color3,
@@ -28,6 +25,7 @@ import {
   PointLight,
   RawTexture,
   Scene,
+  SSAO2RenderingPipeline,
   ShadowGenerator,
   Texture,
   Vector3,
@@ -35,33 +33,23 @@ import {
 } from 'babylonjs';
 import type { Enemy, GameSnapshot, Weather } from '@tower/shared';
 
-// ── палитра дарк-фэнтези (день = сумрачный, ночь = глубоко-синяя) ────────────────
-const DAY_SUN = new Color3(0.55, 0.56, 0.64); // холодное тусклое солнце
-const NIGHT_MOON = new Color3(0.20, 0.24, 0.40); // холодная луна
-const SUNSET = new Color3(0.78, 0.36, 0.18); // кровавый закат/рассвет (короткая полоса)
-
-const DAY_SKY = new Color3(0.30, 0.32, 0.40); // ambient sky днём
-const NIGHT_SKY = new Color3(0.05, 0.06, 0.13);
-const DAY_GROUND = new Color3(0.18, 0.16, 0.14);
-const NIGHT_GROUND = new Color3(0.02, 0.02, 0.04);
-
-const DAY_FOG = new Color3(0.17, 0.18, 0.22); // пепельно-серый
-const NIGHT_FOG = new Color3(0.02, 0.03, 0.07); // чёрно-синий
+// ── палитра «яркий день» (TD: смены дня/ночи нет) ────────────────────────────
+const DAY_SUN_COLOR = new Color3(0.90, 0.92, 1.0);  // солнце — объём/тени на фигурах
+const DAY_SKY_COLOR = new Color3(0.40, 0.43, 0.52); // умеренный sky-fill (не заливает фон)
+const DAY_GROUND_COLOR = new Color3(0.18, 0.16, 0.14); // тёплый ground-fill
+const DAY_FOG_COLOR = new Color3(0.05, 0.06, 0.09);  // тёмный «воздух»/void как на референсе
+const BASE_FOG_DENSITY = 0.006;
 
 const BOSS_LIGHT_COLOR = new Color3(0.85, 0.22, 0.18); // кровавые «глаза» босса
 const BASE_LIGHT_COLOR = new Color3(0.25, 0.70, 0.58); // холодное свечение алтаря
-
-interface TerrainUniformProxy {
-  material: {
-    setVector3: (name: string, v: Vector3) => void;
-    setFloat: (name: string, v: number) => void;
-  };
-}
+// Тёплый фокальный «фонарь» над центром поля (как фонарь с референса) —
+// тёплый контраст и подъём читаемости фигур.
+const FOCAL_LIGHT_COLOR = new Color3(0.95, 0.78, 0.50);
 
 export interface AtmosphereOptions {
-  /** Существующий HemisphericLight (используется как ambient-fill + источник для terrain-шейдера). */
+  /** Существующий HemisphericLight (используется как ambient-fill). */
   hemispheric: HemisphericLight;
-  /** Игровой ground-меш (для апдейта uniform-ов террейн-шейдера). Опционально. */
+  /** Игровой ground-меш (принимает тени). Опционально. */
   ground?: Mesh;
   /** Размеры поля (для области эмиссии дождя). */
   board?: { width: number; height: number };
@@ -69,36 +57,12 @@ export interface AtmosphereOptions {
   bossTypeIds?: Set<string>;
 }
 
-const SCRATCH_V3 = new Vector3();
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-function lerpColor(out: Color3, a: Color3, b: Color3, t: number): void {
-  out.r = lerp(a.r, b.r, t);
-  out.g = lerp(a.g, b.g, t);
-  out.b = lerp(a.b, b.b, t);
-}
-function clamp01(x: number): number {
-  return x < 0 ? 0 : x > 1 ? 1 : x;
-}
-
-/** Чистая геометрия солнца по timeOfDay ∈ [0,1). 0=полночь, 0.5=полдень. */
-function computeSunArc(timeOfDay: number): { elevation: number; sunUp: number; twilight: number } {
-  // ang: 0 на рассвете (0.25), π/2 в полдень (0.5), π на закате (0.75), -π/2 в полночь (0).
-  const ang = (timeOfDay - 0.25) * Math.PI * 2;
-  const elevation = Math.sin(ang); // -1..1
-  const sunUp = clamp01(elevation); // 0 ночью, 1 в полдень
-  // узкая полоса «на горизонте» — для тёплого отсвета на рассвете/закате
-  const twilight = clamp01(1 - Math.abs(elevation) * 3);
-  return { elevation, sunUp, twilight };
-}
-
 export class AtmosphereRenderer {
   private readonly scene: Scene;
   private readonly hemispheric: HemisphericLight;
   private readonly sun: DirectionalLight;
   private readonly shadowGen: ShadowGenerator;
+  private readonly ssao: SSAO2RenderingPipeline;
   private readonly pipeline: DefaultRenderingPipeline;
   private readonly ground?: Mesh;
   private readonly boardHalf: { x: number; z: number };
@@ -117,14 +81,7 @@ export class AtmosphereRenderer {
   private readonly bossTypeIds: Set<string>;
   private readonly baseLight: PointLight;
   private baseAttached = false;
-
-  // переиспользуемые scratch-цвета/векторы (без GC в кадре)
-  private readonly cDir = new Color3();
-  private readonly cSky = new Color3();
-  private readonly cGround = new Color3();
-  private readonly cFog = new Color3();
-  private readonly vSky = new Vector3();
-  private readonly vGround = new Vector3();
+  private readonly focalLight: PointLight; // тёплый фокальный fill над полем
 
   constructor(scene: Scene, camera: Camera, grid: { cols: number; rows: number; cellSize: number }, options: AtmosphereOptions) {
     this.scene = scene;
@@ -136,11 +93,13 @@ export class AtmosphereRenderer {
     this.skyHeight = Math.max(boardW, boardH) * 1.0;
     this.bossTypeIds = options.bossTypeIds ?? new Set();
 
-    // ── DirectionalLight (луна/солнце) ──
-    this.sun = new DirectionalLight('sun', new Vector3(0.4, -0.8, 0.45).normalize(), scene);
-    this.sun.position = new Vector3(0, this.skyHeight, 0);
-    this.sun.intensity = 0.7;
-    this.sun.diffuse = DAY_SUN.clone();
+    // ── DirectionalLight: фиксированное яркое солнце (смены дня/ночи нет) ──
+    const sunDir = new Vector3(0.4, -0.8, 0.45).normalize();
+    this.sun = new DirectionalLight('sun', sunDir, scene);
+    // позиция — высоко над центром, против направления (для фрустума теней)
+    this.sun.position = new Vector3(-sunDir.x * this.skyHeight * 1.4, this.skyHeight * 1.3, -sunDir.z * this.skyHeight * 1.4);
+    this.sun.intensity = 0.9;
+    this.sun.diffuse = DAY_SUN_COLOR.clone();
 
     // ── Тени (PCF, low-med map). Только акторы — регистрируются через addShadowCaster. ──
     this.shadowGen = new ShadowGenerator(1024, this.sun);
@@ -151,13 +110,24 @@ export class AtmosphereRenderer {
     this.shadowGen.darkness = 0.45;
     this.shadowGen.transparencyShadow = false;
 
-    // Террейн НЕ получает тени (ShaderMaterial без shadow-pass; §3.2).
-    if (this.ground) this.ground.receiveShadows = false;
+    // Phase D: воксельная плита принимает тени (StandardMaterial с shadow-pass) —
+    // акторы больше не «парят» над гладким ландшафтом, тени ложатся на пол.
+    if (this.ground) this.ground.receiveShadows = true;
 
-    // ── HemisphericLight → ambient-fill низкого уровня ──
-    this.hemispheric.intensity = 0.6;
-    this.hemispheric.diffuse = DAY_SKY.clone();
-    this.hemispheric.groundColor = DAY_GROUND.clone();
+    // ── HemisphericLight → умеренный sky/ground fill (фон держим тёмным) ──
+    this.hemispheric.intensity = 0.7;
+    this.hemispheric.diffuse = DAY_SKY_COLOR.clone();
+    this.hemispheric.groundColor = DAY_GROUND_COLOR.clone();
+
+    // ── SSAO2 (создаём ПЕРВЫМ, чтобы AO композился до tonemap в DefaultRenderingPipeline) ──
+    // crevice-затенение как на воксель-референсе. Консервативные значения: видимый,
+    // но не давящий AO. При артефактах — изолированно отключается одним полем.
+    this.ssao = new SSAO2RenderingPipeline('ssao2', scene, { ssaoRatio: 0.5, blurRatio: 0.5 }, [camera]);
+    this.ssao.totalStrength = 1.3;
+    this.ssao.radius = 1.2;
+    this.ssao.samples = 12;
+    this.ssao.expensiveBlur = true;
+    this.ssao.bilateralSamples = 8;
 
     // ── Пост-процесс ──
     this.pipeline = new DefaultRenderingPipeline('atmosphere-pipeline', true, scene, [camera]);
@@ -165,18 +135,22 @@ export class AtmosphereRenderer {
     this.pipeline.fxaaEnabled = true;
 
     this.pipeline.bloomEnabled = true;
+    // TD-104: bloom чуть агрессивнее на ярких акцентах (факелы/руны/кристаллы),
+    // чтобы они «горели» как фонарь и магический шар с референса.
     this.pipeline.bloomThreshold = 0.72;
-    this.pipeline.bloomWeight = 0.45;
+    this.pipeline.bloomWeight = 0.5;
     this.pipeline.bloomKernel = 64;
     this.pipeline.bloomScale = 0.5;
 
     this.pipeline.imageProcessingEnabled = true;
     this.pipeline.imageProcessing.toneMappingEnabled = true;
     this.pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    // TD-101: пост-процесс ослаблен — ACES+contrast+vignette ранее дробили
+    // полутона в чёрное, фигурки терялись. exposure↑, contrast↓, vignette↓.
     this.pipeline.imageProcessing.exposure = 1.1;
-    this.pipeline.imageProcessing.contrast = 1.18;
+    this.pipeline.imageProcessing.contrast = 1.12;
     this.pipeline.imageProcessing.vignetteEnabled = true;
-    this.pipeline.imageProcessing.vignetteWeight = 3.2;
+    this.pipeline.imageProcessing.vignetteWeight = 2.4;
     this.pipeline.imageProcessing.vignetteStretch = 0.35;
     this.pipeline.imageProcessing.vignetteColor = new Color4(0, 0, 0, 1);
 
@@ -188,7 +162,12 @@ export class AtmosphereRenderer {
     this.pipeline.chromaticAberration.aberrationAmount = 14; // «пиксели» экрана
     this.pipeline.chromaticAberration.radialIntensity = 0.6;
 
+    // ── Ястрый светлый fog + clearColor (фиксированный «день») ──
     scene.fogMode = Scene.FOGMODE_EXP2;
+    scene.fogColor = DAY_FOG_COLOR.clone();
+    scene.fogDensity = BASE_FOG_DENSITY;
+    const cc = scene.clearColor;
+    cc.r = DAY_FOG_COLOR.r; cc.g = DAY_FOG_COLOR.g; cc.b = DAY_FOG_COLOR.b; cc.a = 1;
 
     // ── Дождь (particle system; стартует/останавливается по weather) ──
     this.rainTexture = makeRainTexture(scene);
@@ -239,6 +218,16 @@ export class AtmosphereRenderer {
     this.baseLight.specular = new Color3(0.05, 0.2, 0.18);
     this.baseLight.intensity = 0;
     this.baseLight.range = grid.cellSize * 5;
+
+    // ── TD-104: фокальный тёплый fill над центром поля ──
+    // Высокий overhead PointLight с большим радиусом → мягкий тёплый подъём
+    // над всей игровой зоной; не конкурирует с DirectionalLight, а заполняет
+    // тени на фигурах, чтобы они читались и днём, и ночью.
+    this.focalLight = new PointLight('focal-fill', new Vector3(0, this.skyHeight * 0.55, 0), scene);
+    this.focalLight.diffuse = FOCAL_LIGHT_COLOR.clone();
+    this.focalLight.specular = new Color3(0.12, 0.10, 0.06);
+    this.focalLight.intensity = 0.5;
+    this.focalLight.range = Math.hypot(boardW, boardH) * 1.3;
   }
 
   // ── публичный API ──────────────────────────────────────────────────
@@ -258,9 +247,9 @@ export class AtmosphereRenderer {
     this.baseAttached = true;
   }
 
-  /** Синхронизация атмосферы с состоянием сима каждый кадр. */
+  /** Синхронизация атмосферы с состоянием сима каждый кадр.
+   *  timeOfDay намеренно игнорируется — в режиме TD всегда день. */
   sync(state: GameSnapshot, dt: number): void {
-    this.updateDayNight(state.timeOfDay);
     this.updateWeather(state.weather, dt);
     this.updateBossLights(state.enemies, state.tick);
     if (this.baseAttached) {
@@ -277,58 +266,16 @@ export class AtmosphereRenderer {
     for (const l of this.bossLights) l.dispose();
     this.bossLights.length = 0;
     this.baseLight.dispose();
+    this.focalLight.dispose();
     this.lightning.dispose();
     this.shadowGen.dispose();
+    this.ssao.dispose();
     this.pipeline.dispose();
     this.sun.dispose();
     // hemispheric принадлежит сцене (создан в createScene) — не утилизируем тут.
   }
 
   // ── внутренние ─────────────────────────────────────────────────────
-
-  private updateDayNight(timeOfDay: number): void {
-    const { elevation, sunUp, twilight } = computeSunArc(timeOfDay);
-
-    // DirectionalLight: направление (по дуге), цвет, интенсивность
-    const ang = (timeOfDay - 0.25) * Math.PI * 2;
-    const sx = Math.cos(ang);
-    SCRATCH_V3.set(sx * 0.6, -Math.max(0.15, elevation), 0.45);
-    this.sun.direction = SCRATCH_V3.normalize();
-    // позиция — «над» центром поля, против направления (для фрустума теней)
-    this.sun.position.set(-this.sun.direction.x * this.skyHeight * 1.4, this.skyHeight * 1.3, -this.sun.direction.z * this.skyHeight * 1.4);
-
-    lerpColor(this.cDir, NIGHT_MOON, DAY_SUN, sunUp);
-    lerpColor(this.cDir, this.cDir, SUNSET, twilight * 0.55);
-    this.sun.diffuse = this.cDir;
-    this.sun.intensity = lerp(0.18, 0.75, sunUp) + twilight * 0.12;
-
-    // Hemispheric ambient-fill
-    lerpColor(this.cSky, NIGHT_SKY, DAY_SKY, sunUp);
-    lerpColor(this.cGround, NIGHT_GROUND, DAY_GROUND, sunUp);
-    this.hemispheric.diffuse = this.cSky;
-    this.hemispheric.groundColor = this.cGround;
-    this.hemispheric.intensity = lerp(0.32, 0.85, sunUp);
-
-    // Fog / clearColor — холоднее ночью, кровавый акцент на twilight
-    lerpColor(this.cFog, NIGHT_FOG, DAY_FOG, sunUp);
-    lerpColor(this.cFog, this.cFog, SUNSET, twilight * 0.22);
-    const baseFog = lerp(0.006, 0.013, 1 - sunUp); // ночью гуще
-    this.scene.fogColor = this.cFog;
-    this.scene.fogDensity = baseFog * (1 + this.weatherTransition * 0.9);
-    const cc = this.scene.clearColor;
-    cc.r = this.cFog.r; cc.g = this.cFog.g; cc.b = this.cFog.b; cc.a = 1;
-
-    // апдейт uniform-ов террейн-шейдера (день/ночь окраска земли)
-    const terrain = this.ground?.metadata?.terrain as TerrainUniformProxy | undefined;
-    if (terrain) {
-      terrain.material.setVector3('lightDir', this.sun.direction);
-      this.vSky.set(this.cSky.r, this.cSky.g, this.cSky.b);
-      this.vGround.set(this.cGround.r, this.cGround.g, this.cGround.b);
-      terrain.material.setVector3('lightSky', this.vSky);
-      terrain.material.setVector3('lightGround', this.vGround);
-      terrain.material.setFloat('lightIntensity', this.hemispheric.intensity);
-    }
-  }
 
   private updateWeather(weather: Weather, dt: number): void {
     if (weather !== this.weather) {
@@ -339,6 +286,9 @@ export class AtmosphereRenderer {
     // плавный нагон/спад (~0.8с)
     this.weatherTransition += (target - this.weatherTransition) * Math.min(1, dt * 1.2);
     if (Math.abs(target - this.weatherTransition) < 0.01) this.weatherTransition = target;
+
+    // дождь густит fog (цвет неба остаётся светлым — меняется только плотность)
+    this.scene.fogDensity = BASE_FOG_DENSITY * (1 + this.weatherTransition * 0.9);
 
     // дождь: rate по мощности
     const rate = this.weatherTransition * (weather === 'storm' ? 2400 : 1400);

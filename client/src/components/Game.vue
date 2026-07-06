@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { PointerEventTypes } from 'babylonjs';
 import type { Engine, Mesh, Scene } from 'babylonjs';
-import { DEFAULT_CATALOG, DEFAULT_RELICS } from '@tower/shared';
+import { DEFAULT_CATALOG, DEFAULT_RELICS, DEFAULT_MAP_ID } from '@tower/shared';
 import type {
   CommanderType,
   DefenderUnitType,
@@ -14,7 +14,10 @@ import type {
   TowerType,
   UnitStance
 } from '@tower/shared';
-import { getMap } from '../services/api';
+import { submitRun, getLeaderboard } from '../services/api';
+import type { LeaderboardEntry } from '../services/api';
+import { loadMap } from '../services/maps';
+import { audio } from '../services/audio';
 import { canPlaceWall, canPlaceRelic, canPlaceProductionBuilding, canTrainUnit } from '../domain/placement';
 import { createEngine, createScene, gridToWorld, makePreviewMesh, sampleHeight, setGridVisible } from '../babylon/createScene';
 import { pickGrid } from '../babylon/picking';
@@ -30,13 +33,23 @@ import { AtmosphereRenderer } from '../babylon/atmosphere';
 import { startGameLoop } from '../babylon/game-loop';
 import type { GameLoopHandle } from '../babylon/game-loop';
 import { GameSim } from '../sim/game-sim';
+import { GuestSync } from '../sim/sim-sync';
 import { useGameStore } from '../stores/game-store';
 import { useAuthStore } from '../stores/auth-store';
+import { useCoopStore } from '../stores/coop-store';
 import EconomyBar from './EconomyBar.vue';
 import TowerShop from './TowerShop.vue';
 import RelicDraft from './RelicDraft.vue';
 import ProductionPanel from './ProductionPanel.vue';
 import type { WallMaterial, WallMaterialDef } from '@tower/shared';
+
+const emit = defineEmits<{ (e: 'back-to-lobby'): void }>();
+
+/**
+ * Id встроенной карты. Для single — DEFAULT_MAP_ID; для co-op — из coopStore
+ * (хост выбирает в лобби, гость получает тот же id из `coop:welcome`).
+ */
+const mapId = computed(() => coopStore.selectedMapId || DEFAULT_MAP_ID);
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const engineRef = shallowRef<Engine | null>(null);
@@ -63,6 +76,18 @@ const selectedTowerId = ref<string | null>(null);
 const selectedTowerTypeId = ref<string | null>(null);
 const selectedTowerMode = ref<TargetingMode>('first');
 const gameOver = ref(false);
+/** Phase 7: хост отключился (гость видит оверлей с предложением вернуться в лобби). */
+const hostLeft = ref(false);
+
+// ── Phase 8: контроль игры (пауза/скорость/звук) + результаты забега ──
+const paused = ref(false);
+const speed = ref(1);
+const audioEnabled = ref(true);
+const leaderboard = ref<LeaderboardEntry[]>([]);
+const lastRunResult = ref<{ wins: number; losses: number; newRewards: Array<{ id: string; label: string }> } | null>(null);
+const showLeaderboard = ref(false);
+let runSubmitted = false;
+let prevAudioStatus: string = '';
 
 // ── режим стройки стен (Фаза 4) ──
 const wallMaterials: WallMaterialDef[] = DEFAULT_CATALOG.walls ?? [];
@@ -95,7 +120,24 @@ const stanceOptions: { mode: UnitStance; label: string }[] = [
 
 const gameStore = useGameStore();
 const authStore = useAuthStore();
+const coopStore = useCoopStore();
 const userId = computed(() => authStore.user?.userId || 'local');
+
+// ── Phase 7: Co-op. Режим single/host/guest определяется по coopStore. ──
+const coopMode = computed<'single' | 'host' | 'guest'>(() => {
+  if (coopStore.sessionId && coopStore.phase === 'playing') {
+    return coopStore.isHost ? 'host' : 'guest';
+  }
+  return 'single';
+});
+const isCoop = computed(() => coopMode.value !== 'single');
+const isGuest = computed(() => coopMode.value === 'guest');
+const isHost = computed(() => coopMode.value === 'host');
+/** Soft-role ограничения для UI (Phase 7 задача 7.6). */
+const perms = computed(() => coopStore.rolePermissions);
+let guestSync: GuestSync | null = null;
+/** Подписки на coop-события (отписка в onBeforeUnmount). */
+const coopUnsubs: Array<() => void> = [];
 
 /** Показывать модалку драфта: статус draft и игрок ещё не в режиме размещения. */
 const showDraft = computed(() => gameStore.isDraft && relicPlaceTypeId.value === null);
@@ -233,6 +275,31 @@ function pickRelicInstance(): string | null {
 function applyAction(action: PlayerInput['action']): void {
   const sim = simRef.value;
   if (!sim) return;
+  // Phase 8: звуковые сигналы для ключевых действий
+  switch (action.kind) {
+    case 'place-tower':
+    case 'place-wall':
+    case 'pick-relic':
+    case 'build-production':
+    case 'train-unit':
+      audio.play('place');
+      break;
+    case 'cast-spell':
+      audio.play('spell');
+      break;
+    case 'start-wave':
+      audio.play('wave');
+      break;
+  }
+  if (coopMode.value === 'guest') {
+    // гость НЕ применяет ввод локально (no-prediction) — отправляем хосту.
+    // Эффект проявится в следующем авторитетном снапшоте (~100–200 мс).
+    const client = coopStore.getClient();
+    const tick = sim.state.tick;
+    client?.sendInput({ tick, userId: userId.value, action });
+    return;
+  }
+  // single / host: применяем локально. Хост-сим раздаёт эффект гостям через snapshot.
   sim.applyInput({ tick: sim.state.tick, userId: userId.value, action });
 }
 
@@ -431,7 +498,10 @@ function pickUnit(): string | null {
 
 function buildSim(map: MapDocument): void {
   const playable = ensurePlayableMap(map);
-  const sim = new GameSim({ map: playable, catalog: DEFAULT_CATALOG, ownerId: userId.value });
+  // В co-op ownerId = хост (он авторитетен). Гость получит корректный ownerId
+  // из снапшотов хоста; до первого снапшота — референсное значение.
+  const owner = isCoop.value ? coopStore.ownerId : userId.value;
+  const sim = new GameSim({ map: playable, catalog: DEFAULT_CATALOG, ownerId: owner });
   simRef.value = sim;
   rtsEnabled.value = sim.isRtsEnabled();
   gameStore.setRtsEnabled(rtsEnabled.value);
@@ -448,9 +518,12 @@ function buildSim(map: MapDocument): void {
 }
 
 async function init(): Promise<void> {
+  // Single-player и co-op используют встроенные карты из коде (@tower/shared/maps).
+  // Сетевой /map endpoint больше не нужен для запуска игры; co-op пробрасывает
+  // выбранный хостом mapId гостям через coop:welcome — детерминированно.
   let map: MapDocument;
   try {
-    map = await getMap();
+    map = loadMap(mapId.value);
   } catch (e) {
     console.error(e);
     statusMessage.value = 'Не удалось загрузить карту';
@@ -517,6 +590,11 @@ async function init(): Promise<void> {
 
   previewMesh = makePreviewMesh(scene);
 
+  // ── Phase 7: co-op wiring ──
+  setupCoopWiring(sim);
+
+  const guestMode = isGuest.value;
+  const hostMode = isHost.value;
   loop = startGameLoop(
     engine,
     scene,
@@ -534,32 +612,119 @@ async function init(): Promise<void> {
       gameStore.setSnapshot(snap);
       if (!gameOver.value && gameStore.isOver) gameOver.value = true;
       syncSelectedTowerFromSnapshot();
+      // хост раздаёт авторитетный снапшот гостям 10 Гц
+      if (hostMode) {
+        coopStore.getClient()?.sendState(snap);
+      }
     },
-    (waypoints) => overlay?.updateRoute(waypoints)
+    (waypoints) => overlay?.updateRoute(waypoints),
+    {
+      // гость не шагает сим — его state обновляется через onPreRender из GuestSync
+      stepping: !guestMode,
+      onPreRender: guestMode
+        ? (_dt, nowMs) => {
+            if (!guestSync) return;
+            const sampled = guestSync.sample(nowMs);
+            if (sampled) sim.applyRenderState(sampled);
+          }
+        : undefined
+    }
   );
 
   setupPointerHandlers();
-  statusMessage.value = '';
+  statusMessage.value = isCoop.value
+    ? (guestMode ? 'Co-op: ожидание снапшота хоста...' : 'Co-op: вы — хост')
+    : '';
+}
+
+/**
+ * Phase 7: подключает обработчики co-op-событий от coop-клиента.
+ * - Хост: применяет гостевые вводы к своему симу и отвечает на request-snapshot.
+ * - Гость: буферизует авторитетные снапшоты хоста (GuestSync) и обновляет game-store.
+ * Single-player: no-op.
+ */
+function setupCoopWiring(sim: GameSim): void {
+  // очистка предыдущих подписок (при restart)
+  for (const unsub of coopUnsubs) unsub();
+  coopUnsubs.length = 0;
+  if (coopMode.value === 'single') return;
+  const client = coopStore.getClient();
+  if (!client) return;
+
+  if (coopMode.value === 'guest') {
+    guestSync = new GuestSync();
+    // запросить актуальный снапшот при входе (на случай если игра уже идёт)
+    client.requestSnapshot();
+    coopUnsubs.push(
+      client.on('state', (snapshot) => {
+        guestSync?.push(snapshot);
+        // UI/экономику обновляем из последнего (не интерполированного) снапшота
+        gameStore.setSnapshot(snapshot);
+        if (!gameOver.value && gameStore.isOver) gameOver.value = true;
+        syncSelectedTowerFromSnapshot();
+        if (statusMessage.value) statusMessage.value = ''; // очистить «ожидание снапшота»
+      })
+    );
+    coopUnsubs.push(
+      client.on('host-left', () => {
+        // хост ушёл — показываем оверлей с возвратом в лобби
+        hostLeft.value = true;
+        gameOver.value = true;
+        statusMessage.value = 'Хост отключился. Игра завершена.';
+      })
+    );
+  } else if (coopMode.value === 'host') {
+    // хост получает вводы гостей и применяет к своему симу
+    coopUnsubs.push(
+      client.on('input', (input) => {
+        sim.applyInput(input);
+      })
+    );
+    // гость запросил актуальный снапшот (например, только подключился) — отвечаем
+    coopUnsubs.push(
+      client.on('request-snapshot', () => {
+        client.sendState(sim.serialize());
+      })
+    );
+    coopUnsubs.push(
+      client.on('peer-left', () => {
+        //Peer ушёл — специфичных действий не требуется; snapshot продолжит раздаваться.
+      })
+    );
+  }
 }
 
 function restart(): void {
+  // В гостевом режиме рестарт недоступен — решение принимает хост.
+  if (isGuest.value) return;
   const sim = simRef.value;
   if (!sim) return;
   const map = sim.map;
   buildSim(map);
+  const newSim = simRef.value!;
   // перерисуем башни/врагов/стены/реликвии/юнитов с нового состояния сразу
   const scene = sceneRef.value;
   if (scene) {
-    const s = simRef.value!;
-    enemyRenderer?.sync(s.state);
-    towerRendererRef.value?.sync(s.state);
-    projectilePool?.sync(s.state);
-    wallRenderer?.sync(s.state);
-    relicRenderer?.sync(s.state);
-    unitRenderer?.sync(s.state, 0);
-    overlay?.updateRoute(s.getRouteWaypoints());
+    enemyRenderer?.sync(newSim.state);
+    towerRendererRef.value?.sync(newSim.state);
+    projectilePool?.sync(newSim.state);
+    wallRenderer?.sync(newSim.state);
+    relicRenderer?.sync(newSim.state);
+    unitRenderer?.sync(newSim.state, 0);
+    overlay?.updateRoute(newSim.getRouteWaypoints());
   }
   relicPlaceTypeId.value = null;
+  // Phase 8: сброс контроля/результатов
+  runSubmitted = false;
+  lastRunResult.value = null;
+  leaderboard.value = [];
+  showLeaderboard.value = false;
+  paused.value = false;
+  speed.value = 1;
+  loop?.setPaused(false);
+  loop?.setSpeed(1);
+  // переподключить coop-обработчики к новому симу (хост)
+  if (isHost.value) setupCoopWiring(newSim);
 }
 
 function onSelectType(typeId: string): void {
@@ -695,8 +860,86 @@ function sellSelected(): void {
   selectedTowerId.value = null;
 }
 
+/** Phase 7: гость покидает игру после отключения хоста. */
+function backToLobby(): void {
+  emit('back-to-lobby');
+}
+
+// ── Phase 8: контроль симуляции ──
+function togglePause(): void {
+  paused.value = !paused.value;
+  loop?.setPaused(paused.value);
+}
+function cycleSpeed(): void {
+  speed.value = speed.value === 1 ? 2 : (speed.value === 2 ? 3 : 1);
+  loop?.setSpeed(speed.value);
+}
+function toggleAudio(): void {
+  audioEnabled.value = !audioEnabled.value;
+  audio.setEnabled(audioEnabled.value);
+}
+
+/**
+ * Phase 8: отправить результат забега на сервер (single/host) + подтянуть лидерборд.
+ * Гости не отправляют (хост авторитетен). Защита от двойной отправки — runSubmitted.
+ */
+async function submitRunResult(): Promise<void> {
+  if (runSubmitted) return;
+  const sim = simRef.value;
+  if (!sim) return;
+  if (isGuest.value) return;
+  runSubmitted = true;
+  const outcome = sim.state.status === 'won' ? 'won' : 'lost';
+  const wavesCleared = outcome === 'won'
+    ? sim.state.waveIndex + 1
+    : Math.max(0, sim.state.waveIndex);
+  // Гостевой режим (офлайн) — skip серверной записи. Лидерборд гостю недоступен.
+  if (authStore.isGuest) return;
+  try {
+    const result = await submitRun({
+      outcome,
+      wavesCleared,
+      gold: Math.floor(sim.state.gold),
+      lives: sim.state.lives,
+      mapId: String(sim.map.metadata?.name || 'default'),
+      mode: isCoop.value ? 'coop' : 'single'
+    });
+    lastRunResult.value = { wins: result.wins, losses: result.losses, newRewards: result.newRewards };
+  } catch (e) {
+    console.warn('submitRun failed', e);
+  }
+  // подгрузить лидерборд (глобальный топ)
+  try {
+    leaderboard.value = await getLeaderboard(undefined, 10);
+  } catch (e) {
+    console.warn('leaderboard failed', e);
+  }
+}
+
+function toggleLeaderboard(): void {
+  showLeaderboard.value = !showLeaderboard.value;
+}
+
+// ── Phase 8: звук + отправка результата забега ──
+// Старт волны / победа / поражение → звуковые сигналы.
+watch(() => gameStore.status, (next, prev) => {
+  if (next === 'wave' && prev !== 'wave') audio.play('wave');
+  if (next === 'won') audio.play('win');
+  if (next === 'lost') audio.play('lose');
+});
+// game over → отправить результат и подгрузить лидерборд (однократно).
+watch(gameOver, (over) => {
+  if (over && !hostLeft.value) {
+    void submitRunResult();
+  }
+});
+
 onMounted(() => init());
 onBeforeUnmount(() => {
+  // Phase 7: отписаться от coop-событий
+  for (const unsub of coopUnsubs) unsub();
+  coopUnsubs.length = 0;
+  guestSync = null;
   loop?.stop();
   overlay?.dispose();
   enemyRenderer?.dispose();
@@ -720,6 +963,31 @@ onBeforeUnmount(() => {
         <canvas ref="canvasRef" class="game-canvas"></canvas>
         <div v-if="statusMessage" class="game-alert">{{ statusMessage }}</div>
 
+        <!-- Phase 8: контролы симуляции (пауза/скорость/звук/лидерборд) -->
+        <div v-if="!isGuest" class="game-controls">
+          <button class="ctrl-btn" :class="{ active: paused }" :title="paused ? 'Продолжить' : 'Пауза'" @click="togglePause">{{ paused ? '▶' : '⏸' }}</button>
+          <button class="ctrl-btn" :class="{ active: speed > 1 }" title="Скорость симуляции" @click="cycleSpeed">×{{ speed }}</button>
+          <button class="ctrl-btn" :class="{ active: audioEnabled }" :title="audioEnabled ? 'Выключить звук' : 'Включить звук'" @click="toggleAudio">{{ audioEnabled ? '🔊' : '🔇' }}</button>
+          <button class="ctrl-btn" title="Лидерборд" @click="toggleLeaderboard">🏆</button>
+        </div>
+        <div v-if="paused" class="pause-banner">Пауза</div>
+
+        <!-- Phase 8: панель лидерборда -->
+        <div v-if="showLeaderboard" class="leaderboard-panel">
+          <div class="lb-header">
+            <span>Топ результатов</span>
+            <button class="btn ghost small" @click="toggleLeaderboard">✕</button>
+          </div>
+          <ol v-if="leaderboard.length" class="lb-list">
+            <li v-for="(e, i) in leaderboard" :key="e.id" :class="{ self: e.userId === userId }">
+              <span class="lb-rank">{{ i + 1 }}</span>
+              <span class="lb-name">{{ e.username }}</span>
+              <span class="lb-meta">волн: {{ e.wavesCleared }} · 💰{{ e.gold }} · ❤{{ e.lives }}</span>
+            </li>
+          </ol>
+          <p v-else class="lb-empty">Пока нет результатов. Сыграйте партию!</p>
+        </div>
+
         <!-- Фаза 5: индикатор режима размещения реликвии -->
         <div v-if="relicPlaceTypeId" class="relic-place-banner">
           <span>Разместите реликвию в свободной клетке</span>
@@ -732,6 +1000,13 @@ onBeforeUnmount(() => {
           <span v-else-if="rtsMode === 'build'">Строительство здания — кликните по свободной клетке</span>
           <span v-else-if="rtsMode === 'train'">Тренировка юнита — кликните по свободной клетке</span>
           <button class="btn ghost" @click="cancelRtsMode">Отмена</button>
+        </div>
+
+        <!-- Phase 7: индикатор co-op режима/роли -->
+        <div v-if="isCoop" class="coop-banner" :class="{ guest: isGuest }">
+          <span class="coop-mode">{{ isGuest ? 'Co-op · гость' : 'Co-op · хост' }}</span>
+          <span class="coop-role">роль: {{ coopStore.roleLabel }}</span>
+          <span v-if="isGuest" class="coop-hint">действия применяются через хоста</span>
         </div>
 
         <!-- Фаза 5: драфт реликвий между волнами -->
@@ -747,19 +1022,37 @@ onBeforeUnmount(() => {
 
         <div v-if="gameOver" class="overlay-modal">
           <div class="modal-card">
-            <div class="modal-title" :class="gameStore.status">
-              {{ gameStore.status === 'won' ? 'Победа!' : 'Поражение' }}
+            <div v-if="hostLeft" class="modal-title lost">Хост отключился</div>
+            <template v-else>
+              <div class="modal-title" :class="gameStore.status">
+                {{ gameStore.status === 'won' ? 'Победа!' : (isCoop ? 'Игра окончена' : 'Поражение') }}
+              </div>
+              <div class="modal-text">
+                Волна: {{ gameStore.waveLabel }} · Золото: {{ gameStore.gold }}
+              </div>
+              <!-- Phase 8: мета-прогресс (wins/losses + новые награды) -->
+              <div v-if="lastRunResult" class="modal-progress">
+                <div class="progress-line">Побед: {{ lastRunResult.wins }} · Поражений: {{ lastRunResult.losses }}</div>
+                <div v-for="r in lastRunResult.newRewards" :key="r.id" class="reward-line">🏆 {{ r.label }}</div>
+              </div>
+            </template>
+            <div v-if="isGuest && !hostLeft" class="modal-hint">Дождитесь, пока хост начнёт новую игру.</div>
+            <div class="modal-actions">
+              <button v-if="!hostLeft" class="btn ghost" @click="toggleLeaderboard">🏆 Лидерборд</button>
+              <button v-if="hostLeft" class="btn primary" @click="backToLobby">Вернуться в лобби</button>
+              <button v-else-if="!isGuest" class="btn primary" @click="restart">Заново</button>
             </div>
-            <div class="modal-text">
-              Волна: {{ gameStore.waveLabel }} · Золото: {{ gameStore.gold }}
-            </div>
-            <button class="btn primary" @click="restart">Заново</button>
           </div>
         </div>
       </main>
 
       <aside class="game-side">
+        <!-- Phase 7: soft-role restriction — башни только builder/free -->
+        <div v-if="isCoop && !perms.canBuildTowers" class="role-locked">
+          Роль «{{ coopStore.roleLabel }}» не строит башни
+        </div>
         <TowerShop
+          v-if="!isCoop || perms.canBuildTowers"
           :towers="towerTypes"
           :selected-type-id="selectedTypeId"
           :sell-mode="sellMode"
@@ -768,7 +1061,7 @@ onBeforeUnmount(() => {
           @sell-mode="onSellMode"
         />
 
-        <section class="wall-shop">
+        <section v-if="!isCoop || perms.canBuildWalls" class="wall-shop">
           <div class="info-title">Стены лабиринта</div>
           <div class="wall-grid">
             <button
@@ -777,7 +1070,7 @@ onBeforeUnmount(() => {
               class="wall-btn"
               :class="{ active: wallBuildMode && selectedWallMaterial === m.material, disabled: gameStore.gold < m.cost }"
               :disabled="gameStore.gold < m.cost"
-              :title="`${m.name} · ${m.maxHp} HP`"
+              :title="`${m.name} · ${m.maxHp} HP · ${m.cost} золота. Стена перенаправляет врагов и удлиняет путь.`"
               @click="selectWallMaterial(m.material)"
             >
               <span class="wall-mat" :data-mat="m.material">{{ m.name }}</span>
@@ -811,11 +1104,12 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- Фаза 6: RTS-режим «Тёмная крепость» -->
+        <!-- Phase 7: soft-role — экономисту доступны здания/юниты, командиру — только заклинания -->
         <ProductionPanel
           v-if="rtsEnabled"
-          :buildings="productionBuildings"
-          :units="defenderUnits"
-          :commander="commander"
+          :buildings="(!isCoop || perms.canEconomy) ? productionBuildings : []"
+          :units="(!isCoop || perms.canEconomy) ? defenderUnits : []"
+          :commander="(!isCoop || perms.canCastSpells) ? commander : null"
           :active-mode="rtsMode"
           :selected-id="rtsSelectedId"
           :resources="gameStore.resources"
@@ -941,6 +1235,111 @@ onBeforeUnmount(() => {
   z-index: 4;
 }
 .rts-mode-banner .btn.ghost { margin: 0; }
+.coop-banner {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(59, 130, 246, 0.55);
+  border-radius: 10px;
+  color: #93c5fd;
+  font-weight: 700;
+  font-size: 12px;
+  z-index: 4;
+}
+.coop-banner.guest { border-color: rgba(168, 85, 247, 0.55); color: #c4b5fd; }
+.coop-banner .coop-role { opacity: 0.85; font-weight: 600; }
+.coop-banner .coop-hint { opacity: 0.65; font-weight: 500; font-size: 11px; }
+.role-locked {
+  padding: 10px 12px;
+  margin: 8px 0 0;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px dashed rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 12px;
+  text-align: center;
+}
+.modal-hint { color: #94a3b8; font-size: 13px; }
+.modal-progress {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.progress-line { color: #cbd5e1; font-size: 13px; }
+.reward-line { color: #fcd34d; font-size: 13px; font-weight: 600; }
+.modal-actions { display: flex; gap: 10px; }
+
+.game-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 5;
+}
+.ctrl-btn {
+  min-width: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(15, 23, 42, 0.85);
+  color: #e5e7eb;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+}
+.ctrl-btn.active {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: #3b82f6;
+  color: #fff;
+}
+.pause-banner {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 42px;
+  font-weight: 800;
+  color: #fcd34d;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  z-index: 4;
+}
+.leaderboard-panel {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  width: 280px;
+  max-height: 60%;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e5e7eb;
+  z-index: 6;
+}
+.lb-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-weight: 800; margin-bottom: 8px;
+}
+.lb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lb-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04); font-size: 12px;
+}
+.lb-list li.self { background: rgba(59, 130, 246, 0.18); }
+.lb-rank { font-weight: 800; color: #fcd34d; min-width: 18px; }
+.lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-meta { color: #94a3b8; font-size: 11px; }
+.lb-empty { color: #94a3b8; font-size: 13px; }
+.btn.small { padding: 4px 8px; font-size: 12px; }
 .game-side {
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.6);

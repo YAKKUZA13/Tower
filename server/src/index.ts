@@ -6,13 +6,15 @@ import { query } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
 import { connectRedis, getRedis } from './redis/client.js';
 import authRoutes from './routes/auth.js';
-import mapRoutes from './routes/map.js';
 import sessionRoutes from './routes/session.js';
-import assetsRoutes from './routes/assets.js';
+import runRoutes from './routes/run.js';
+import { CoopRooms } from './services/coop-rooms.js';
+import type { CoopClient } from './services/coop-rooms.js';
 import type { FastifyRequest } from 'fastify';
 import type { ServerMessage, WsClient } from './types/realtime.js';
 import type { ClientMessage } from './types/realtime.js';
 import type { GameRole } from './types/game-session.js';
+import type { CoopClientMessage } from '@tower/shared';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const BODY_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -20,6 +22,12 @@ const BODY_LIMIT_BYTES = 20 * 1024 * 1024;
 interface WsQuery {
   sessionId?: string;
   token?: string;
+}
+
+function isCoopMessage(data: unknown): data is CoopClientMessage {
+  if (typeof data !== 'object' || data === null) return false;
+  const t = (data as { type?: unknown }).type;
+  return typeof t === 'string' && t.startsWith('coop:');
 }
 
 async function start() {
@@ -38,7 +46,10 @@ async function start() {
 
   await app.register(websocket);
 
+  // Глобальный пул клиентов — для legacy `broadcast` (map_updated) и presence.
+  // Co-op маршрутизация идёт через отдельный CoopRooms (Phase 7).
   const clients = new Set<WsClient>();
+  const coopRooms = new CoopRooms();
 
   app.decorate('wsClients', clients);
   app.decorate('broadcast', (sessionId: string | null, payload: ServerMessage) => {
@@ -79,41 +90,79 @@ async function start() {
     const user = auth.user;
     const session = sessionId ? await getActiveSession(sessionId) : await getActiveSession(null);
     const role: GameRole = session ? (session.gmUserId === user.userId ? 'gm' : (session.players.find(p => p.userId === user.userId) ? 'player' : 'spectator')) : 'spectator';
-    const client: WsClient = { socket, sessionId: session?.sessionId || null, userId: user.userId, role };
-    clients.add(client);
+    const baseClient: WsClient = { socket, sessionId: session?.sessionId || null, userId: user.userId, role };
+    clients.add(baseClient);
     const { getRedisOrNull } = await import('./redis/client.js');
     const redis = await getRedisOrNull();
-    if (redis && client.sessionId) {
-      await redis.hSet(`presence:session:${client.sessionId}`, user.userId, JSON.stringify({
+    if (redis && baseClient.sessionId) {
+      await redis.hSet(`presence:session:${baseClient.sessionId}`, user.userId, JSON.stringify({
         userId: user.userId,
         username: user.username || user.login,
         role,
         connectedAt: Date.now()
       }));
-      await redis.expire(`presence:session:${client.sessionId}`, 120);
+      await redis.expire(`presence:session:${baseClient.sessionId}`, 120);
     }
     const send = (obj: ServerMessage) => socket.send(JSON.stringify(obj));
-    send({ type: 'welcome', role, sessionId: client.sessionId });
+    send({ type: 'welcome', role, sessionId: baseClient.sessionId });
+
+    // ── Co-op: регистрируем клиента в комнате, если есть активная сессия ──
+    let coopClient: CoopClient | null = null;
+    if (session && baseClient.sessionId) {
+      coopClient = {
+        socket,
+        sessionId: baseClient.sessionId,
+        userId: user.userId,
+        username: user.username || user.login,
+        isHost: session.gmUserId === user.userId,
+        coopRole: 'free',
+        ready: false
+      };
+      const welcome = coopRooms.join(coopClient, session.gmUserId);
+      send(welcome as unknown as ServerMessage);
+    }
+
     socket.on('message', (raw: Buffer | string) => {
       let data: ClientMessage | null = null;
       try { data = JSON.parse(String(raw)) as ClientMessage; } catch {}
       if (data?.type === 'ping') {
         send({ type: 'pong', t: Date.now() });
+        return;
       }
-      // D&D-сообщения (chat/dice/entity/turn) удалены в Фазе 0.2; TD realtime (co-op) появится в Фазе 7.
+      // ── Co-op маршрутизация (Phase 7) ──
+      if (coopClient && isCoopMessage(data)) {
+        try {
+          coopRooms.handleMessage(coopClient, data);
+        } catch (e) {
+          app.log.warn({ err: e }, 'coop message handling failed');
+        }
+      }
     });
+
     socket.on('close', () => {
-      clients.delete(client);
-      if (redis && client.sessionId) {
-        redis.hDel(`presence:session:${client.sessionId}`, user.userId).catch((err: unknown) => app.log.warn(err));
+      clients.delete(baseClient);
+      if (coopClient) {
+        const out = coopRooms.leave(coopClient);
+        if (out.hostLeft && out.sessionId) {
+          // хост ушёл — комната распущена; уведомить бывших гостей напрямую
+          // (leave уже удалил комнату, поэтому через базовый пул по sessionId)
+          const msg = JSON.stringify({ type: 'coop:host-left' } as ServerMessage);
+          for (const c of clients) {
+            if (c.sessionId === out.sessionId) {
+              try { c.socket.send(msg); } catch (e) { app.log.warn(e); }
+            }
+          }
+        }
+      }
+      if (redis && baseClient.sessionId) {
+        redis.hDel(`presence:session:${baseClient.sessionId}`, user.userId).catch((err: unknown) => app.log.warn(err));
       }
     });
   });
 
   await app.register(authRoutes, { prefix: '/auth' });
   await app.register(sessionRoutes, { prefix: '/session' });
-  await app.register(mapRoutes, { prefix: '/map' });
-  await app.register(assetsRoutes, { prefix: '/assets' });
+  await app.register(runRoutes, { prefix: '/run' });
 
   try {
     await app.listen({ port: PORT, host: '0.0.0.0' });

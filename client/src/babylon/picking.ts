@@ -1,1 +1,1 @@
-export { pickGrid, pickSceneObject, pickWorld } from './createScene';
+export { pickGrid, pickWorld } from './createScene';

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useAuthStore } from '../stores/auth-store';
-import type { AccountRole } from '../domain/auth';
 
 const emit = defineEmits(['authed']);
 
@@ -10,7 +9,6 @@ const mode = ref<'login' | 'register'>('login');
 const login = ref('');
 const password = ref('');
 const passwordRepeat = ref('');
-const defaultRole = ref<AccountRole>('player');
 const status = ref('');
 const isRegisterMode = computed(() => mode.value === 'register');
 const canSubmit = computed(() => {
@@ -24,8 +22,7 @@ async function doRegister() {
   try {
     await authStore.registerAccount({
       login: login.value.trim(),
-      password: password.value,
-      defaultRole: defaultRole.value
+      password: password.value
     });
     emit('authed');
     status.value = 'Аккаунт создан';
@@ -53,6 +50,11 @@ function submit() {
   if (isRegisterMode.value) doRegister();
   else doLogin();
 }
+
+function playAsGuest() {
+  authStore.loginAsGuest();
+  emit('authed');
+}
 </script>
 
 <template>
@@ -73,19 +75,6 @@ function submit() {
       <template v-if="isRegisterMode">
         <label class="auth-label">Повтор пароля</label>
         <input v-model="passwordRepeat" type="password" class="auth-input" placeholder="Повторите пароль" autocomplete="new-password" @keyup.enter="submit" />
-
-        <div class="role-select">
-          <label :class="['role-card', defaultRole === 'gm' ? 'active' : '']">
-            <input v-model="defaultRole" type="radio" value="gm" />
-            <span class="role-title">Мастер</span>
-            <span class="role-help">Создание сессий, редактор, управление миром.</span>
-          </label>
-          <label :class="['role-card', defaultRole === 'player' ? 'active' : '']">
-            <input v-model="defaultRole" type="radio" value="player" />
-            <span class="role-title">Игрок</span>
-            <span class="role-help">Подключение к игре, персонаж, прогрессия.</span>
-          </label>
-        </div>
       </template>
 
       <div class="auth-actions">
@@ -93,7 +82,9 @@ function submit() {
           {{ authStore.isLoading ? 'Подождите...' : (isRegisterMode ? 'Создать аккаунт' : 'Войти') }}
         </button>
       </div>
-      <div class="auth-hint">Пароль хранится на сервере только как salted hash. Токен входа можно отозвать.</div>
+      <div class="auth-divider"><span>или</span></div>
+      <button class="auth-btn guest" @click="playAsGuest">Играть без аккаунта</button>
+      <div class="auth-hint">Аккаунт нужен только для co-op и сохранения результатов в лидерборде. Одиночная игра доступна сразу, без сервера.</div>
       <div class="auth-status">{{ status }}</div>
     </div>
   </div>
@@ -148,33 +139,6 @@ function submit() {
   padding: 8px 10px;
   box-sizing: border-box;
 }
-.role-select {
-  display: grid;
-  gap: 8px;
-}
-.role-card {
-  border: 1px solid #dbe3f0;
-  border-radius: 12px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  cursor: pointer;
-}
-.role-card input {
-  display: none;
-}
-.role-card.active {
-  border-color: #2563eb;
-  background: #eff6ff;
-}
-.role-title {
-  font-weight: 800;
-}
-.role-help {
-  color: #64748b;
-  font-size: 12px;
-}
 .auth-actions {
   display: flex;
   gap: 8px;
@@ -195,10 +159,28 @@ function submit() {
   opacity: 0.55;
   cursor: not-allowed;
 }
-.auth-btn.ghost {
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  color: #0f172a;
+.auth-btn.guest {
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+.auth-btn.guest:hover {
+  background: #1e293b;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 4px 0;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
 }
 .auth-hint {
   font-size: 12px;

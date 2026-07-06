@@ -28,6 +28,7 @@ function rgb(c: [number, number, number]): string {
       class="shop-card"
       :class="{ active: !sellMode && selectedTypeId === t.id, disabled: gold < t.cost }"
       :disabled="gold < t.cost"
+      :title="`${t.name} — ${t.category}, урон ${t.damage}, скорострельность ${t.fireRate.toFixed(1)}/с, радиус ${t.range.toFixed(1)}. ${t.description}`"
       @click="emit('sell-mode', false); emit('select', t.id)"
     >
       <div class="card-head">

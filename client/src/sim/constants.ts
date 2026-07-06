@@ -15,8 +15,9 @@ export const SELL_REFUND_RATIO = 0.5;
 /** Базовый seed (single-player; в co-op задаётся хостом). */
 export const DEFAULT_SEED = 1337;
 
-/** Длительность полных суток в секундах сима (Фаза 3 — день/ночь). 0..1 в snapshot.timeOfDay. */
-export const DAY_LENGTH_SECONDS = 180;
+/** Длительность полных суток в секундах сима (Фаза 3 — день/ночь). 0..1 в snapshot.timeOfDay.
+ *  TD-102: увеличено (180 → 300), чтобы матч дольше оставался в читаемой фазе. */
+export const DAY_LENGTH_SECONDS = 300;
 
 // ── Стены (Фаза 4) ──
 /** Длительность горения стены после поджога (сек). */

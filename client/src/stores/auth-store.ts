@@ -3,6 +3,13 @@ import type { AccountRole, AuthUser } from '../domain/auth';
 import { getMe, login, logout, register } from '../services/api';
 import { clearAuthToken, clearStoredAuthUser, getAuthToken, getStoredAuthUser, setAuthToken, setStoredAuthUser } from '../services/token-storage';
 
+/** Маркер гостевого токена — присутствие означает «офлайн-single без сервера». */
+export const GUEST_TOKEN = 'guest';
+
+function isGuestToken(token: string): boolean {
+  return token === GUEST_TOKEN;
+}
+
 interface AuthState {
   user: AuthUser | null;
   token: string;
@@ -19,6 +26,7 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isAuthed: (state) => Boolean(state.user && state.token),
+    isGuest: (state) => isGuestToken(state.token),
     defaultRole: (state): AccountRole => state.user?.defaultRole || 'player'
   },
   actions: {
@@ -29,11 +37,25 @@ export const useAuthStore = defineStore('auth', {
       setStoredAuthUser(user);
       localStorage.setItem('username', user.username || user.login);
     },
-    async registerAccount(payload: { login: string; password: string; defaultRole: AccountRole }) {
+    /**
+     * Гостевой вход (офлайн-single). Без сервера: создаёт локального AuthUser
+     * и token='guest'. Single-player запускается на встроенной карте без БД.
+     * Co-op и лидерборд гостю недоступны (нужен аккаунт).
+     */
+    loginAsGuest(username = 'Гость') {
+      const guestUser: AuthUser = {
+        userId: 'guest',
+        login: 'guest',
+        username,
+        defaultRole: 'player'
+      };
+      this.applyAuth(guestUser, GUEST_TOKEN);
+    },
+    async registerAccount(payload: { login: string; password: string; defaultRole?: AccountRole }) {
       this.isLoading = true;
       this.error = '';
       try {
-        const res = await register(payload);
+        const res = await register({ ...payload, defaultRole: payload.defaultRole ?? 'player' });
         this.applyAuth(res.user, res.token || res.authSession.token);
       } catch (e) {
         this.error = 'Не удалось создать аккаунт';
@@ -57,6 +79,8 @@ export const useAuthStore = defineStore('auth', {
     },
     async restoreSession() {
       if (!this.token) return;
+      // Гостевой токен — не идём в сеть; пользователь уже в localStorage.
+      if (isGuestToken(this.token)) return;
       this.isLoading = true;
       try {
         const user = await getMe();
@@ -69,11 +93,15 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     async logoutAccount() {
-      try {
-        if (this.token) await logout();
-      } finally {
-        this.clearAuth();
+      // Гость не имеет серверной сессии — пропускаем сетевой logout.
+      if (this.token && !isGuestToken(this.token)) {
+        try {
+          await logout();
+        } catch {
+          // ignore — cleanup локально в finally
+        }
       }
+      this.clearAuth();
     },
     clearAuth() {
       this.user = null;

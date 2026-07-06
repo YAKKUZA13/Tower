@@ -1,20 +1,22 @@
 /**
- * Процедурный билдер воксельных мешей (Phase 2 задача 2.2/2.3).
+ * Процедурный билдер воксельных мешей.
  *
- * Воксель = прямоугольный параллелепипед (box). Модель = набор вокселов, каждый
- * со своим цветом. Билдер создаёт по боксу на воксел, красит вершинные цвета и
- * сливает (Mesh.MergeMeshes) в ОДИН меш → 1 draw call, совместимо с thin instances
- * и InstancedMesh (ADR-4). Это и есть «воксель-модель» в духе CC0-паков Quaternius/KayKit.
+ * Воксель = один unit-куб в целочисленной сетке (центр в (x,y,z)∈ℤ, размер 1).
+ * Модель = набор таких кубов, каждый со своим цветом. Билдер строит по боксу на
+ * воксел, красит вершинные цвета (с baked per-face tint), сливает (MergeMeshes)
+ * в ОДИН меш → 1 draw call, совместимо с thin instances и InstancedMesh (ADR-4).
  *
- * Координаты — в «клеточно-нормализованном» пространстве: модель отцентрирована в начале
- * координат, высота ≈ 1.0 (y ∈ [-0.5, 0.5]). Рендерер масштабирует master на cellSize.
+ * Авторская модель пишется в «грубых» целочисленных координатах (Y вверх, стопы у
+ * y=0; X — ширина; Z — глубина, лицо в +Z). normalizeMesh центрирует и масштабирует
+ * к height=1.0 → рендерер ставит master на cellSize. Перекрытия разрешены: dedup
+ * по клетке (last-wins) убирает z-fighting; акценты добавляются последними.
  */
 import { Color3, Matrix, Mesh, MeshBuilder, StandardMaterial, VertexBuffer, type Scene } from 'babylonjs';
 import { ACCENT, PALETTE, shade, type RGB } from './dark-palette';
 
 export interface Voxel {
-  x: number; y: number; z: number;     // центр воксела
-  sx: number; sy: number; sz: number;  // полные размеры
+  x: number; y: number; z: number;     // центр воксела (целое)
+  sx: number; sy: number; sz: number;  // полные размеры (1 для unit-куба)
   color: RGB;
 }
 
@@ -31,14 +33,28 @@ export interface VoxelMeshOptions {
   matte?: boolean;
 }
 
-/** Быстро добавить бокс-воксель в список. */
-export function box(
+// ── Авторские хелперы (unit-grid) ─────────────────────────────────────────────
+
+/** Один unit-воксель в клетке (x,y,z). */
+export function cube(list: Voxel[], x: number, y: number, z: number, color: RGB): void {
+  list.push({ x, y, z, sx: 1, sy: 1, sz: 1, color });
+}
+
+/** Заполнить целочисленный параллелепипед [x0..x1]×[y0..y1]×[z0..z1] unit-вокселями. */
+export function box3(
   list: Voxel[],
-  x: number, y: number, z: number,
-  sx: number, sy: number, sz: number,
+  x0: number, x1: number,
+  y0: number, y1: number,
+  z0: number, z1: number,
   color: RGB
 ): void {
-  list.push({ x, y, z, sx, sy, sz, color });
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      for (let z = z0; z <= z1; z++) {
+        list.push({ x, y, z, sx: 1, sy: 1, sz: 1, color });
+      }
+    }
+  }
 }
 
 /**
@@ -65,22 +81,20 @@ export function normalizeMesh(mesh: Mesh): void {
   mesh.refreshBoundingInfo();
 }
 
-/** Заполнить «столбец»/«плашку» вокселов (для толстых деталей). */
-export function fill(
-  list: Voxel[],
-  x0: number, x1: number,
-  y0: number, y1: number,
-  z0: number, z1: number,
-  step: number,
-  color: RGB
-): void {
-  for (let x = x0; x <= x1 + 1e-6; x += step) {
-    for (let y = y0; y <= y1 + 1e-6; y += step) {
-      for (let z = z0; z <= z1 + 1e-6; z += step) {
-        list.push({ x, y, z, sx: step, sy: step, sz: step, color });
-      }
-    }
-  }
+// ── baked per-face directional tint (классический «воксельный» шейдинг) ──────────
+// Запекаем top ярче / sides средне / bottom темнее по нормали грани → блоки читаются
+// при любом освещении, а стык яркой верхней и тёмной боковой грани читается как тёмная
+// линия (эффект «out line по граням вокселя»), что работает на thin instances.
+const FACE_TINT_TOP = 1.0;
+const FACE_TINT_SIDE = 0.6;
+const FACE_TINT_BOTTOM = 0.38;
+
+/** Emissive-подобные цвета (яркие + насыщенные) НЕ затемняем по граням — это
+ *  «огонь / глаза / кристаллы / золото», они должны гореть равно на всех гранях. */
+function isAccentColor([r, g, b]: RGB): boolean {
+  const max = Math.max(r, g, b);
+  const sat = max - Math.min(r, g, b);
+  return max > 0.7 && sat > 0.25;
 }
 
 /**
@@ -88,27 +102,37 @@ export function fill(
  * Вызывающий владеет результатом (должен dispose).
  */
 export function buildVoxelMesh(scene: Scene, voxels: Voxel[], options: VoxelMeshOptions): Mesh {
-  if (voxels.length === 0) {
-    // страховочный пустой меш
+  // dedup по клетке целочисленной сетки (last-wins): убирает перекрытия/z-fighting;
+  // детали-акценты (глаза/огонь/руны), добавляемые последними, перебивают корпус.
+  const cells = new Map<string, RGB>();
+  for (const v of voxels) {
+    cells.set(`${Math.round(v.x)},${Math.round(v.y)},${Math.round(v.z)}`, v.color);
+  }
+  if (cells.size === 0) {
     return MeshBuilder.CreateBox(options.name, { size: 0.05 }, scene);
   }
 
   const parts: Mesh[] = [];
-  for (let i = 0; i < voxels.length; i++) {
-    const v = voxels[i];
-    const m = MeshBuilder.CreateBox(`${options.name}-v${i}`, {
-      width: Math.max(0.001, v.sx),
-      height: Math.max(0.001, v.sy),
-      depth: Math.max(0.001, v.sz)
-    }, scene);
-    m.position.set(v.x, v.y, v.z);
-    // вершинные цвета: бокс имеет 24 вершины, красим все в цвет воксела
-    const c = v.color;
+  for (const [key, color] of cells) {
+    const p = key.split(',');
+    const x = +p[0]!, y = +p[1]!, z = +p[2]!;
+    const m = MeshBuilder.CreateBox(`${options.name}-v`, { size: 1 }, scene);
+    m.position.set(x, y, z);
+    // вершинные цвета с baked per-face tint по нормали грани.
+    const accent = isAccentColor(color);
+    const normals = m.getVerticesData(VertexBuffer.NormalKind);
     const vc = new Float32Array(24 * 4);
     for (let k = 0; k < 24; k++) {
-      vc[k * 4] = c[0];
-      vc[k * 4 + 1] = c[1];
-      vc[k * 4 + 2] = c[2];
+      const ny = normals ? normals[k * 3 + 1] : 0;
+      let t = FACE_TINT_TOP;
+      if (!accent) {
+        if (ny > 0.5) t = FACE_TINT_TOP;
+        else if (ny < -0.5) t = FACE_TINT_BOTTOM;
+        else t = FACE_TINT_SIDE;
+      }
+      vc[k * 4] = color[0] * t;
+      vc[k * 4 + 1] = color[1] * t;
+      vc[k * 4 + 2] = color[2] * t;
       vc[k * 4 + 3] = 1;
     }
     m.setVerticesData(VertexBuffer.ColorKind, vc, false);
@@ -134,345 +158,380 @@ export function buildVoxelMesh(scene: Scene, voxels: Voxel[], options: VoxelMesh
   if (options.alpha !== undefined && options.alpha < 1) {
     mat.alpha = options.alpha;
   }
-  // StandardMaterial использует vertex colors автоматически, если меш имеет ColorKind.
   merged.material = mat;
   merged.isPickable = false;
   merged.doNotSyncBoundingInfo = true;
-  // Внимание: НЕ freezeWorldMatrix здесь — рендереры задают master.scaling (cellSize)
-  // после buildMaster; заморозка «проглотила» бы это масштабирование.
   return merged;
 }
 
 // ──────────────────────────────────────────────────────────────────────
-//  Определения моделей. Каждая функция возвращает Voxel[].
-//  Высота моделей ≈ 1.0 (y ∈ [-0.5, 0.5]), отцентрировано в (0,0,0).
+//  Определения моделей. Координаты — целочисленная сетка (unit-кубы).
+//  Гуманоиды: ширина X (− лево, + право), лицо в +Z, стопы y=0, высота ~16–20.
 // ──────────────────────────────────────────────────────────────────────
 
-/** Лучник — деревянная сторожевая башня с peaked-крышей и факелом. */
+/** Скелет — костяной гуманоид с ребрами, черепом и ржавым мечом. */
+export function skeletonEnemy(): Voxel[] {
+  const v: Voxel[] = [];
+  const bo = PALETTE.bone, bod = PALETTE.boneDark;
+  const e = ACCENT.eyeRed, sw = PALETTE.metalLight, wd = PALETTE.woodDark;
+  // ноги
+  box3(v, -2, -1, 0, 1, 0, 1, bod);   box3(v, 1, 2, 0, 1, 0, 1, bod);   // ступни
+  box3(v, -1, -1, 2, 5, 0, 0, bod);   box3(v, 1, 1, 2, 5, 0, 0, bod);   // голени
+  cube(v, -1, 6, 0, bo);              cube(v, 1, 6, 0, bo);             // колени
+  box3(v, -1, -1, 7, 8, 0, 0, bod);   box3(v, 1, 1, 7, 8, 0, 0, bod);   // бёдра
+  // таз
+  box3(v, -2, 2, 9, 10, 0, 1, bod);
+  // позвоночник + ребра
+  box3(v, -1, 0, 11, 14, 0, 0, bo);
+  box3(v, -2, -1, 12, 12, 0, 0, bo);  box3(v, 1, 2, 12, 12, 0, 0, bo);
+  box3(v, -2, -1, 13, 13, 0, 0, bo);  box3(v, 1, 2, 13, 13, 0, 0, bo);
+  box3(v, -2, -2, 11, 11, 0, 0, bo);  box3(v, 2, 3, 11, 11, 0, 0, bo);  // нижние ребра
+  // плечи + руки
+  box3(v, -2, 2, 14, 14, 0, 1, bo);                                     // ключицы
+  box3(v, -3, -2, 10, 13, 0, 0, bod); box3(v, 2, 3, 10, 13, 0, 0, bod); // плечи
+  box3(v, -3, -2, 7, 9, 0, 0, bod);  box3(v, 2, 3, 7, 9, 0, 0, bod);    // предплечья
+  cube(v, -3, 6, 0, bo);             cube(v, 3, 6, 0, bo);              // кисти
+  // череп
+  box3(v, -2, 2, 15, 18, -1, 1, bo);
+  box3(v, -1, 1, 19, 19, 0, 0, bo);                                     // макушка
+  cube(v, -1, 17, 1, e);             cube(v, 1, 17, 1, e);              // глазницы
+  cube(v, 0, 16, 1, bod);                                               // нос-дырка
+  box3(v, -1, 1, 14, 14, 0, 1, bod);                                    // зубы (тёмная полоса)
+  // ржавый меч в правой кисти
+  cube(v, 3, 6, 1, wd);
+  box3(v, 3, 3, 7, 12, 1, 1, sw);
+  cube(v, 3, 13, 1, ACCENT.gold);
+  return v;
+}
+
+/** Гоблин — сгорбленный, зелёный, длинные руки, большие уши, дубина. */
+export function goblinEnemy(): Voxel[] {
+  const v: Voxel[] = [];
+  const f = PALETTE.flesh, fd = PALETTE.fleshDark, mo = PALETTE.moss;
+  const e = ACCENT.eyeDemon, wd = PALETTE.woodDark;
+  // короткие кривые ноги
+  box3(v, -2, -1, 0, 1, 0, 1, fd);  box3(v, 1, 2, 0, 1, 0, 1, fd);
+  box3(v, -1, -1, 2, 4, 0, 0, fd);  box3(v, 1, 1, 2, 4, 0, 0, fd);
+  // таз + сгорбленный торс (верхние слои сдвинуты вперёд по +Z — сутулость)
+  box3(v, -2, 2, 5, 6, 0, 1, mo);
+  box3(v, -2, 2, 7, 9, 0, 1, f);
+  box3(v, -1, 2, 10, 12, 1, 2, f);
+  // длинные руки до земли
+  box3(v, -3, -3, 6, 11, 0, 0, fd); box3(v, 2, 3, 6, 11, 0, 0, fd);
+  cube(v, -3, 5, 0, fd);            cube(v, 3, 5, 0, fd);
+  // голова (большая, вперёд)
+  box3(v, -2, 2, 11, 14, 1, 2, f);
+  // большие уши
+  box3(v, -3, -3, 12, 13, 1, 1, fd); box3(v, 2, 3, 12, 13, 1, 1, fd);
+  cube(v, 0, 12, 3, fd);                                               // нос-клюв
+  cube(v, -1, 13, 2, e);            cube(v, 1, 13, 2, e);              // глаза
+  // дубина в правой руке
+  cube(v, 3, 5, 1, wd);
+  box3(v, 3, 3, 6, 9, 1, 1, wd);
+  cube(v, 3, 10, 1, wd);
+  return v;
+}
+
+/** Зомби — гнилое туловище, одна рука длиннее, рваная плоть. */
+export function zombieEnemy(): Voxel[] {
+  const v: Voxel[] = [];
+  const f = PALETTE.fleshDark, fd = shade(PALETTE.fleshDark, 0.7), fl = shade(PALETTE.fleshDark, 1.15);
+  const e = ACCENT.eyeRed;
+  // ноги (одна короче — хромота)
+  box3(v, -2, -1, 0, 1, 0, 1, fd);  box3(v, 1, 2, 0, 1, 0, 1, fd);
+  box3(v, -1, -1, 2, 6, 0, 0, fd);  box3(v, 1, 1, 2, 5, 0, 0, fd);
+  // таз + раздутый живот
+  box3(v, -2, 2, 7, 8, 0, 1, fd);
+  box3(v, -2, 2, 9, 13, 0, 1, f);
+  cube(v, 0, 11, 1, fd);                                               // провал живота
+  // левая рука (обычная), правая (длиннее, тянется вперёд)
+  box3(v, -3, -3, 9, 13, 0, 0, fd);
+  box3(v, 2, 3, 9, 14, 1, 1, fd);                                      // вытянутая рука
+  box3(v, 2, 3, 15, 16, 1, 1, fl);                                     // кисть (светлее)
+  cube(v, -3, 8, 0, fd);
+  // голова (скособочена)
+  box3(v, -1, 3, 14, 17, 0, 1, fl);
+  cube(v, -2, 15, 1, f);            cube(v, 2, 15, 1, f);              // глаза (тусклые)
+  cube(v, -2, 15, 1, e);            cube(v, 2, 15, 1, e);
+  box3(v, -1, 2, 17, 17, 0, 1, fd);                                    // волосы/гниль
+  cube(v, 1, 16, 1, fd);                                               // открытый рот
+  return v;
+}
+
+/** Демон — крупный, рогатый, тёмно-багровый, когти. */
+export function demonEnemy(): Voxel[] {
+  const v: Voxel[] = [];
+  const sk = PALETTE.metalDark, bl = ACCENT.blood, bls = shade(ACCENT.blood, 0.55);
+  const e = ACCENT.eyeDemon;
+  // массивные ноги (задние, согнутые)
+  box3(v, -3, -1, 0, 1, 0, 2, sk);  box3(v, 1, 3, 0, 1, 0, 2, sk);
+  box3(v, -3, -2, 2, 6, 0, 1, sk);  box3(v, 2, 3, 2, 6, 0, 1, sk);
+  box3(v, -3, -1, 7, 8, 0, 0, sk);  box3(v, 1, 2, 7, 8, 0, 0, sk);     // стопы-когти вперёд
+  // бочкообразный торс
+  box3(v, -3, 3, 9, 14, 0, 1, bls);
+  box3(v, -2, 2, 9, 14, 2, 2, sk);
+  cube(v, 0, 12, 1, bl);            cube(v, 0, 13, 1, bl);             // рубцы на груди
+  // массивные плечи + руки (длинные, с когтями)
+  box3(v, -4, -3, 11, 13, 0, 1, sk); box3(v, 2, 4, 11, 13, 0, 1, sk);
+  box3(v, -4, -3, 8, 10, 0, 0, sk); box3(v, 3, 4, 8, 10, 0, 0, sk);
+  cube(v, -4, 7, 0, e);             cube(v, 4, 7, 0, e);               // когти-свет
+  // голова
+  box3(v, -2, 2, 15, 18, 0, 1, bls);
+  box3(v, -1, 2, 19, 19, 0, 1, bls);                                   // лоб/нос
+  cube(v, -1, 17, 1, e);            cube(v, 1, 17, 1, e);              // глаза
+  box3(v, -1, 1, 15, 15, 1, 1, bl);                                    // пасть/клыки
+  // рога
+  box3(v, -3, -2, 18, 20, 0, 0, PALETTE.boneDark); box3(v, 2, 3, 18, 20, 0, 0, PALETTE.boneDark);
+  cube(v, -3, 21, 0, PALETTE.bone); cube(v, 3, 21, 0, PALETTE.bone);    // кончики рогов
+  return v;
+}
+
+/** Владыка (босс) — огромный тёмный лорд с большими рогами и магией. */
+export function bossEnemy(): Voxel[] {
+  const v: Voxel[] = [];
+  const sd = PALETTE.stoneDark, bl = ACCENT.blood, bls = shade(ACCENT.blood, 0.4);
+  const ar = ACCENT.arcane, e = ACCENT.eyeDemon;
+  // огромные ноги
+  box3(v, -4, -2, 0, 1, 0, 2, sd);  box3(v, 2, 4, 0, 1, 0, 2, sd);
+  box3(v, -4, -2, 2, 8, 0, 1, sd);  box3(v, 2, 4, 2, 8, 0, 1, sd);
+  // массивный торс (плащ-накидка расширяется вниз)
+  box3(v, -4, 4, 9, 16, -1, 2, bls);
+  box3(v, -3, 3, 9, 16, 2, 3, sd);
+  box3(v, -5, 5, 9, 12, -1, 2, shade(sd, 0.8));                        // плечи-наплечники
+  box3(v, -5, 5, 13, 16, 0, 1, sd);                                    // рукава плаща
+  // руки
+  box3(v, -6, -5, 11, 16, 0, 1, shade(sd, 0.8)); box3(v, 4, 6, 11, 16, 0, 1, shade(sd, 0.8));
+  cube(v, -6, 10, 0, bl);           cube(v, 6, 10, 0, bl);             // когти
+  // голова
+  box3(v, -3, 3, 17, 21, 0, 1, bls);
+  box3(v, -2, 2, 22, 22, 0, 1, bls);
+  cube(v, -2, 19, 1, e);            cube(v, 2, 19, 1, e);              // горящие глаза
+  box3(v, -1, 2, 17, 17, 1, 1, ar);                                    // светящаяся пасть
+  cube(v, 0, 20, 1, ar);                                               // руна на лбу
+  // большие рога (изогнутые)
+  box3(v, -4, -3, 19, 23, 0, 0, PALETTE.boneDark); box3(v, 3, 4, 19, 23, 0, 0, PALETTE.boneDark);
+  box3(v, -5, -4, 23, 25, 0, 0, PALETTE.boneDark); box3(v, 4, 5, 23, 25, 0, 0, PALETTE.boneDark);
+  cube(v, -5, 26, 0, PALETTE.bone); cube(v, 5, 26, 0, PALETTE.bone);
+  return v;
+}
+
+/** Лучник — деревянная сторожевая башня: 4 угловых столба, платформа, перила, острая крыша, факел. */
 export function arrowTower(): Voxel[] {
   const v: Voxel[] = [];
   const w = PALETTE.wood, wd = PALETTE.woodDark, wl = PALETTE.woodLight;
   // 4 угловых столба
-  for (const sx of [-0.22, 0.22]) for (const sz of [-0.22, 0.22]) {
-    box(v, sx, -0.35, sz, 0.10, 0.70, 0.10, wd);
-  }
-  // платформа
-  fill(v, -0.28, 0.28, 0.05, 0.05, -0.28, 0.28, 0.14, w);
-  // стенки воротилца
-  fill(v, -0.28, 0.28, 0.19, 0.27, -0.28, 0.28, 0.56, wl);
-  // дверной проём (вырез): просто не ставим центральные — оставим стенки тонкими
-  // peaked крыша (две наклонные плоскости ≈ ступеньки)
-  for (let i = 0; i < 4; i++) {
-    const t = i / 3;
-    const half = 0.30 - i * 0.07;
-    fill(v, -half, half, 0.30 + i * 0.07, 0.30 + i * 0.07, -half, half, 0.14, shade(wd, 0.85));
-    void t;
-  }
-  // факел (огонь)
-  box(v, 0.30, 0.20, 0.30, 0.05, 0.18, 0.05, PALETTE.woodDark);
-  box(v, 0.30, 0.34, 0.30, 0.08, 0.08, 0.08, ACCENT.fireCore);
-  box(v, 0.30, 0.40, 0.30, 0.05, 0.06, 0.05, ACCENT.fire);
+  box3(v, -4, -3, 0, 14, -3, -3, wd); box3(v, 3, 4, 0, 14, -3, -3, wd);
+  box3(v, -4, -3, 0, 14, 3, 3, wd);  box3(v, 3, 4, 0, 14, 3, 3, wd);
+  // перекладины (арочной структуры)
+  box3(v, -4, 4, 5, 5, -3, 3, w);    box3(v, -4, 4, 10, 10, -3, 3, w);
+  // платформа лучников
+  box3(v, -4, 4, 14, 15, -3, 3, wl);
+  // перила (с бойницами — с зазорами)
+  box3(v, -4, -4, 16, 18, -3, -3, w); box3(v, 3, 4, 16, 18, -3, -3, w);
+  box3(v, -4, -4, 16, 18, 3, 3, w);   box3(v, 3, 4, 16, 18, 3, 3, w);
+  cube(v, -2, 17, -3, w); cube(v, 0, 17, -3, w); cube(v, 2, 17, -3, w); // фронт-перила
+  // острая крыша (ступенчатая)
+  box3(v, -4, 4, 19, 19, -3, 3, shade(wd, 0.85));
+  box3(v, -3, 3, 20, 20, -3, 3, shade(wd, 0.85));
+  box3(v, -2, 2, 21, 21, -2, 2, shade(wd, 0.85));
+  box3(v, -1, 1, 22, 22, -1, 1, shade(wd, 0.8));
+  cube(v, 0, 23, 0, ACCENT.gold);                                      // шпиль
+  // факел на углу
+  cube(v, 4, 12, -3, wd);
+  cube(v, 4, 14, -3, ACCENT.fireCore);
+  cube(v, 4, 15, -3, ACCENT.fire);
   return v;
 }
 
 /** Осада — каменная крепость с чёрной пушкой. */
 export function cannonTower(): Voxel[] {
   const v: Voxel[] = [];
-  const s = PALETTE.stone, sd = PALETTE.stoneDark, md = PALETTE.metalDark;
+  const s = PALETTE.stone, sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
+  const md = PALETTE.metalDark, m = PALETTE.metal;
   // основание-бастион
-  fill(v, -0.32, 0.32, -0.50, -0.30, -0.32, 0.32, 0.16, sd);
-  fill(v, -0.30, 0.30, -0.30, 0.05, -0.30, 0.30, 0.15, s);
-  // зубцы баттlements
-  for (const sx of [-0.30, -0.10, 0.10, 0.30]) for (const sz of [-0.30, 0.30]) {
-    box(v, sx, 0.16, sz, 0.12, 0.12, 0.12, shade(s, 0.9));
-  }
-  // пушка-ствол (чёрный, горизонтально вдоль +X)
-  fill(v, 0.0, 0.42, -0.05, 0.05, -0.08, 0.08, 0.10, md);
-  box(v, 0.44, 0.0, 0.0, 0.12, 0.16, 0.16, PALETTE.metal); // казённик
-  // жерло
-  box(v, 0.40, 0.0, 0.0, 0.06, 0.10, 0.10, ACCENT.fireCore);
+  box3(v, -5, 5, 0, 4, -4, 4, sd);
+  box3(v, -4, 4, 4, 8, -4, 4, s);
+  // кладка (горизонтальные швы — тёмные полосы)
+  box3(v, -4, 4, 5, 5, -4, 4, shade(s, 0.9));
+  box3(v, -4, 4, 7, 7, -4, 4, shade(s, 0.9));
+  // зубцы (merlons) с бойницами
+  box3(v, -5, -4, 9, 11, -4, -4, sl); box3(v, -1, 0, 9, 11, -4, -4, sl); box3(v, 3, 5, 9, 11, -4, -4, sl);
+  box3(v, -5, -4, 9, 11, 4, 4, sl);   box3(v, -1, 0, 9, 11, 4, 4, sl);   box3(v, 3, 5, 9, 11, 4, 4, sl);
+  box3(v, -5, -5, 9, 11, -1, -1, sl); box3(v, 3, 5, 9, 11, -1, -1, sl);  // боковые зубцы
+  box3(v, -5, -5, 9, 11, 1, 1, sl);   box3(v, 3, 5, 9, 11, 1, 1, sl);
+  // пушка-ствол (чёрный, горизонтально вдоль +Z, выглядывает из бойницы +Z)
+  box3(v, -1, 1, 6, 11, 3, 4, md);
+  box3(v, -2, 2, 4, 6, 2, 5, m);                                        // казённик
+  cube(v, 0, 8, 4, ACCENT.fireCore); cube(v, 0, 9, 4, ACCENT.fireCore);  // жерло
+  // колёса
+  cube(v, -2, 5, 4, sd); cube(v, 2, 5, 4, sd); cube(v, -2, 5, -4, sd); cube(v, 2, 5, -4, sd);
   return v;
 }
 
-/** Аркан — тёмный обелиск со светящимся кристаллом на вершине. */
+/** Аркан — тёмный обелиск со светящимся кристаллом и рунами. */
 export function arcaneTower(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
+  const ar = ACCENT.arcane, arc = ACCENT.arcaneCore;
   // основание
-  fill(v, -0.30, 0.30, -0.50, -0.36, -0.30, 0.30, 0.15, sd);
-  // обелиск (сужается вверх)
-  for (let i = 0; i < 4; i++) {
-    const half = 0.22 - i * 0.035;
-    const y = -0.30 + i * 0.20;
-    fill(v, -half, half, y, y + 0.16, -half, half, 0.14, i % 2 ? sl : sd);
-  }
-  // руны (золото)
-  box(v, 0, -0.10, 0.24, 0.04, 0.16, 0.02, ACCENT.gold);
-  // кристалл на вершине (фиолет)
-  box(v, 0, 0.18, 0, 0.16, 0.24, 0.16, ACCENT.arcane);
-  box(v, 0, 0.34, 0, 0.08, 0.10, 0.08, ACCENT.arcaneCore);
+  box3(v, -4, 4, 0, 3, -4, 4, sd);
+  box3(v, -3, 3, 3, 5, -3, 3, sl);
+  // обелиск (сужается вверх ступенями)
+  box3(v, -3, 3, 6, 10, -3, 3, sd);
+  box3(v, -3, 3, 6, 10, -3, 3, sl);   // (перекрытие → нижний слой sd ниже)
+  box3(v, -2, 2, 6, 9, -2, 2, sd);
+  box3(v, -2, 2, 11, 14, -2, 2, sl);
+  box3(v, -1, 1, 11, 13, -1, 1, sd);
+  box3(v, -1, 1, 15, 17, -1, 1, sl);
+  // светящиеся руны по граням (после корпуса → перекрывают)
+  cube(v, 0, 8, 3, ar); cube(v, 0, 11, 3, ar); cube(v, 0, 14, 3, ar);
+  cube(v, -3, 8, 0, ar); cube(v, 3, 11, 0, ar);
+  // кристалл на вершине (ромб из кубов)
+  box3(v, -1, 1, 18, 18, -1, 1, ar);
+  cube(v, 0, 19, 0, ar); cube(v, 0, 17, 0, ar);
+  cube(v, -1, 18, 0, ar); cube(v, 1, 18, 0, ar); cube(v, 0, 18, -1, ar); cube(v, 0, 18, 1, ar);
+  cube(v, 0, 20, 0, arc); cube(v, 0, 16, 0, arc);
   return v;
 }
 
-/** Лёд — обледенелый шпиль с кристаллом льда. */
+/** Лёд — обледенелый шпиль с кристаллом льда и сосульками. */
 export function iceTower(): Voxel[] {
   const v: Voxel[] = [];
   const s = PALETTE.stoneLight, sd = PALETTE.stoneDark;
-  fill(v, -0.28, 0.28, -0.50, -0.34, -0.28, 0.28, 0.14, sd);
-  // шпиль
-  for (let i = 0; i < 4; i++) {
-    const half = 0.20 - i * 0.03;
-    const y = -0.34 + i * 0.18;
-    fill(v, -half, half, y, y + 0.15, -half, half, 0.14, shade(s, 0.95 - i * 0.05));
-  }
-  // сосульки
-  box(v, -0.22, 0.0, 0.22, 0.06, 0.14, 0.06, ACCENT.ice);
-  box(v, 0.22, 0.0, -0.22, 0.06, 0.14, 0.06, ACCENT.ice);
-  // кристалл льда
-  box(v, 0, 0.20, 0, 0.14, 0.22, 0.14, ACCENT.ice);
-  box(v, 0, 0.34, 0, 0.07, 0.08, 0.07, ACCENT.iceCore);
+  const ic = ACCENT.ice, icc = ACCENT.iceCore;
+  // основание
+  box3(v, -4, 4, 0, 3, -4, 4, sd);
+  box3(v, -3, 3, 3, 5, -3, 3, s);
+  // шпиль (сужается)
+  box3(v, -3, 3, 6, 9, -3, 3, s);
+  box3(v, -2, 2, 10, 13, -2, 2, shade(s, 0.92));
+  box3(v, -1, 1, 14, 16, -1, 1, shade(s, 0.85));
+  // сосульки по краям
+  box3(v, -4, -4, 6, 7, 0, 0, ic); box3(v, 3, 4, 6, 8, 0, 0, ic);
+  box3(v, 0, 0, 6, 7, -4, -4, ic); box3(v, 0, 0, 6, 8, 3, 4, ic);
+  // кристалл льда (ромб)
+  box3(v, -1, 1, 17, 17, -1, 1, ic);
+  cube(v, 0, 18, 0, ic);
+  cube(v, -1, 17, 0, ic); cube(v, 1, 17, 0, ic); cube(v, 0, 17, -1, ic); cube(v, 0, 17, 1, ic);
+  cube(v, 0, 19, 0, icc); cube(v, 0, 16, 0, icc);
   return v;
 }
 
-/** Скелет — костяной гуманоид. */
-export function skeletonEnemy(): Voxel[] {
-  const v: Voxel[] = [];
-  const bo = PALETTE.bone, bod = PALETTE.boneDark;
-  // ноги
-  box(v, -0.10, -0.40, 0, 0.07, 0.30, 0.10, bod);
-  box(v, 0.10, -0.40, 0, 0.07, 0.30, 0.10, bod);
-  // таз/торс
-  box(v, 0, -0.22, 0, 0.20, 0.10, 0.12, bo);
-  // рёбра/грудь
-  fill(v, -0.12, 0.12, -0.10, 0.06, -0.08, 0.08, 0.06, bo);
-  box(v, 0, 0.00, 0, 0.10, 0.10, 0.08, bod);
-  // руки
-  box(v, -0.18, -0.10, 0, 0.06, 0.30, 0.06, bo);
-  box(v, 0.18, -0.10, 0, 0.06, 0.30, 0.06, bo);
-  // череп
-  box(v, 0, 0.22, 0, 0.18, 0.18, 0.16, bo);
-  // глазницы
-  box(v, -0.05, 0.24, 0.08, 0.04, 0.04, 0.02, ACCENT.eyeRed);
-  box(v, 0.05, 0.24, 0.08, 0.04, 0.04, 0.02, ACCENT.eyeRed);
-  return v;
-}
-
-/** Гоблин — мелкий сгорбленный, глаза-угольки. */
-export function goblinEnemy(): Voxel[] {
-  const v: Voxel[] = [];
-  const f = PALETTE.flesh, fd = PALETTE.fleshDark, mo = PALETTE.moss;
-  // коренастые ноги
-  box(v, -0.08, -0.42, 0, 0.10, 0.16, 0.12, fd);
-  box(v, 0.08, -0.42, 0, 0.10, 0.16, 0.12, fd);
-  // сгорбленное туловище
-  fill(v, -0.16, 0.16, -0.26, 0.04, -0.12, 0.12, 0.12, mo);
-  box(v, 0, 0.06, -0.02, 0.22, 0.16, 0.16, f);
-  // длинные руки до земли
-  box(v, -0.22, -0.18, 0, 0.06, 0.30, 0.06, fd);
-  box(v, 0.22, -0.18, 0, 0.06, 0.30, 0.06, fd);
-  // голова
-  box(v, 0, 0.20, 0.02, 0.16, 0.14, 0.14, f);
-  // уши
-  box(v, -0.14, 0.20, 0.02, 0.04, 0.10, 0.04, fd);
-  box(v, 0.14, 0.20, 0.02, 0.04, 0.10, 0.04, fd);
-  // глаза
-  box(v, -0.04, 0.22, 0.09, 0.04, 0.04, 0.02, ACCENT.eyeDemon);
-  box(v, 0.04, 0.22, 0.09, 0.04, 0.04, 0.02, ACCENT.eyeDemon);
-  return v;
-}
-
-/** Зомби — гнилое туловище, тёмная плоть. */
-export function zombieEnemy(): Voxel[] {
-  const v: Voxel[] = [];
-  const f = PALETTE.fleshDark, fd = shade(PALETTE.fleshDark, 0.7);
-  box(v, -0.10, -0.42, 0, 0.10, 0.26, 0.12, fd);
-  box(v, 0.10, -0.42, 0, 0.10, 0.26, 0.12, fd);
-  box(v, 0, -0.20, 0, 0.26, 0.30, 0.16, f);
-  // рваная рука
-  box(v, -0.22, -0.16, 0.04, 0.07, 0.30, 0.07, fd);
-  box(v, 0.22, -0.10, -0.04, 0.07, 0.22, 0.07, fd);
-  // голова (скособочена)
-  box(v, 0.04, 0.20, 0.0, 0.18, 0.18, 0.16, shade(f, 1.1));
-  // глаза (тусклые)
-  box(v, -0.02, 0.22, 0.08, 0.04, 0.04, 0.02, ACCENT.eyeRed);
-  box(v, 0.12, 0.22, 0.08, 0.04, 0.04, 0.02, ACCENT.eyeRed);
-  return v;
-}
-
-/** Демон — крупный, рогатый, тёмно-багровый. */
-export function demonEnemy(): Voxel[] {
-  const v: Voxel[] = [];
-  const m = PALETTE.metalDark, bl = ACCENT.blood;
-  // массивные ноги
-  box(v, -0.12, -0.42, 0, 0.14, 0.26, 0.16, m);
-  box(v, 0.12, -0.42, 0, 0.14, 0.26, 0.16, m);
-  // торс
-  fill(v, -0.22, 0.22, -0.16, 0.12, -0.18, 0.18, 0.14, shade(bl, 0.6));
-  box(v, 0, 0.10, 0, 0.28, 0.22, 0.22, m);
-  // плечи/руки
-  box(v, -0.28, -0.06, 0, 0.10, 0.34, 0.12, shade(m, 0.8));
-  box(v, 0.28, -0.06, 0, 0.10, 0.34, 0.12, shade(m, 0.8));
-  // голова
-  box(v, 0, 0.28, 0, 0.22, 0.20, 0.20, shade(bl, 0.5));
-  // рога
-  box(v, -0.12, 0.42, 0, 0.05, 0.12, 0.05, PALETTE.boneDark);
-  box(v, 0.12, 0.42, 0, 0.05, 0.12, 0.05, PALETTE.boneDark);
-  // глаза
-  box(v, -0.06, 0.30, 0.10, 0.05, 0.05, 0.02, ACCENT.eyeDemon);
-  box(v, 0.06, 0.30, 0.10, 0.05, 0.05, 0.02, ACCENT.eyeDemon);
-  return v;
-}
-
-/** Владыка (босс) — огромный тёмный лорд с большими рогами. */
-export function bossEnemy(): Voxel[] {
-  const v: Voxel[] = [];
-  const sd = PALETTE.stoneDark, bl = ACCENT.blood, ar = ACCENT.arcane;
-  box(v, -0.16, -0.44, 0, 0.18, 0.30, 0.20, sd);
-  box(v, 0.16, -0.44, 0, 0.18, 0.30, 0.20, sd);
-  fill(v, -0.30, 0.30, -0.14, 0.20, -0.24, 0.24, 0.16, shade(bl, 0.45));
-  box(v, 0, 0.22, 0, 0.40, 0.34, 0.30, sd);
-  box(v, -0.36, 0.04, 0, 0.12, 0.42, 0.14, shade(sd, 1.15));
-  box(v, 0.36, 0.04, 0, 0.12, 0.42, 0.14, shade(sd, 1.15));
-  // голова
-  box(v, 0, 0.44, 0, 0.28, 0.24, 0.26, shade(bl, 0.4));
-  // большие рога
-  box(v, -0.16, 0.62, -0.04, 0.06, 0.20, 0.06, PALETTE.boneDark);
-  box(v, 0.16, 0.62, -0.04, 0.06, 0.20, 0.06, PALETTE.boneDark);
-  box(v, -0.20, 0.74, -0.04, 0.04, 0.10, 0.04, PALETTE.bone);
-  box(v, 0.20, 0.74, -0.04, 0.04, 0.10, 0.04, PALETTE.bone);
-  // глаза + магическое свечение
-  box(v, -0.07, 0.46, 0.12, 0.06, 0.06, 0.02, ACCENT.eyeDemon);
-  box(v, 0.07, 0.46, 0.12, 0.06, 0.06, 0.02, ACCENT.eyeDemon);
-  box(v, 0, 0.34, 0.14, 0.08, 0.04, 0.02, ar);
-  return v;
-}
-
-/** База — алтарь с кристаллом (голубая душа). */
+/** База — алтарь с кристаллом-душой. */
 export function baseAltar(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, s = PALETTE.stone;
-  // кольцо-основание из камня
-  fill(v, -0.42, 0.42, -0.50, -0.42, -0.42, 0.42, 0.14, sd);
-  fill(v, -0.42, 0.42, -0.30, -0.20, -0.42, 0.42, 0.14, s);
-  // руны золотом по углам
-  for (const sx of [-0.36, 0.36]) for (const sz of [-0.36, 0.36]) {
-    box(v, sx, -0.34, sz, 0.08, 0.10, 0.08, ACCENT.gold);
-  }
-  // кристалл-ядро
-  box(v, 0, -0.10, 0, 0.22, 0.30, 0.22, ACCENT.soul);
-  box(v, 0, 0.12, 0, 0.14, 0.22, 0.14, ACCENT.iceCore);
-  box(v, 0, 0.28, 0, 0.07, 0.10, 0.07, ACCENT.soul);
+  const so = ACCENT.soul, icc = ACCENT.iceCore, g = ACCENT.gold;
+  // кольцо-основание (квадратный подиум со ступенями)
+  box3(v, -5, 5, 0, 2, -5, 5, sd);
+  box3(v, -4, 4, 2, 3, -4, 4, s);
+  box3(v, -3, 3, 3, 4, -3, 3, shade(s, 0.92));
+  // руны золотом по углам подиума
+  cube(v, -4, 1, -4, g); cube(v, 4, 1, -4, g); cube(v, -4, 1, 4, g); cube(v, 4, 1, 4, g);
+  cube(v, -4, 2, -4, g); cube(v, 4, 2, -4, g); cube(v, -4, 2, 4, g); cube(v, 4, 2, 4, g);
+  // обелиски-поддержка по углам
+  box3(v, -3, -3, 4, 9, -3, -3, sd); box3(v, 3, 3, 4, 9, -3, -3, sd);
+  box3(v, -3, -3, 4, 9, 3, 3, sd);   box3(v, 3, 3, 4, 9, 3, 3, sd);
+  // кристалл-ядро (большой ромб)
+  box3(v, -2, 2, 5, 10, -2, 2, so);
+  cube(v, 0, 11, 0, so); cube(v, 0, 4, 0, so);
+  cube(v, -3, 7, 0, so); cube(v, 3, 7, 0, so); cube(v, 0, 7, -3, so); cube(v, 0, 7, 3, so);
+  cube(v, 0, 8, 0, icc); cube(v, 0, 6, 0, icc);
   return v;
 }
 
-/** Спавн — тёмный портал с огненными рунами. */
+/** Спавн — тёмный портал с огненным ядром. */
 export function spawnPortal(): Voxel[] {
   const v: Voxel[] = [];
-  const sd = PALETTE.stoneDark, bl = ACCENT.blood;
-  fill(v, -0.36, 0.36, -0.50, -0.42, -0.36, 0.36, 0.12, sd);
-  // кольцо-арка (упрощённо: угловые столбы)
-  box(v, -0.30, -0.20, 0, 0.12, 0.50, 0.12, shade(sd, 0.8));
-  box(v, 0.30, -0.20, 0, 0.12, 0.50, 0.12, shade(sd, 0.8));
-  box(v, 0, 0.10, 0, 0.66, 0.12, 0.12, shade(sd, 0.7));
-  // огненное ядро портала
-  box(v, 0, -0.18, 0, 0.30, 0.40, 0.06, ACCENT.fire);
-  box(v, 0, -0.18, 0.02, 0.18, 0.26, 0.04, ACCENT.fireCore);
-  // кровь-руны
-  box(v, 0, -0.40, 0.08, 0.22, 0.04, 0.02, bl);
+  const sd = PALETTE.stoneDark, s = PALETTE.stone;
+  const fi = ACCENT.fire, fic = ACCENT.fireCore, bl = ACCENT.blood;
+  // основание-площадка
+  box3(v, -5, 5, 0, 2, -3, 3, sd);
+  box3(v, -4, 4, 2, 3, -3, 3, s);
+  // боковые столбы арки
+  box3(v, -4, -3, 3, 12, -2, -2, shade(sd, 0.8)); box3(v, 3, 4, 3, 12, -2, -2, shade(sd, 0.8));
+  box3(v, -4, -3, 3, 12, 2, 2, shade(sd, 0.8));   box3(v, 3, 4, 3, 12, 2, 2, shade(sd, 0.8));
+  // замковый камень арки сверху
+  box3(v, -3, 3, 13, 14, -2, 2, shade(sd, 0.7));
+  box3(v, -2, 2, 15, 15, -1, 1, shade(sd, 0.7));
+  // огненное ядро портала (заполняет проём арки)
+  box3(v, -2, 2, 5, 12, -1, 1, fi);
+  box3(v, -1, 1, 6, 11, 0, 0, fic);
+  // кровавые руны у основания
+  cube(v, -2, 1, 3, bl); cube(v, 0, 1, 3, bl); cube(v, 2, 1, 3, bl);
   return v;
 }
 
-/** Снаряд — короткий болт (универсальный). */
+/** Снаряд — короткий болт. */
 export function projectileBolt(): Voxel[] {
   const v: Voxel[] = [];
-  box(v, 0, 0, 0, 0.06, 0.06, 0.06, PALETTE.metalLight);
-  box(v, 0.05, 0, 0, 0.08, 0.04, 0.04, ACCENT.fireCore);
-  box(v, -0.05, 0, 0, 0.04, 0.08, 0.08, shade(PALETTE.metalDark, 0.9));
+  box3(v, -1, 1, 0, 0, 0, 0, PALETTE.metalLight);
+  cube(v, 2, 0, 0, ACCENT.fireCore);
+  cube(v, -2, 0, 0, PALETTE.metalDark);
   return v;
 }
 
-// ── Стены лабиринта (Фаза 4) ────────────────────────────────────────────
+// ── Стены лабиринта ────────────────────────────────────────────────────────
 
-/** Деревянная стена — частокол из тёмных брёвен с перекладиной. */
+/** Деревянная стена — частокол из брёвен с перекладиной. */
 export function woodWall(): Voxel[] {
   const v: Voxel[] = [];
   const w = PALETTE.wood, wd = PALETTE.woodDark;
-  // 3 вертикальных бревна
-  for (const sx of [-0.22, 0, 0.22]) {
-    fill(v, sx - 0.09, sx + 0.09, -0.42, 0.42, -0.12, 0.12, 0.10, wd);
-  }
-  // перекладины (скрепляют частокол)
-  fill(v, -0.34, 0.34, -0.26, -0.20, -0.14, 0.14, 0.10, w);
-  fill(v, -0.34, 0.34, 0.20, 0.34, -0.14, 0.14, 0.10, w);
-  // заострённый верх (уголки)
-  for (const sx of [-0.22, 0, 0.22]) {
-    box(v, sx, 0.46, 0, 0.10, 0.10, 0.10, shade(wd, 0.8));
-  }
+  // 3 бревна
+  box3(v, -3, -1, 0, 8, -2, 2, wd); box3(v, -1, 1, 0, 8, -2, 2, wd); box3(v, 1, 3, 0, 8, -2, 2, wd);
+  // заострённые верхушки
+  cube(v, -2, 9, 0, shade(wd, 0.8)); cube(v, 0, 9, 0, shade(wd, 0.8)); cube(v, 2, 9, 0, shade(wd, 0.8));
+  // перекладины
+  box3(v, -3, 3, 2, 3, -2, 2, w); box3(v, -3, 3, 6, 6, -2, 2, w);
   return v;
 }
 
-/** Каменная стена — грубая кладка из тёмных валунов. */
+/** Каменная стена — грубая кладка из валунов. */
 export function stoneWall(): Voxel[] {
   const v: Voxel[] = [];
   const s = PALETTE.stone, sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
-  // основание-куча
-  fill(v, -0.36, 0.36, -0.50, -0.34, -0.34, 0.34, 0.14, sd);
-  // ряды кладки (со смещением)
-  fill(v, -0.34, 0.34, -0.34, -0.16, -0.30, 0.30, 0.14, s);
-  fill(v, -0.34, 0.34, -0.16, 0.02, -0.30, 0.30, 0.14, shade(s, 0.92));
-  fill(v, -0.34, 0.34, 0.02, 0.20, -0.30, 0.30, 0.14, s);
+  box3(v, -3, 3, 0, 2, -2, 2, sd);
+  box3(v, -3, 3, 3, 5, -2, 2, s);
+  box3(v, -3, 3, 6, 7, -2, 2, shade(s, 0.92));
   // верхние валуны (неровный гребень)
-  box(v, -0.14, 0.34, 0.0, 0.30, 0.20, 0.30, sl);
-  box(v, 0.18, 0.32, 0.08, 0.22, 0.18, 0.22, shade(sl, 0.9));
-  box(v, -0.10, 0.34, -0.14, 0.26, 0.18, 0.20, shade(sl, 0.95));
+  box3(v, -2, 0, 8, 9, -2, 2, sl);
+  box3(v, 1, 3, 8, 9, -1, 1, shade(sl, 0.9));
+  cube(v, -3, 8, 0, sd); cube(v, 3, 8, 0, sd);
   return v;
 }
 
-/** Костяная стена — баррикада из черепов и берцовых костей. */
+/** Костяная стена — баррикада из костей и черепов. */
 export function boneWall(): Voxel[] {
   const v: Voxel[] = [];
-  const bo = PALETTE.bone, bod = PALETTE.boneDark;
-  // основание из крупных костей (бёдра)
-  fill(v, -0.34, 0.34, -0.50, -0.38, -0.30, 0.30, 0.12, bod);
-  // вертикальные берцовые кости
-  for (const sx of [-0.22, 0.04, 0.26]) {
-    fill(v, sx - 0.07, sx + 0.07, -0.34, 0.24, -0.09, 0.09, 0.08, bo);
-    // суставы
-    box(v, sx, -0.34, 0, 0.12, 0.08, 0.12, bod);
-    box(v, sx, 0.26, 0, 0.10, 0.07, 0.10, bod);
-  }
+  const bo = PALETTE.bone, bod = PALETTE.boneDark, e = ACCENT.eyeRed;
+  // основание
+  box3(v, -3, 3, 0, 2, -2, 2, bod);
+  // берцовые кости (вертикальные)
+  box3(v, -3, -2, 3, 8, -1, -1, bo); box3(v, 0, 1, 3, 8, -1, -1, bo); box3(v, 2, 3, 3, 8, 1, 1, bo);
+  cube(v, -3, 2, 0, bod); cube(v, 0, 2, 0, bod); cube(v, 2, 2, 0, bod);     // суставы
   // черепа на гребне
-  box(v, -0.10, 0.36, 0, 0.16, 0.14, 0.16, bo);
-  box(v, -0.06, 0.40, 0.08, 0.03, 0.03, 0.02, ACCENT.eyeRed);
-  box(v, 0.02, 0.40, 0.08, 0.03, 0.03, 0.02, ACCENT.eyeRed);
-  box(v, 0.22, 0.32, 0, 0.14, 0.12, 0.14, shade(bo, 0.95));
-  box(v, 0.22, 0.36, 0.08, 0.03, 0.03, 0.02, ACCENT.eyeRed);
+  box3(v, -2, -1, 9, 10, -1, 1, bo);
+  cube(v, -1, 9, 1, e); cube(v, 1, 9, 1, e);
+  box3(v, 1, 2, 9, 10, -1, 1, shade(bo, 0.95));
+  cube(v, 1, 9, 1, e); cube(v, 2, 9, 1, e);
   return v;
 }
 
-// ── Реликвии-тотемы (Фаза 5, концепция 1) ────────────────────────────────
-// Общий силуэт: каменный пьедестал + парящий/остроконечный кристалл со свечением.
-// Высота ≈ 1.0 (y ∈ [-0.5, 0.5]), отцентрировано в (0,0,0). Цвет кристалла = тема эффекта.
+// ── Реликвии-тотемы ────────────────────────────────────────────────────────
 
-/** Огненный тотем — чёрный обелиск с пламенем на вершине. */
+/** Огненный тотем — чёрный обелиск с пламенем. */
 export function relicFireTotem(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, s = PALETTE.stone;
-  // пьедестал
-  fill(v, -0.30, 0.30, -0.50, -0.40, -0.30, 0.30, 0.14, sd);
-  fill(v, -0.26, 0.26, -0.40, -0.26, -0.24, 0.24, 0.12, s);
-  // обелиск
-  for (let i = 0; i < 4; i++) {
-    const half = 0.16 - i * 0.02;
-    const y = -0.26 + i * 0.16;
-    fill(v, -half, half, y, y + 0.14, -half, half, 0.12, i % 2 ? s : sd);
-  }
-  // огненное ядро (языки пламени)
-  box(v, 0, 0.06, 0, 0.14, 0.18, 0.14, ACCENT.fire);
-  box(v, 0, 0.24, 0, 0.10, 0.16, 0.10, ACCENT.fireCore);
-  box(v, 0, 0.38, 0, 0.05, 0.10, 0.05, ACCENT.fireCore);
-  // руны у основания
-  box(v, 0, -0.44, 0.16, 0.16, 0.04, 0.02, ACCENT.fire);
+  const fi = ACCENT.fire, fic = ACCENT.fireCore;
+  box3(v, -3, 3, 0, 2, -3, 3, sd);
+  box3(v, -2, 2, 3, 4, -2, 2, s);
+  box3(v, -2, 2, 5, 8, -2, 2, sd);
+  box3(v, -1, 1, 9, 11, -1, 1, s);
+  // пламя
+  box3(v, -1, 1, 12, 14, -1, 1, fi);
+  cube(v, 0, 15, 0, fic); cube(v, 0, 16, 0, fic);
+  cube(v, 0, 3, 2, fi);                                       // руна у основания
   return v;
 }
 
@@ -480,55 +539,46 @@ export function relicFireTotem(): Voxel[] {
 export function relicArcaneTotem(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
-  fill(v, -0.28, 0.28, -0.50, -0.40, -0.28, 0.28, 0.14, sd);
-  // три наклонных осколка (имитация через смещённые боксы)
-  box(v, -0.14, -0.20, 0, 0.08, 0.50, 0.08, sl);
-  box(v, 0.14, -0.16, 0.04, 0.08, 0.46, 0.08, sd);
-  box(v, 0, -0.10, -0.10, 0.08, 0.42, 0.08, shade(sl, 0.9));
-  // парящий фиолетовый кристалл (ромб)
-  box(v, 0, 0.18, 0, 0.18, 0.22, 0.18, ACCENT.arcane);
-  box(v, 0, 0.34, 0, 0.10, 0.12, 0.10, ACCENT.arcaneCore);
-  box(v, 0, 0.06, 0, 0.10, 0.06, 0.10, ACCENT.arcaneCore);
-  // руны
-  box(v, 0, -0.44, 0.16, 0.14, 0.04, 0.02, ACCENT.arcane);
+  const ar = ACCENT.arcane, arc = ACCENT.arcaneCore;
+  box3(v, -3, 3, 0, 2, -3, 3, sd);
+  // наклонные осколки
+  box3(v, -2, -1, 3, 10, -1, -1, sl);
+  box3(v, 0, 2, 3, 9, 1, 1, sd);
+  cube(v, 1, 11, 0, sl);
+  // парящий кристалл (ромб)
+  box3(v, -1, 1, 12, 13, -1, 1, ar);
+  cube(v, 0, 14, 0, arc); cube(v, 0, 11, 0, arc);
   return v;
 }
 
 /** Золотой тотем — колонна с рунным кольцом и золотым шаром. */
 export function relicGoldTotem(): Voxel[] {
   const v: Voxel[] = [];
-  const sd = PALETTE.stoneDark, s = PALETTE.stone;
-  fill(v, -0.30, 0.30, -0.50, -0.42, -0.30, 0.30, 0.14, sd);
-  // колонна
-  fill(v, -0.16, 0.16, -0.30, 0.10, -0.16, 0.16, 0.12, s);
-  fill(v, -0.18, 0.18, 0.10, 0.18, -0.18, 0.18, 0.12, shade(s, 0.92));
+  const sd = PALETTE.stoneDark, s = PALETTE.stone, g = ACCENT.gold;
+  box3(v, -3, 3, 0, 2, -3, 3, sd);
+  box3(v, -1, 1, 3, 10, -1, 1, s);
   // рунное кольцо (золото)
-  for (const sy of [-0.18, 0.06]) {
-    fill(v, -0.20, 0.20, sy, sy + 0.05, -0.20, 0.20, 0.10, ACCENT.gold);
-  }
-  // золотой шар-ядро
-  box(v, 0, 0.26, 0, 0.16, 0.16, 0.16, ACCENT.gold);
-  box(v, 0, 0.26, 0, 0.08, 0.08, 0.08, ACCENT.fireCore);
+  box3(v, -2, 2, 4, 5, -2, 2, g);
+  box3(v, -2, 2, 8, 9, -2, 2, g);
+  // золотой шар
+  box3(v, -1, 1, 11, 13, -1, 1, g);
+  cube(v, 0, 14, 0, ACCENT.fireCore);
   return v;
 }
 
-/** Ледяной тотем — обледенелый шпиль с кристаллом льда. */
+/** Ледяной тотем — обледенелый шпиль с кристаллом. */
 export function relicIceTotem(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
-  fill(v, -0.28, 0.28, -0.50, -0.40, -0.28, 0.28, 0.14, sd);
-  // шпиль
-  for (let i = 0; i < 4; i++) {
-    const half = 0.15 - i * 0.025;
-    const y = -0.28 + i * 0.16;
-    fill(v, -half, half, y, y + 0.14, -half, half, 0.12, shade(sl, 0.95 - i * 0.05));
-  }
-  // кристалл льда
-  box(v, 0, 0.24, 0, 0.16, 0.20, 0.16, ACCENT.ice);
-  box(v, 0, 0.38, 0, 0.08, 0.10, 0.08, ACCENT.iceCore);
+  const ic = ACCENT.ice, icc = ACCENT.iceCore;
+  box3(v, -3, 3, 0, 2, -3, 3, sd);
+  box3(v, -2, 2, 3, 6, -2, 2, shade(sl, 0.92));
+  box3(v, -1, 1, 7, 10, -1, 1, shade(sl, 0.85));
   // сосульки
-  box(v, -0.18, -0.18, 0.18, 0.05, 0.14, 0.05, ACCENT.ice);
-  box(v, 0.18, -0.18, -0.18, 0.05, 0.14, 0.05, ACCENT.ice);
+  box3(v, -3, -3, 4, 6, 0, 0, ic); box3(v, 3, 3, 4, 6, 0, 0, ic);
+  // кристалл
+  box3(v, -1, 1, 11, 13, -1, 1, ic);
+  cube(v, 0, 14, 0, icc);
   return v;
 }
 
@@ -536,70 +586,59 @@ export function relicIceTotem(): Voxel[] {
 export function relicBloodTotem(): Voxel[] {
   const v: Voxel[] = [];
   const bo = PALETTE.bone, bod = PALETTE.boneDark, sd = PALETTE.stoneDark;
-  fill(v, -0.28, 0.28, -0.50, -0.42, -0.28, 0.28, 0.14, sd);
-  // костяной столб
-  fill(v, -0.10, 0.10, -0.28, 0.08, -0.10, 0.10, 0.10, bod);
-  fill(v, -0.12, 0.12, 0.08, 0.20, -0.12, 0.12, 0.10, bo);
-  // кровавый камень (пульсирующее ядро)
-  box(v, 0, 0.26, 0, 0.18, 0.18, 0.18, ACCENT.blood);
-  box(v, 0, 0.26, 0.10, 0.06, 0.06, 0.02, ACCENT.eyeRed);
+  const bl = ACCENT.blood, e = ACCENT.eyeRed;
+  box3(v, -3, 3, 0, 2, -3, 3, sd);
+  box3(v, -1, 1, 3, 9, -1, 1, bod);
+  box3(v, -1, 1, 9, 10, -1, 1, bo);
+  // кровавый камень
+  box3(v, -1, 1, 11, 13, -1, 1, bl);
+  cube(v, 0, 11, 1, e); cube(v, 0, 12, 1, e);
   // черепа у основания
-  box(v, -0.18, -0.40, 0.12, 0.10, 0.10, 0.10, bo);
-  box(v, 0.18, -0.40, 0.12, 0.10, 0.10, 0.10, bo);
-  box(v, -0.16, -0.40, 0.17, 0.02, 0.02, 0.02, ACCENT.eyeRed);
-  box(v, 0.20, -0.40, 0.17, 0.02, 0.02, 0.02, ACCENT.eyeRed);
+  cube(v, -3, 1, 2, bo); cube(v, 3, 1, 2, bo);
+  cube(v, -3, 1, 3, e); cube(v, 3, 1, 3, e);
   return v;
 }
 
-// ── RTS: производственные здания (Фаза 6, концепция 3) ──────────────────
-// Здания крупнее юнитов, ниже силуэтом, «приземлены» к земле. Высота ≈ 1.0.
+// ── RTS: производственные здания ───────────────────────────────────────────
 
-/** Лесопилка — деревянский навес с бревном и пилой. */
+/** Лесопилка — деревянный навес с бревном и пилой. */
 export function sawmillBuilding(): Voxel[] {
   const v: Voxel[] = [];
   const w = PALETTE.wood, wd = PALETTE.woodDark, wl = PALETTE.woodLight;
-  // фундамент-плашка
-  fill(v, -0.42, 0.42, -0.50, -0.40, -0.42, 0.42, 0.16, PALETTE.earth);
-  // 4 угловых столба навеса
-  for (const sx of [-0.34, 0.34]) for (const sz of [-0.30, 0.30]) {
-    box(v, sx, -0.20, sz, 0.10, 0.50, 0.10, wd);
-  }
-  // крыша-навес (наклонная ≈ ступеньки)
-  for (let i = 0; i < 3; i++) {
-    fill(v, -0.40 + i * 0.04, 0.40 - i * 0.04, 0.06 + i * 0.06, 0.18 + i * 0.06, -0.34, 0.34, 0.10, shade(wd, 0.85));
-  }
-  // бревно (заготовка)
-  fill(v, -0.20, 0.20, -0.34, -0.18, -0.18, 0.18, 0.12, w);
-  // пила-диск (металл)
-  box(v, 0, -0.20, 0.22, 0.22, 0.04, 0.04, PALETTE.metalLight);
-  box(v, 0, -0.20, 0.24, 0.04, 0.04, 0.04, ACCENT.gold);
-  // маленький костёр у входа (тёплый акцент)
-  box(v, -0.30, -0.38, 0.10, 0.06, 0.06, 0.06, ACCENT.fire);
-  box(v, 0.30, -0.20, 0, 0.05, 0.50, 0.05, wl); // подпорка
+  box3(v, -5, 5, 0, 2, -4, 4, PALETTE.earth);                          // фундамент
+  // угловые столбы
+  box3(v, -5, -4, 3, 10, -4, -4, wd); box3(v, 4, 5, 3, 10, -4, -4, wd);
+  box3(v, -5, -4, 3, 10, 4, 4, wd);   box3(v, 4, 5, 3, 10, 4, 4, wd);
+  // крыша-навес (ступенчатая)
+  box3(v, -5, 5, 11, 12, -4, 4, shade(wd, 0.85));
+  box3(v, -4, 4, 13, 14, -4, 4, shade(wd, 0.8));
+  box3(v, -2, 2, 15, 15, -3, 3, shade(wd, 0.75));
+  // бревно-заготовка
+  box3(v, -2, 2, 3, 5, -2, 2, w);
+  // пила
+  box3(v, -1, 1, 6, 7, 3, 3, PALETTE.metalLight);
+  cube(v, 0, 6, 3, ACCENT.gold);
+  // костёр у входа
+  cube(v, -3, 2, 3, ACCENT.fire); cube(v, -4, 2, 3, ACCENT.fire);
   return v;
 }
 
-/** Шахта — тёмный ствол в горе с деревянной крепью. */
+/** Шахта — ствол в горе с деревянной крепью. */
 export function mineBuilding(): Voxel[] {
   const v: Voxel[] = [];
   const s = PALETTE.stone, sd = PALETTE.stoneDark, wd = PALETTE.woodDark;
-  // скалистое основание
-  fill(v, -0.42, 0.42, -0.50, -0.36, -0.42, 0.42, 0.16, sd);
-  // куча камней (горка)
-  fill(v, -0.36, 0.36, -0.36, -0.20, -0.36, 0.36, 0.16, s);
-  fill(v, -0.26, 0.26, -0.30, 0.0, -0.30, 0.30, 0.14, shade(s, 0.92));
+  box3(v, -5, 5, 0, 3, -4, 4, sd);                                     // скалистое основание
+  box3(v, -4, 4, 3, 6, -4, 4, s);
+  box3(v, -3, 3, 6, 8, -3, 3, shade(s, 0.92));
   // чёрный провал шахты
-  fill(v, -0.18, 0.18, -0.30, 0.10, -0.14, 0.14, 0.10, PALETTE.metalDark);
+  box3(v, -2, 2, 4, 8, -2, 2, PALETTE.metalDark);
   // деревянная крепь (рама)
-  box(v, -0.22, -0.10, 0, 0.06, 0.50, 0.06, wd);
-  box(v, 0.22, -0.10, 0, 0.06, 0.50, 0.06, wd);
-  box(v, 0, 0.30, 0, 0.50, 0.06, 0.06, wd);
-  // руда (золотые крупицы) — намёк на добычу
-  box(v, -0.14, -0.30, 0.16, 0.04, 0.04, 0.04, ACCENT.gold);
-  box(v, 0.10, -0.28, 0.20, 0.04, 0.04, 0.04, ACCENT.gold);
-  box(v, 0.04, -0.34, 0.10, 0.04, 0.04, 0.04, ACCENT.gold);
-  // фонарь у входа
-  box(v, 0, 0.18, 0.20, 0.06, 0.06, 0.06, ACCENT.fireCore);
+  box3(v, -3, -3, 3, 10, -3, -3, wd); box3(v, 3, 3, 3, 10, -3, -3, wd);
+  box3(v, -3, 3, 11, 11, -3, 3, wd);
+  // руда (золотые крупицы)
+  cube(v, -3, 3, 3, ACCENT.gold); cube(v, 3, 4, 3, ACCENT.gold); cube(v, 0, 5, 3, ACCENT.gold);
+  // фонарь
+  cube(v, 0, 9, 3, ACCENT.fireCore);
   return v;
 }
 
@@ -607,23 +646,18 @@ export function mineBuilding(): Voxel[] {
 export function smelterBuilding(): Voxel[] {
   const v: Voxel[] = [];
   const s = PALETTE.stone, sd = PALETTE.stoneDark, md = PALETTE.metalDark;
-  // фундамент
-  fill(v, -0.42, 0.42, -0.50, -0.42, -0.42, 0.42, 0.16, sd);
-  // основание печи (квадратное)
-  fill(v, -0.34, 0.34, -0.42, 0.10, -0.34, 0.34, 0.16, s);
-  // корпус печи
-  fill(v, -0.30, 0.30, 0.10, 0.28, -0.30, 0.30, 0.14, shade(s, 0.88));
-  // труба (вверх)
-  fill(v, -0.10, 0.10, 0.28, 0.40, -0.10, 0.10, 0.10, md);
-  // огненное жерло (чёрный провал + огонь внутри)
-  fill(v, -0.16, 0.16, -0.05, 0.20, -0.10, 0.10, 0.10, PALETTE.metalDark);
-  box(v, 0, 0.05, 0.12, 0.18, 0.10, 0.04, ACCENT.fire);
-  box(v, 0, 0.10, 0.14, 0.10, 0.06, 0.02, ACCENT.fireCore);
-  // анвил/кованная плита
-  box(v, 0.30, -0.30, 0, 0.16, 0.10, 0.16, md);
-  box(v, 0.30, -0.20, 0, 0.20, 0.04, 0.20, PALETTE.metal);
-  // искры
-  box(v, 0.20, 0.20, 0.20, 0.03, 0.03, 0.03, ACCENT.fireCore);
+  const fi = ACCENT.fire, fic = ACCENT.fireCore;
+  box3(v, -5, 5, 0, 2, -4, 4, sd);
+  box3(v, -4, 4, 3, 5, -4, 4, s);                                      // основание печи
+  box3(v, -3, 3, 6, 9, -3, 3, shade(s, 0.88));                          // корпус
+  box3(v, -1, 1, 10, 13, -1, 1, md);                                   // труба
+  // жерло
+  box3(v, -2, 2, 5, 7, -2, 2, PALETTE.metalDark);
+  box3(v, -1, 1, 6, 7, 0, 0, fi);
+  cube(v, 0, 7, 0, fic);
+  // наковальня
+  box3(v, 4, 4, 3, 4, 3, 3, md); box3(v, 3, 5, 4, 5, 3, 3, PALETTE.metal);
+  cube(v, 2, 7, 3, fic);                                               // искра
   return v;
 }
 
@@ -631,81 +665,81 @@ export function smelterBuilding(): Voxel[] {
 export function barracksBuilding(): Voxel[] {
   const v: Voxel[] = [];
   const s = PALETTE.stone, sd = PALETTE.stoneDark, wd = PALETTE.woodDark, m = PALETTE.metal;
-  // фундамент
-  fill(v, -0.42, 0.42, -0.50, -0.42, -0.42, 0.42, 0.16, sd);
-  // стены бункера
-  fill(v, -0.40, 0.40, -0.42, -0.10, -0.40, 0.40, 0.16, s);
-  // бойницы (горизонтальные тёмные щели)
-  fill(v, -0.36, 0.36, -0.30, -0.24, -0.05, -0.05, 0.06, PALETTE.metalDark);
-  fill(v, -0.36, 0.36, -0.30, -0.24, 0.05, 0.05, 0.06, PALETTE.metalDark);
+  box3(v, -5, 5, 0, 2, -4, 4, sd);
+  box3(v, -4, 4, 3, 7, -4, 4, s);                                      // стены бункера
+  // бойницы (тёмные щели)
+  box3(v, -4, 4, 4, 4, -2, -2, PALETTE.metalDark); box3(v, -4, 4, 4, 4, 2, 2, PALETTE.metalDark);
+  box3(v, -4, 4, 6, 6, -2, -2, PALETTE.metalDark); box3(v, -4, 4, 6, 6, 2, 2, PALETTE.metalDark);
   // крыша-зубцы
-  for (const sx of [-0.36, -0.12, 0.12, 0.36]) {
-    box(v, sx, -0.06, 0, 0.10, 0.10, 0.84, shade(sd, 0.9));
-  }
-  // дверь-проём (тёмная)
-  fill(v, -0.10, 0.10, -0.42, -0.30, 0, 0, 0.10, PALETTE.metalDark);
-  // стойка с оружием у входа
-  box(v, 0.24, -0.30, 0.20, 0.04, 0.40, 0.04, wd); // древко
-  box(v, 0.24, 0.10, 0.20, 0.10, 0.10, 0.02, m); // наконечник
-  box(v, 0.30, -0.30, 0.24, 0.02, 0.30, 0.02, m); // лезвие меча
-  box(v, 0.30, -0.42, 0.24, 0.06, 0.04, 0.06, ACCENT.gold); // руны
-  // факел по углу
-  box(v, -0.34, -0.10, 0.34, 0.04, 0.20, 0.04, wd);
-  box(v, -0.34, 0.04, 0.34, 0.06, 0.06, 0.06, ACCENT.fire);
+  cube(v, -4, 8, -4, shade(sd, 0.9)); cube(v, -1, 8, -4, shade(sd, 0.9)); cube(v, 2, 8, -4, shade(sd, 0.9));
+  cube(v, -4, 8, 4, shade(sd, 0.9)); cube(v, -1, 8, 4, shade(sd, 0.9)); cube(v, 2, 8, 4, shade(sd, 0.9));
+  // дверь-проём
+  box3(v, -1, 1, 3, 5, 0, 0, PALETTE.metalDark);
+  // стойка с оружием
+  cube(v, 3, 3, 3, wd); box3(v, 3, 3, 4, 7, 3, 3, m);                  // древко + наконечник
+  // факел
+  cube(v, -4, 6, 3, wd); cube(v, -4, 7, 3, ACCENT.fire);
   return v;
 }
 
-// ── RTS: защитные юниты (Фаза 6) ───────────────────────────────────────
-// Юниты мельче зданий, но заметнее врагов; оружие/щит отличают классы.
+// ── RTS: защитные юниты ────────────────────────────────────────────────────
 
 /** Рыцарь — латник со щитом и мечом. */
 export function knightUnit(): Voxel[] {
   const v: Voxel[] = [];
   const m = PALETTE.metal, md = PALETTE.metalDark, ml = PALETTE.metalLight, wd = PALETTE.woodDark;
-  // ноги (в доспехе)
-  box(v, -0.09, -0.42, 0, 0.08, 0.26, 0.10, md);
-  box(v, 0.09, -0.42, 0, 0.08, 0.26, 0.10, md);
-  // торс (нагрудник)
-  fill(v, -0.16, 0.16, -0.16, 0.10, -0.12, 0.12, 0.14, m);
-  box(v, 0, -0.04, 0.13, 0.18, 0.18, 0.04, ml); // грудь
+  const e = ACCENT.soul, g = ACCENT.gold;
+  // ноги в доспехе
+  box3(v, -2, -1, 0, 1, 0, 1, md); box3(v, 1, 2, 0, 1, 0, 1, md);
+  box3(v, -2, -1, 2, 6, 0, 0, md); box3(v, 1, 2, 2, 6, 0, 0, md);
+  // набедренник
+  box3(v, -2, 2, 7, 9, 0, 1, m);
+  // нагрудник
+  box3(v, -2, 2, 10, 13, 0, 1, m);
+  box3(v, -1, 1, 12, 13, 1, 1, ml);                                    // грудь-блик
+  cube(v, 0, 11, 1, g);                                                // эмблема
   // наплечники
-  box(v, -0.20, -0.04, 0, 0.08, 0.10, 0.14, md);
-  box(v, 0.20, -0.04, 0, 0.08, 0.10, 0.14, md);
+  box3(v, -3, -2, 10, 11, 0, 1, md); box3(v, 2, 3, 10, 11, 0, 1, md);
+  // руки
+  box3(v, -3, -2, 12, 14, 0, 0, md); box3(v, 2, 3, 12, 14, 0, 0, md);
   // голова в шлеме
-  box(v, 0, 0.18, 0, 0.16, 0.16, 0.16, md);
-  box(v, 0, 0.28, 0, 0.04, 0.08, 0.04, ACCENT.gold); // гребень
+  box3(v, -2, 2, 14, 17, 0, 1, md);
+  cube(v, 0, 18, 0, g);                                                // гребень
+  cube(v, -1, 16, 1, e); cube(v, 1, 16, 1, e);                         // глазница щели
   // щит (левая рука)
-  box(v, -0.22, -0.06, 0.10, 0.06, 0.22, 0.18, shade(m, 0.9));
-  box(v, -0.22, -0.06, 0.20, 0.02, 0.06, 0.06, ACCENT.gold); // эмблема
-  // меч в правой руке
-  box(v, 0.24, -0.10, 0.10, 0.04, 0.16, 0.04, wd); // рукоять
-  fill(v, 0.24, 0.10, 0.10, 0.03, 0.30, 0.03, 0.04, ml); // клинок
+  box3(v, -4, -3, 10, 14, 1, 2, shade(m, 0.9));
+  cube(v, -4, 12, 2, g);
+  // меч в правой
+  cube(v, 3, 9, 1, wd);                                                // рукоять
+  box3(v, 3, 3, 10, 15, 1, 1, ml);                                     // клинок
+  cube(v, 3, 16, 1, g);                                                // набалдашник
   return v;
 }
 
-/** Лучник — лёгкий боец с луком. */
+/** Лучник — лёгкий боец с луком и колчаном. */
 export function archerUnit(): Voxel[] {
   const v: Voxel[] = [];
   const f = PALETTE.flesh, fd = PALETTE.fleshDark, w = PALETTE.wood, wl = PALETTE.woodLight;
-  // ноги (кожаные поножи)
-  box(v, -0.08, -0.42, 0, 0.08, 0.26, 0.10, fd);
-  box(v, 0.08, -0.42, 0, 0.08, 0.26, 0.10, fd);
-  // торс (туника)
-  fill(v, -0.14, 0.14, -0.16, 0.08, -0.10, 0.10, 0.12, shade(f, 0.85));
+  const e = ACCENT.soul, g = ACCENT.gold;
+  // ноги (поножи)
+  box3(v, -2, -1, 0, 1, 0, 1, fd); box3(v, 1, 2, 0, 1, 0, 1, fd);
+  box3(v, -2, -1, 2, 6, 0, 0, fd); box3(v, 1, 2, 2, 6, 0, 0, fd);
+  // туника
+  box3(v, -2, 2, 7, 13, 0, 1, shade(f, 0.85));
   // капюшон
-  box(v, 0, 0.06, -0.04, 0.20, 0.10, 0.18, fd);
+  box3(v, -2, 2, 14, 15, -1, 1, fd);
+  box3(v, -2, 2, 13, 14, 1, 2, fd);
   // голова
-  box(v, 0, 0.16, 0, 0.14, 0.14, 0.14, f);
-  box(v, -0.04, 0.18, 0.08, 0.03, 0.03, 0.02, ACCENT.soul); // глаза
-  box(v, 0.04, 0.18, 0.08, 0.03, 0.03, 0.02, ACCENT.soul);
+  box3(v, -1, 1, 14, 16, 0, 1, f);
+  cube(v, -1, 15, 1, e); cube(v, 1, 15, 1, e);
   // колчан за спиной
-  box(v, 0, -0.04, -0.16, 0.06, 0.20, 0.04, w);
-  box(v, 0, 0.08, -0.16, 0.03, 0.10, 0.02, wl); // стрелы
-  // лук (в левой руке, дугой)
-  box(v, -0.22, -0.06, 0.10, 0.04, 0.30, 0.04, w);
-  box(v, -0.26, -0.06, 0.10, 0.02, 0.06, 0.02, w);
-  box(v, -0.26, 0.10, 0.10, 0.02, 0.06, 0.02, w);
-  box(v, -0.24, 0.02, 0.10, 0.10, 0.02, 0.02, wl); // тетива/стрела
+  box3(v, -1, 1, 9, 13, -2, -2, w);
+  cube(v, 0, 14, -2, wl); cube(v, -1, 14, -2, wl);
+  // лук (дугой в левой руке)
+  box3(v, -3, -3, 11, 15, 1, 1, w);
+  cube(v, -3, 10, 1, w); cube(v, -3, 16, 1, w);
+  cube(v, -3, 13, 2, wl);                                              // стрела на тетиве
+  cube(v, 2, 13, 1, g);                                                // пояс-пряжка
   return v;
 }
 
@@ -713,55 +747,53 @@ export function archerUnit(): Voxel[] {
 export function mageUnit(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
-  // ноги (скрыты мантией)
-  fill(v, -0.14, 0.14, -0.42, -0.30, -0.10, 0.10, 0.16, shade(sd, 0.7));
-  // мантия-квадрат
-  fill(v, -0.18, 0.18, -0.30, 0.10, -0.14, 0.14, 0.14, sl);
-  fill(v, -0.20, 0.20, 0.10, 0.20, -0.16, 0.16, 0.12, shade(sd, 0.8));
+  const ar = ACCENT.arcane, arc = ACCENT.arcaneCore;
+  // подол мантии (расширяется вниз)
+  box3(v, -2, 2, 0, 6, 0, 1, shade(sd, 0.7));
+  box3(v, -1, 1, 3, 4, 0, 1, sl);                                      // подкладка
+  // лиф мантии
+  box3(v, -2, 2, 7, 12, 0, 1, sl);
+  box3(v, -2, 2, 11, 13, 0, 1, shade(sd, 0.8));
   // рукава
-  box(v, -0.24, -0.10, 0, 0.08, 0.30, 0.10, shade(sd, 0.7));
-  box(v, 0.24, -0.10, 0, 0.08, 0.30, 0.10, shade(sd, 0.7));
+  box3(v, -3, -2, 8, 12, 0, 0, shade(sd, 0.7)); box3(v, 2, 3, 8, 12, 0, 0, shade(sd, 0.7));
   // капюшон + лицо (тень)
-  box(v, 0, 0.16, 0, 0.20, 0.18, 0.20, sd);
-  box(v, 0, 0.16, 0.10, 0.10, 0.06, 0.02, PALETTE.metalDark); // тень-лицо
-  box(v, -0.04, 0.18, 0.12, 0.03, 0.03, 0.02, ACCENT.arcaneCore); // глаза-магия
-  box(v, 0.04, 0.18, 0.12, 0.03, 0.03, 0.02, ACCENT.arcaneCore);
+  box3(v, -2, 2, 13, 16, 0, 1, sd);
+  box3(v, -1, 1, 14, 15, 1, 1, PALETTE.metalDark);                     // тень-лицо
+  cube(v, -1, 15, 1, arc); cube(v, 1, 15, 1, arc);                     // глаза-магия
   // посох с кристаллом
-  box(v, 0.24, -0.20, 0.16, 0.04, 0.50, 0.04, PALETTE.woodDark);
-  box(v, 0.24, 0.20, 0.16, 0.10, 0.10, 0.10, ACCENT.arcane); // кристалл
-  box(v, 0.24, 0.26, 0.16, 0.05, 0.06, 0.05, ACCENT.arcaneCore);
-  // руны на мантии
-  box(v, 0, -0.04, 0.15, 0.04, 0.10, 0.02, ACCENT.arcane);
+  box3(v, 3, 3, 6, 14, 1, 1, PALETTE.woodDark);
+  box3(v, 2, 4, 15, 17, 0, 2, ar);                                     // кристалл-ромб
+  cube(v, 3, 16, 1, arc);
+  cube(v, 0, 10, 1, ar);                                               // руна на мантии
   return v;
 }
 
-/** Командир-некромант — увеличенный маг с короной и рунами. */
+/** Командир-некромант — увеличенный маг с короной и двойным посохом. */
 export function commanderUnit(): Voxel[] {
   const v: Voxel[] = [];
   const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight, bo = PALETTE.bone;
-  // основание/плащ шире
-  fill(v, -0.18, 0.18, -0.44, -0.30, -0.12, 0.12, 0.16, shade(sd, 0.6));
-  fill(v, -0.22, 0.22, -0.30, 0.08, -0.18, 0.18, 0.14, sl);
-  fill(v, -0.24, 0.24, 0.08, 0.18, -0.20, 0.20, 0.12, shade(sd, 0.75));
+  const ar = ACCENT.arcane, arc = ACCENT.arcaneCore, bl = ACCENT.blood, g = ACCENT.gold;
+  // широкий подол плаща
+  box3(v, -3, 3, 0, 6, 0, 1, shade(sd, 0.6));
+  box3(v, -2, 2, 3, 4, 0, 1, sl);
+  box3(v, -3, 3, 7, 13, 0, 1, sl);
+  box3(v, -3, 3, 12, 14, 0, 1, shade(sd, 0.75));
   // рукава-рога
-  box(v, -0.28, -0.10, 0, 0.08, 0.32, 0.10, shade(sd, 0.7));
-  box(v, 0.28, -0.10, 0, 0.08, 0.32, 0.10, shade(sd, 0.7));
-  // капюшон крупнее
-  box(v, 0, 0.16, -0.02, 0.24, 0.22, 0.24, sd);
-  box(v, 0, 0.30, 0, 0.16, 0.06, 0.16, bo); // корона из кости
-  box(v, -0.06, 0.34, 0, 0.03, 0.06, 0.03, ACCENT.gold);
-  box(v, 0.06, 0.34, 0, 0.03, 0.06, 0.03, ACCENT.gold);
-  // горящие глаза-магия
-  box(v, 0, 0.18, 0.10, 0.10, 0.06, 0.02, PALETTE.metalDark);
-  box(v, -0.04, 0.20, 0.12, 0.04, 0.04, 0.02, ACCENT.arcaneCore);
-  box(v, 0.04, 0.20, 0.12, 0.04, 0.04, 0.02, ACCENT.arcaneCore);
+  box3(v, -4, -3, 8, 13, 0, 0, shade(sd, 0.7)); box3(v, 3, 4, 8, 13, 0, 0, shade(sd, 0.7));
+  // крупный капюшон
+  box3(v, -2, 2, 14, 18, 0, 1, sd);
+  box3(v, -1, 1, 15, 16, 1, 1, PALETTE.metalDark);
+  // корона из кости
+  box3(v, -2, 2, 19, 19, 0, 0, bo); box3(v, -1, 1, 19, 19, 0, 0, bo); box3(v, 1, 2, 19, 19, 0, 0, bo);
+  cube(v, -1, 20, 0, g); cube(v, 1, 20, 0, g);
+  cube(v, -1, 16, 1, arc); cube(v, 1, 16, 1, arc);                     // горящие глаза
   // посох-жезл с двумя кристаллами
-  box(v, 0.28, -0.20, 0.16, 0.05, 0.56, 0.05, PALETTE.boneDark);
-  box(v, 0.28, 0.24, 0.16, 0.12, 0.12, 0.12, ACCENT.arcane);
-  box(v, 0.28, 0.32, 0.16, 0.06, 0.06, 0.06, ACCENT.arcaneCore);
-  box(v, 0.28, 0.08, 0.16, 0.06, 0.06, 0.06, ACCENT.blood); // второй кристалл (кровавый)
+  box3(v, 4, 4, 5, 16, 1, 1, PALETTE.boneDark);
+  box3(v, 3, 5, 17, 19, 0, 2, ar);
+  cube(v, 4, 18, 1, arc);
+  cube(v, 4, 10, 1, bl);                                               // второй (кровавый) кристалл
   // рунный пояс
-  fill(v, -0.20, 0.20, -0.06, -0.02, -0.16, 0.16, 0.04, ACCENT.arcane);
+  cube(v, -2, 10, 1, ar); cube(v, 0, 10, 1, ar); cube(v, 2, 10, 1, ar);
   return v;
 }
 
@@ -787,7 +819,6 @@ export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'relic:totem-gold': relicGoldTotem,
   'relic:totem-ice': relicIceTotem,
   'relic:totem-blood': relicBloodTotem,
-  // ── Phase 6: RTS здания и юниты ──
   'building:sawmill': sawmillBuilding,
   'building:mine': mineBuilding,
   'building:smelter': smelterBuilding,
@@ -816,7 +847,6 @@ export function builderEmissive(builderName: string): RGB | undefined {
     case 'relic:totem-gold': return ACCENT.gold;
     case 'relic:totem-ice': return ACCENT.ice;
     case 'relic:totem-blood': return ACCENT.blood;
-    // ── Phase 6: RTS ──
     case 'building:sawmill': return ACCENT.fire;
     case 'building:mine': return ACCENT.gold;
     case 'building:smelter': return ACCENT.fireCore;

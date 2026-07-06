@@ -136,6 +136,11 @@ export class AssetCatalog {
   /**
    * Возвращает свежий master-меш, принадлежащий вызывающему рендереру (dispose — на нём).
    * Меш отцентрирован в начале координат, высота ≈ 1.0 (воксели) или нормализованный GLB.
+   *
+   * Phase 8.5: материал мастера замораживается (material.freeze()) — кеш uniforms
+   * для hot-path инстансинга (thin/InstancedMesh). День/ночь (atmosphere) меняет
+   * свет СЦЕНЫ, а не материал-униформы → freeze безопасен. Террейн-ShaderMaterial
+   * здесь не участвует и НЕ замораживается (ему нужны per-frame uniform-апдейты).
    */
   buildMaster(catalogId: string, name: string, options: Partial<VoxelMeshOptions> = {}): Mesh {
     const id = resolveLegacy(catalogId);
@@ -148,6 +153,7 @@ export class AssetCatalog {
         clone.isVisible = true;
         clone.setEnabled(true);
         clone.isPickable = false;
+        this.freezeMaterialOf(clone);
         return clone;
       }
     }
@@ -158,13 +164,15 @@ export class AssetCatalog {
       const voxels = builder();
       const entry = this.entries.get(id);
       const emissive = options.emissive ?? builderEmissive(id) ?? entry?.emissive;
-      return buildVoxelMesh(this.scene, voxels, {
+      const mesh = buildVoxelMesh(this.scene, voxels, {
         name,
         emissive,
         emissiveStrength: options.emissiveStrength ?? 0.18,
         alpha: options.alpha,
         matte: options.matte
       });
+      this.freezeMaterialOf(mesh);
+      return mesh;
     }
 
     // 3. Фолбэк — простой бокс (не должен срабатывать для дефолтных каталогов)
@@ -172,6 +180,14 @@ export class AssetCatalog {
     const fb = MeshBuilder.CreateBox(name, { size: 0.4 }, this.scene);
     fb.isPickable = false;
     return fb;
+  }
+
+  /** Замораживает material меша (если есть) — оптимизация uniform-кеша Babylon. */
+  private freezeMaterialOf(mesh: Mesh): void {
+    const mat = mesh.material;
+    if (mat && typeof (mat as { freeze?: () => void }).freeze === 'function') {
+      (mat as { freeze: () => void }).freeze();
+    }
   }
 
   dispose(): void {

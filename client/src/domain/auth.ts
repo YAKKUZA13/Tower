@@ -11,7 +11,7 @@ export interface AuthCredentials {
 }
 
 export interface RegisterCredentials extends AuthCredentials {
-  defaultRole: AccountRole;
+  defaultRole?: AccountRole;
 }
 
 export interface AuthUser {

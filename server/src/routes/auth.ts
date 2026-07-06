@@ -6,7 +6,7 @@ import type { AuthSession, PublicUser, UserAccount } from '../types/auth.js';
 interface RegisterBody {
   login: string;
   password: string;
-  defaultRole: 'gm' | 'player';
+  defaultRole?: 'gm' | 'player';
 }
 
 interface LoginBody {
@@ -38,7 +38,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     schema: {
       body: {
         type: 'object',
-        required: ['login', 'password', 'defaultRole'],
+        required: ['login', 'password'],
         properties: {
           login: { type: 'string', minLength: 2, maxLength: 40 },
           password: { type: 'string', minLength: 8, maxLength: 200 },
@@ -47,7 +47,8 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       }
     }
   }, async (req: FastifyRequest<{ Body: RegisterBody }>, reply) => {
-    const { login, password, defaultRole } = req.body;
+    const { login, password } = req.body;
+    const defaultRole = req.body.defaultRole ?? 'player';
     const user = await createUserWithPassword(login, password, defaultRole);
     if (!user) return reply.code(409).send({ error: 'login_taken' });
     const { authSession, token } = await createAuthSession(user);

@@ -5,7 +5,6 @@ import type { GameRole, GameSession } from '../types/game-session.js';
 
 interface JoinBody {
   sessionId: string;
-  characterName?: string;
 }
 
 interface ResetBody {
@@ -34,8 +33,7 @@ function toSessionDto(session: GameSession | null, userId: string) {
     gm: session.gm || {
       userId: session.gmUserId,
       username: gmName,
-      characterName: '',
-      role: 'gm'
+      role: 'gm' as GameRole
     },
     players: session.players || [],
     mapId: session.mapId || session.sessionId,
@@ -60,15 +58,14 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         type: 'object',
         required: ['sessionId'],
         properties: {
-          sessionId: { type: 'string', minLength: 10 },
-          characterName: { type: 'string' }
+          sessionId: { type: 'string', minLength: 10 }
         }
       }
     }
   }, async (req: FastifyRequest<{ Body: JoinBody }>, reply) => {
-    const { sessionId, characterName } = req.body;
+    const { sessionId } = req.body;
     if (!req.user) return reply.code(401).send({ error: 'missing_auth' });
-    const session = await joinSession(sessionId, req.user, characterName || '');
+    const session = await joinSession(sessionId, req.user);
     if (!session) return reply.code(404).send({ error: 'session_not_found' });
     return reply.send(toSessionDto(session, req.user.userId));
   });
@@ -103,4 +100,3 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
 };
 
 export default sessionRoutes;
-

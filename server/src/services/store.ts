@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { transaction } from '../db/pool.js';
-import { createDefaultMap, normalizeMapDocument } from '../domain/map.js';
 import { getRedisOrNull } from '../redis/client.js';
 import {
   findActiveAuthSessionWithUser,
@@ -14,12 +13,8 @@ import {
   upsertPlayerParticipant
 } from '../repositories/game-sessions-repository.js';
 import { findUserByLogin, insertUserWithProfile, normalizeAccountRole, normalizeLogin, createEmptyProfile } from '../repositories/users-repository.js';
-import { deleteAssetById, findAssetById, findAssetWithDataById, insertAsset, listAssets } from '../repositories/assets-repository.js';
-import { readMapDocument, writeMapDocument } from '../repositories/maps-repository.js';
-import type { AssetRecord, AssetWithData } from '../types/assets.js';
 import type { AccountRole, AuthSession, AuthSessionLookup, PasswordHash, PublicUser, UserAccount } from '../types/auth.js';
 import type { GameSession } from '../types/game-session.js';
-import type { MapDocument } from '../types/map.js';
 
 const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PASSWORD_KEY_LENGTH = 64;
@@ -184,7 +179,6 @@ export async function createSession(gmUser: PublicUser): Promise<GameSession> {
     gm: {
       userId: gmUser.userId,
       username: gmName,
-      characterName: '',
       role: 'gm'
     },
     players: [],
@@ -202,78 +196,15 @@ export async function createSession(gmUser: PublicUser): Promise<GameSession> {
 
 export async function joinSession(
   sessionId: string,
-  user: PublicUser,
-  characterName = ''
+  user: PublicUser
 ): Promise<GameSession | null> {
   const session = await getActiveSession(sessionId);
   if (!session) return null;
   const username = user.login || user.username;
-  await upsertPlayerParticipant(sessionId, user.userId, username, characterName, Date.now());
+  await upsertPlayerParticipant(sessionId, user.userId, username, Date.now());
   return await getActiveSession(sessionId);
 }
 
 export async function resetSession(sessionId: string): Promise<void> {
   await closeSession(sessionId, Date.now());
-}
-
-export async function readMap(ownerId: string): Promise<MapDocument> {
-  const document = await readMapDocument(ownerId);
-  return document ? normalizeMapDocument(document) : getDefaultMap();
-}
-
-export async function writeMap(ownerId: string, map: MapDocument): Promise<void> {
-  const normalized = normalizeMapDocument(map);
-  await writeMapDocument(ownerId, normalized);
-}
-
-export function getDefaultMap(): MapDocument {
-  return normalizeMapDocument(createDefaultMap());
-}
-
-export async function readAssets(): Promise<AssetRecord[]> {
-  return listAssets();
-}
-
-export async function addAsset({
-  name,
-  mime,
-  dataBuffer,
-  ownerUserId = null
-}: {
-  name: string;
-  mime?: string;
-  dataBuffer: Buffer;
-  ownerUserId?: string | null;
-}): Promise<AssetRecord> {
-  const safeName = name.replace(/[^\w.-]+/g, '_');
-  const id = crypto.randomUUID();
-  const storedName = `${id}_${safeName}`;
-  const record: AssetWithData = {
-    id,
-    ownerUserId,
-    name: safeName,
-    mime: mime || 'application/octet-stream',
-    file: storedName,
-    size: dataBuffer.byteLength,
-    createdAt: Date.now(),
-    data: dataBuffer
-  };
-  await insertAsset(record);
-  const { data: _data, ...asset } = record;
-  return asset;
-}
-
-export async function getAssetById(id: string): Promise<AssetRecord | null> {
-  return findAssetById(id);
-}
-
-export async function getAssetWithDataById(id: string): Promise<AssetWithData | null> {
-  return findAssetWithDataById(id);
-}
-
-export async function deleteAsset(id: string): Promise<boolean> {
-  const asset = await getAssetById(id);
-  if (!asset) return false;
-  await deleteAssetById(id);
-  return true;
 }

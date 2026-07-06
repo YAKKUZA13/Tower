@@ -3,7 +3,6 @@ export type GameRole = 'gm' | 'player' | 'spectator';
 export interface GameParticipant {
   userId: string;
   username: string;
-  characterName: string;
   role?: GameRole;
 }
 

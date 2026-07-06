@@ -1,72 +1,60 @@
-<script setup>
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
+<script setup lang="ts">
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import LoginForm from './components/LoginForm.vue';
-// Тяжёлые 3D-компоненты грузятся лениво (Babylon.js выносится в отдельный чанк).
-const MapEditor = defineAsyncComponent(() => import('./components/MapEditor.vue'));
-const Play = defineAsyncComponent(() => import('./components/Play.vue'));
+import CoopLobby from './components/CoopLobby.vue';
+// Игровой 3D-компонент грузится лениво (Babylon.js выносится в отдельный чанк).
 const Game = defineAsyncComponent(() => import('./components/Game.vue'));
-import { useSessionSocket } from './composables/use-session-socket';
 import { useAuthStore } from './stores/auth-store';
-import { useGameSessionStore } from './stores/game-session-store';
+import { useCoopStore } from './stores/coop-store';
 
 const authStore = useAuthStore();
-const sessionStore = useGameSessionStore();
+const coopStore = useCoopStore();
 const { user, isAuthed } = storeToRefs(authStore);
-const { sessionId, role, roleLabel } = storeToRefs(sessionStore);
-const view = ref('lobby'); // lobby | editor | play
-const joiningId = ref('');
-const characterName = ref('');
-const username = computed(() => user.value?.username || user.value?.login || '');
-const accountRoleLabel = computed(() => authStore.defaultRole === 'gm' ? 'Мастер' : 'Игрок');
-const { status: wsStatus, connectSocket, closeSocket } = useSessionSocket({ sessionId, isAuthed });
+const { phase: coopPhase } = storeToRefs(coopStore);
 
-function handleAuthed() {
-  view.value = authStore.defaultRole === 'gm' ? 'lobby' : 'lobby';
+type View = 'lobby' | 'game';
+const view = ref<View>('lobby');
+const username = computed(() => user.value?.username || user.value?.login || '');
+
+function handleAuthed(): void {
+  view.value = 'lobby';
 }
 
-async function logout() {
-  closeSocket();
-  sessionStore.clearSession();
+async function logout(): Promise<void> {
+  coopStore.leaveRoom();
   await authStore.logoutAccount();
   view.value = 'lobby';
 }
 
-async function hostSession() {
-  await sessionStore.createGameSession();
-  view.value = 'editor';
-  connectSocket();
+/** CoopLobby: хост нажал «Старт» → перейти в игру (co-op). */
+function onStartGame(): void {
+  view.value = 'game';
 }
 
-async function joinExisting() {
-  const sid = joiningId.value.trim();
-  if (!sid) return;
-  const res = await sessionStore.joinGameSession(sid, characterName.value.trim());
-  view.value = role.value === 'gm' ? 'editor' : 'play';
-  joiningId.value = '';
-  connectSocket();
-}
-
-async function refreshSession() {
-  try {
-    await sessionStore.refreshGameSession();
-  } catch (e) {
-    console.warn('session refresh failed', e);
-  }
-}
-
-async function resetCurrentSession() {
-  await sessionStore.resetCurrentSession();
+/** Возврат из игры в лобби. */
+function backToLobby(): void {
+  coopStore.endGame();
   view.value = 'lobby';
-  closeSocket();
 }
+
+/** Game.vue: гость просит вернуться в лобби (например, после отключения хоста). */
+function onBackToLobby(): void {
+  coopStore.leaveRoom();
+  view.value = 'lobby';
+}
+
+// Если co-op фаза стала 'playing' (хост стартовал) — автоматически в Game.
+watch(coopPhase, (p) => {
+  if (p === 'playing' && view.value !== 'game') view.value = 'game';
+  if (p === 'closed' && view.value === 'game') view.value = 'lobby';
+});
 
 onMounted(async () => {
   await authStore.restoreSession();
-  if (sessionStore.sessionId) {
-    await refreshSession();
-    view.value = sessionStore.role === 'gm' ? 'editor' : 'play';
-  }
+});
+onBeforeUnmount(() => {
+  coopStore.disconnect();
 });
 </script>
 
@@ -76,21 +64,19 @@ onMounted(async () => {
     <header class="app-header">
       <div class="app-header-left">
         <div class="app-brand">Tower Defense</div>
-        <div v-if="isAuthed && sessionId" class="app-nav">
-          <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Лобби</button>
-          <button v-if="role === 'gm'" class="nav-button" :class="{ active: view === 'editor' }" @click="view='editor'">Редактор карты</button>
-          <button class="nav-button" :class="{ active: view === 'game' }" @click="view='game'">Играть (TD)</button>
-          <button class="nav-button" :class="{ active: view === 'play' }" @click="view='play'">Просмотр карты</button>
+        <div v-if="isAuthed" class="app-nav">
+          <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Co-op лобби</button>
+          <button class="nav-button" :class="{ active: view === 'game' }" @click="view='game'">
+            {{ coopStore.sessionId && coopPhase === 'playing' ? 'Игра (co-op)' : 'Одиночная игра' }}
+          </button>
         </div>
       </div>
       <div v-if="isAuthed" class="app-header-right">
         <div class="user-meta">
           <span>{{ username }}</span>
-          <span class="muted">({{ accountRoleLabel }})</span>
-          <span v-if="roleLabel" class="muted">({{ roleLabel }})</span>
+          <span v-if="coopStore.sessionId" class="muted">· {{ coopStore.isHost ? 'хост' : 'гость' }}</span>
         </div>
-        <div v-if="sessionId" class="muted">Сессия: {{ sessionId }}</div>
-        <div class="muted">{{ wsStatus }}</div>
+        <button v-if="view === 'game' && coopPhase === 'playing'" class="btn ghost" @click="backToLobby">В лобби</button>
         <button class="btn ghost" @click="logout">Выйти</button>
       </div>
     </header>
@@ -98,34 +84,8 @@ onMounted(async () => {
     <div class="app-body">
       <LoginForm v-if="!isAuthed" @authed="handleAuthed" />
       <template v-else>
-        <div v-if="view==='lobby'" class="lobby">
-          <div v-if="authStore.defaultRole === 'gm'" class="lobby-card">
-            <div class="card-title">Создать сессию (ведущий)</div>
-            <div class="card-help">Создаёт новую игру, вы — ведущий.</div>
-            <button class="btn primary" :disabled="sessionStore.isLoading" @click="hostSession">Создать сессию</button>
-            <button v-if="sessionId && role==='gm'" class="btn danger" @click="resetCurrentSession">Сбросить сессию</button>
-          </div>
-
-          <div class="lobby-card">
-            <div class="card-title">Присоединиться к сессии</div>
-            <label class="field-label">ID сессии</label>
-            <input v-model="joiningId" class="input" placeholder="введите ID сессии" />
-            <label class="field-label">Имя персонажа</label>
-            <input v-model="characterName" class="input" placeholder="необязательно" />
-            <button class="btn primary" :disabled="sessionStore.isLoading" @click="joinExisting">Подключиться</button>
-          </div>
-
-          <div v-if="sessionId" class="lobby-card">
-            <div class="card-title">Текущая сессия</div>
-            <div>ID: {{ sessionId }}</div>
-            <div>Роль: {{ roleLabel || 'неизвестно' }}</div>
-            <button class="btn ghost" @click="refreshSession">Обновить</button>
-          </div>
-        </div>
-
-        <MapEditor v-else-if="view==='editor'" />
-        <Game v-else-if="view==='game'" />
-        <Play v-else />
+        <CoopLobby v-if="view==='lobby'" @start-game="onStartGame" />
+        <Game v-else @back-to-lobby="onBackToLobby" />
       </template>
     </div>
   </div>
@@ -202,62 +162,15 @@ button {
   display: flex;
   flex-direction: column;
 }
-.lobby {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-  padding: 16px;
-}
-.lobby-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  color: #0f172a;
-}
-.card-title {
-  font-weight: 700;
-}
-.card-help {
-  color: #64748b;
-  font-size: 13px;
-}
-.field-label {
-  font-size: 12px;
-  color: #475569;
-}
-.input {
-  border: 1px solid #cbd5f5;
-  border-radius: 8px;
-  padding: 6px 8px;
-  width: 100%;
-}
-.input.small {
-  width: 80px;
-}
-.input.tiny {
-  width: 60px;
-}
 .btn {
   border: none;
   border-radius: 8px;
   padding: 8px 12px;
   font-weight: 600;
 }
-.btn.primary {
-  background: #2563eb;
-  color: #fff;
-}
 .btn.ghost {
   background: #f1f5f9;
   color: #0f172a;
   border: 1px solid #e2e8f0;
-}
-.btn.danger {
-  background: #dc2626;
-  color: #fff;
 }
 </style>

@@ -75,7 +75,13 @@ export interface GameSimConfig {
 const MAX_STEPS_PER_FRAME = 6;
 
 export class GameSim {
-  readonly state: GameSnapshot;
+  /**
+   * Авторитетное состояние сима. Внешний код читает через геттер `state`
+   * (immutable-семантика); внутренние методы и гостевой reconcile/applyRenderState
+   * (Phase 7) мутируют через приватное `_state`.
+   */
+  private _state: GameSnapshot;
+  get state(): GameSnapshot { return this._state; }
   readonly catalog: GameCatalog;
   readonly map: MapDocument;
   private readonly enemyTypes: Map<string, import('@tower/shared').EnemyType>;
@@ -100,6 +106,8 @@ export class GameSim {
   private prevStatus: GameSnapshot['status'] = 'prep';
   /** Кеш модификаторов размещённых реликвий (appliedRelicEffects). */
   private relicMods: RelicModifiers = EMPTY_MODS;
+  /** Последний routeVersion, применённый в гостевом режиме (для recompute-гарда). */
+  private lastAppliedRouteVersion = -1;
 
   constructor(config: GameSimConfig) {
     this.map = config.map;
@@ -122,7 +130,7 @@ export class GameSim {
     this.routePath = buildPath(config.map.path.waypoints, config.map.grid, config.map.heightmap);
 
     const lives = Number(config.map.base.hp) || 20;
-    this.state = {
+    this._state = {
       tick: 0,
       status: 'prep',
       waveIndex: -1,
@@ -261,6 +269,36 @@ export class GameSim {
   /** Глубокая копия состояния (snapshot для UI/сети). */
   serialize(): GameSnapshot {
     return structuredClone(this.state);
+  }
+
+  /**
+   * Заменяет внутреннее состояние авторитетным снапшотом хоста (Phase 7).
+   * Используется гостем: он НЕ шагает сим, а рендерит reconcile-нутые состояния.
+   * Маршрут врагов и кеш реликвий пересчитываются от новых стен/реликий,
+   * чтобы `getRouteWaypoints()`/`getRelicMods()` оставались консистентны для рендера.
+   */
+  reconcile(snapshot: GameSnapshot): void {
+    this._state = structuredClone(snapshot);
+    // пересчитать маршрут от текущих стен (renderer overlay читает getRouteWaypoints)
+    this.recomputeRoute(false);
+    // установить кеш реликвий БЕЗ rescale стен (снапшот хоста уже содержит
+    // корректные hp/maxHp с учётом его own relicMods)
+    this.relicMods = computeRelicModifiers(this.state.relics, this.relicTypes, this.towerTypes);
+    this.lastAppliedRouteVersion = snapshot.routeVersion;
+  }
+
+  /**
+   * Покадровое обновление состояния для гостевого рендера (Phase 7).
+   * В отличие от reconcile — НЕ клонирует (объект принадлежит GuestSync и каждый
+   * кадр свежий) и пересчитывает маршрут только при смене routeVersion (A* дорогой).
+   * relicMods НЕ пересчитывается (гость не запускает боевые системы).
+   */
+  applyRenderState(snapshot: GameSnapshot): void {
+    this._state = snapshot;
+    if (snapshot.routeVersion !== this.lastAppliedRouteVersion) {
+      this.lastAppliedRouteVersion = snapshot.routeVersion;
+      this.recomputeRoute(false);
+    }
   }
 
   getTowerType(id: string): TowerType | undefined {

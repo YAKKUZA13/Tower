@@ -17,11 +17,10 @@ interface GameSessionRow extends QueryResultRow {
 interface ParticipantRow extends QueryResultRow {
   user_id: string;
   username: string;
-  character_name: string | null;
   role: 'gm' | 'player' | 'spectator';
 }
 
-function toGameSession(row?: GameSessionRow, players: GameParticipant[] = []): GameSession | null {
+function toGameSession(row: GameSessionRow | undefined, players: GameParticipant[] = []): GameSession | null {
   if (!row) return null;
   return {
     sessionId: row.session_id,
@@ -39,7 +38,7 @@ function toGameSession(row?: GameSessionRow, players: GameParticipant[] = []): G
 
 export async function readParticipants(sessionId: string): Promise<GameParticipant[]> {
   const res = await query<ParticipantRow>(
-    `SELECT user_id, username, character_name, role
+    `SELECT user_id, username, role
      FROM game_participants
      WHERE session_id = $1
      ORDER BY joined_at ASC`,
@@ -48,7 +47,6 @@ export async function readParticipants(sessionId: string): Promise<GameParticipa
   return res.rows.map(row => ({
     userId: row.user_id,
     username: row.username,
-    characterName: row.character_name || '',
     role: row.role
   }));
 }
@@ -80,8 +78,8 @@ export async function insertSessionWithGm(client: PoolClient, session: GameSessi
     ]
   );
   await client.query(
-    `INSERT INTO game_participants (session_id, user_id, username, character_name, role, joined_at)
-     VALUES ($1, $2, $3, '', 'gm', $4)
+    `INSERT INTO game_participants (session_id, user_id, username, role, joined_at)
+     VALUES ($1, $2, $3, 'gm', $4)
      ON CONFLICT (session_id, user_id) DO NOTHING`,
     [session.sessionId, session.gmUserId, session.gmName, session.createdAt]
   );
@@ -91,15 +89,14 @@ export async function upsertPlayerParticipant(
   sessionId: string,
   userId: string,
   username: string,
-  characterName: string,
   joinedAt: number
 ): Promise<void> {
   await query(
-    `INSERT INTO game_participants (session_id, user_id, username, character_name, role, joined_at)
-     VALUES ($1, $2, $3, $4, 'player', $5)
+    `INSERT INTO game_participants (session_id, user_id, username, role, joined_at)
+     VALUES ($1, $2, $3, 'player', $4)
      ON CONFLICT (session_id, user_id)
-     DO UPDATE SET character_name = EXCLUDED.character_name, username = EXCLUDED.username`,
-    [sessionId, userId, username, characterName, joinedAt]
+     DO UPDATE SET username = EXCLUDED.username`,
+    [sessionId, userId, username, joinedAt]
   );
 }
 

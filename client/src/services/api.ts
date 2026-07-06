@@ -1,19 +1,8 @@
 import type { AuthResponse, AuthUser, RegisterCredentials } from '../domain/auth';
 import type { GameSession } from '../domain/game-session';
-import type { MapDocument } from '../domain/map';
-import { clearStoredGameRole, clearStoredSessionId, getAuthToken, getStoredSessionId } from './token-storage';
+import { getAuthToken, getStoredSessionId } from './token-storage';
 
 const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
-
-export interface AssetRecord {
-  id: string;
-  ownerUserId?: string | null;
-  name: string;
-  mime: string;
-  file?: string;
-  size: number;
-  createdAt?: number;
-}
 
 class ApiError extends Error {
   constructor(
@@ -40,10 +29,6 @@ async function readJsonOrThrow<T>(res: Response, errorPrefix: string): Promise<T
     throw new ApiError(`${errorPrefix}:${res.status}:${txt}`, res.status, txt);
   }
   return await res.json() as T;
-}
-
-function isStaleSessionError(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404 && error.body.includes('session_not_found');
 }
 
 export async function register(payload: RegisterCredentials): Promise<AuthResponse> {
@@ -80,35 +65,7 @@ export async function getMe(): Promise<AuthUser> {
   return await readJsonOrThrow<AuthUser>(res, 'me_failed');
 }
 
-export async function getMap(): Promise<MapDocument> {
-  const sessionId = getStoredSessionId();
-  const res = await fetch(`${BASE}/map`, {
-    method: 'GET',
-    headers: authHeaders(sessionId ? { 'x-session-id': sessionId } : {})
-  });
-  return await readJsonOrThrow<MapDocument>(res, 'map_load_failed');
-}
-
-export async function saveMap(map: MapDocument): Promise<{ ok: boolean }> {
-  const sessionId = getStoredSessionId();
-  try {
-    return await saveMapForSession(map, sessionId);
-  } catch (error) {
-    if (!sessionId || !isStaleSessionError(error)) throw error;
-    clearStoredSessionId();
-    clearStoredGameRole();
-    return await saveMapForSession(map, '');
-  }
-}
-
-async function saveMapForSession(map: MapDocument, sessionId: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${BASE}/map`, {
-    method: 'POST',
-    headers: authHeaders(sessionId ? { 'x-session-id': sessionId } : {}),
-    body: JSON.stringify(map)
-  });
-  return await readJsonOrThrow<{ ok: boolean }>(res, 'map_save_failed');
-}
+// ── Co-op session endpoints (rooms) ──────────────────────────────────────
 
 export async function createSession(): Promise<GameSession> {
   const res = await fetch(`${BASE}/session/session`, {
@@ -119,11 +76,11 @@ export async function createSession(): Promise<GameSession> {
   return await readJsonOrThrow<GameSession>(res, 'session_create_failed');
 }
 
-export async function joinSession(sessionId: string, characterName = ''): Promise<GameSession> {
+export async function joinSession(sessionId: string): Promise<GameSession> {
   const res = await fetch(`${BASE}/session/join`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ sessionId, characterName })
+    body: JSON.stringify({ sessionId })
   });
   return await readJsonOrThrow<GameSession>(res, 'session_join_failed');
 }
@@ -145,28 +102,54 @@ export async function resetSession(sessionId: string): Promise<{ ok: boolean }> 
   return await readJsonOrThrow<{ ok: boolean }>(res, 'session_reset_failed');
 }
 
-export async function listAssets(): Promise<AssetRecord[]> {
-  const res = await fetch(`${BASE}/assets`, { headers: authHeaders() });
-  return await readJsonOrThrow<AssetRecord[]>(res, 'assets_list_failed');
+// ── Phase 8: результаты забегов + лидерборды ──────────────────────────────
+
+export interface RunPayload {
+  outcome: 'won' | 'lost';
+  wavesCleared: number;
+  gold: number;
+  lives: number;
+  mapId?: string;
+  mode?: 'single' | 'coop';
+  durationSec?: number;
 }
 
-export async function uploadAsset({ name, dataBase64, mime }: { name: string; dataBase64: string; mime: string }): Promise<AssetRecord> {
-  const res = await fetch(`${BASE}/assets/upload`, {
+export interface RunResultResponse {
+  ok: boolean;
+  wins: number;
+  losses: number;
+  newRewards: Array<{ id: string; label: string }>;
+}
+
+export interface LeaderboardEntry {
+  id: string;
+  userId: string;
+  username: string;
+  outcome: 'won' | 'lost';
+  wavesCleared: number;
+  gold: number;
+  lives: number;
+  mode: string;
+  createdAt: number;
+}
+
+export async function submitRun(payload: RunPayload): Promise<RunResultResponse> {
+  const sessionId = getStoredSessionId();
+  const res = await fetch(`${BASE}/run`, {
     method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ name, dataBase64, mime })
+    headers: authHeaders(sessionId ? { 'x-session-id': sessionId } : {}),
+    body: JSON.stringify(payload)
   });
-  return await readJsonOrThrow<AssetRecord>(res, 'asset_upload_failed');
+  return await readJsonOrThrow<RunResultResponse>(res, 'run_submit_failed');
 }
 
-export async function deleteAsset(id: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${BASE}/assets/${id}`, {
-    method: 'DELETE',
+export async function getLeaderboard(mapId?: string, limit = 20): Promise<LeaderboardEntry[]> {
+  const params = new URLSearchParams();
+  if (mapId) params.set('map', mapId);
+  params.set('limit', String(limit));
+  const res = await fetch(`${BASE}/run/leaderboard?${params.toString()}`, {
     headers: authHeaders()
   });
-  return await readJsonOrThrow<{ ok: boolean }>(res, 'asset_delete_failed');
-}
-
-export function getAssetModelUrl(asset: Pick<AssetRecord, 'id' | 'name'>): string {
-  return `${BASE}/assets/${asset.id}/${encodeURIComponent(asset.name)}`;
+  const data = await readJsonOrThrow<{ entries: LeaderboardEntry[] }>(res, 'leaderboard_failed');
+  return data.entries;
 }
