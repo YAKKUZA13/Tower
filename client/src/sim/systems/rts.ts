@@ -71,12 +71,62 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
     const type = unitTypes.get(unit.typeId);
     if (!type) continue;
 
+    unit.cooldown = Math.max(0, unit.cooldown - dt);
+
+    // ── M8.2: прямой приказ игрока override AI (move/attack). ──
+    const hasMoveOrder = unit.moveOrderCol !== undefined && unit.moveOrderRow !== undefined;
+    const attackOrderId = unit.attackOrderEnemyId;
+    let moveTarget: { x: number; z: number } | null = null;
+
+    if (attackOrderId) {
+      // приказ атаки: цель = указанный враг (если жив)
+      const ordered = enemies.find((e) => e.id === attackOrderId && e.alive);
+      if (ordered) {
+        moveTarget = { x: ordered.position.x, z: ordered.position.z };
+        if (unit.cooldown <= 0) {
+          const dx = ordered.position.x - unit.position.x;
+          const dz = ordered.position.z - unit.position.z;
+          const hitRadius = Math.max(grid.cellSize * 0.6, type.range * grid.cellSize - grid.cellSize * 0.2);
+          if (dx * dx + dz * dz <= hitRadius * hitRadius) {
+            const died = applyUnitDamage(ordered, type.damage);
+            if (died) killed += 1;
+            unit.cooldown += 1 / Math.max(1e-3, type.fireRate);
+            unit.targetEnemyId = ordered.id;
+          }
+        }
+      } else {
+        unit.attackOrderEnemyId = null; // цель мертва → снять приказ
+      }
+    } else if (hasMoveOrder) {
+      moveTarget = gridToWorldData(grid, unit.moveOrderCol!, unit.moveOrderRow!);
+    }
+
+    if (moveTarget) {
+      const dx = moveTarget.x - unit.position.x;
+      const dz = moveTarget.z - unit.position.z;
+      const distSq = dx * dx + dz * dz;
+      const eps = grid.cellSize * 0.15;
+      if (distSq > eps * eps && type.speed > 0) {
+        const dist = Math.sqrt(distSq);
+        const step = type.speed * grid.cellSize * dt;
+        const k = Math.min(1, step / dist);
+        unit.position.x += dx * k;
+        unit.position.z += dz * k;
+        const g = worldToColRow(grid, unit.position);
+        unit.col = g.col;
+        unit.row = g.row;
+      } else if (hasMoveOrder && !attackOrderId) {
+        // достигли точки приказа движения → снять
+        unit.moveOrderCol = undefined;
+        unit.moveOrderRow = undefined;
+      }
+      continue; // приказ обрабатывает движение; AI skip
+    }
+
     // цель: либо прежняя (если жива и в пределах агро), либо ближайший враг
     const range = type.range;
     const rangeWorld = range * grid.cellSize;
     let target = pickUnitTarget(unit, type, enemies, grid, rangeWorld);
-
-    unit.cooldown = Math.max(0, unit.cooldown - dt);
 
     if (target) {
       // цель есть — двигаемся/атакуем

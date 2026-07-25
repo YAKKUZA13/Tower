@@ -1,0 +1,44 @@
+{
+  "format_version": 3,
+  "name": "ice_tower",
+  "palette": "default",
+  "seed": 44,
+  "units": [
+    {
+      "type": "Part", "id": "base", "asset": "box",
+      "params": { "w": { "Float": 5.0 }, "h": { "Float": 1.0 }, "d": { "Float": 5.0 } },
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone"
+    },
+    {
+      "type": "Part", "id": "spire_low", "asset": "cylinder",
+      "params": { "r": { "Float": 1.8 }, "h": { "Float": 2.4 }, "segments": { "Uint": 12 } },
+      "at": { "type": "OnTopOf", "target": "base", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone_warm"
+    },
+    {
+      "type": "Part", "id": "spire_mid", "asset": "cylinder",
+      "params": { "r": { "Float": 1.2 }, "h": { "Float": 2.0 }, "segments": { "Uint": 12 } },
+      "at": { "type": "OnTopOf", "target": "spire_low", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone"
+    },
+    {
+      "type": "Part", "id": "spire_top", "asset": "cylinder",
+      "params": { "r": { "Float": 0.7 }, "h": { "Float": 1.6 }, "segments": { "Uint": 12 } },
+      "at": { "type": "OnTopOf", "target": "spire_mid", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone_warm"
+    },
+    {
+      "type": "Part", "id": "ice_crystal", "asset": "crystal",
+      "params": { "r": { "Float": 0.8 }, "h": { "Float": 1.8 } },
+      "at": { "type": "OnTopOf", "target": "spire_top", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "metal"
+    },
+    {
+      "type": "Part", "id": "icicle_fl", "asset": "cylinder",
+      "params": { "r": { "Float": 0.22 }, "h": { "Float": 1.2 }, "segments": { "Uint": 6 } },
+      "at": { "type": "Origin", "offset": [-1.8, 1.0, 0.0] }, "rotation": [0.0, 0.0, 0.0], "label": "stone_warm"
+    },
+    { "type": "Mirror", "id": "icicle_fr", "of": "icicle_fl" }
+  ]
+}

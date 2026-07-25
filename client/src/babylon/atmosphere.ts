@@ -55,6 +55,18 @@ export interface AtmosphereOptions {
   board?: { width: number; height: number };
   /** TypeId врагов, которые несут «глазной» PointLight (обычно boss-категория). */
   bossTypeIds?: Set<string>;
+  // ── M8-fix: brightness overrides (RTS-карты большие + ortho-камера → TD-значения
+  //    давят кадр в темноту; для RTS передаём более светлые значения из RtsGame). ──
+  /** Плотность экспоненциального fog (TD default 0.006). RTS → ~0.003. */
+  fogDensity?: number;
+  /** ACES tonemap exposure (TD default 1.1). RTS → ~1.35. */
+  exposure?: number;
+  /** Веса виньетки (TD default 2.4 — тяжёлая). RTS → ~1.2. */
+  vignetteWeight?: number;
+  /** Интенсивность hemispheric ambient-fill (TD default 0.7). RTS → ~0.95 (светлее). */
+  ambientIntensity?: number;
+  /** Интенсивность направленного sun (TD default 0.9). RTS → ~1.15. */
+  sunIntensity?: number;
 }
 
 export class AtmosphereRenderer {
@@ -98,7 +110,7 @@ export class AtmosphereRenderer {
     this.sun = new DirectionalLight('sun', sunDir, scene);
     // позиция — высоко над центром, против направления (для фрустума теней)
     this.sun.position = new Vector3(-sunDir.x * this.skyHeight * 1.4, this.skyHeight * 1.3, -sunDir.z * this.skyHeight * 1.4);
-    this.sun.intensity = 0.9;
+    this.sun.intensity = options.sunIntensity ?? 0.9;
     this.sun.diffuse = DAY_SUN_COLOR.clone();
 
     // ── Тени (PCF, low-med map). Только акторы — регистрируются через addShadowCaster. ──
@@ -115,7 +127,7 @@ export class AtmosphereRenderer {
     if (this.ground) this.ground.receiveShadows = true;
 
     // ── HemisphericLight → умеренный sky/ground fill (фон держим тёмным) ──
-    this.hemispheric.intensity = 0.7;
+    this.hemispheric.intensity = options.ambientIntensity ?? 0.7;
     this.hemispheric.diffuse = DAY_SKY_COLOR.clone();
     this.hemispheric.groundColor = DAY_GROUND_COLOR.clone();
 
@@ -147,10 +159,10 @@ export class AtmosphereRenderer {
     this.pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
     // TD-101: пост-процесс ослаблен — ACES+contrast+vignette ранее дробили
     // полутона в чёрное, фигурки терялись. exposure↑, contrast↓, vignette↓.
-    this.pipeline.imageProcessing.exposure = 1.1;
+    this.pipeline.imageProcessing.exposure = options.exposure ?? 1.1;
     this.pipeline.imageProcessing.contrast = 1.12;
     this.pipeline.imageProcessing.vignetteEnabled = true;
-    this.pipeline.imageProcessing.vignetteWeight = 2.4;
+    this.pipeline.imageProcessing.vignetteWeight = options.vignetteWeight ?? 2.4;
     this.pipeline.imageProcessing.vignetteStretch = 0.35;
     this.pipeline.imageProcessing.vignetteColor = new Color4(0, 0, 0, 1);
 
@@ -165,7 +177,7 @@ export class AtmosphereRenderer {
     // ── Ястрый светлый fog + clearColor (фиксированный «день») ──
     scene.fogMode = Scene.FOGMODE_EXP2;
     scene.fogColor = DAY_FOG_COLOR.clone();
-    scene.fogDensity = BASE_FOG_DENSITY;
+    scene.fogDensity = options.fogDensity ?? BASE_FOG_DENSITY;
     const cc = scene.clearColor;
     cc.r = DAY_FOG_COLOR.r; cc.g = DAY_FOG_COLOR.g; cc.b = DAY_FOG_COLOR.b; cc.a = 1;
 
@@ -237,6 +249,11 @@ export class AtmosphereRenderer {
     this.shadowGen.addShadowCaster(mesh, false);
     const mat = mesh.material as { receiveShadows?: boolean } | null;
     if (mat) mat.receiveShadows = true;
+  }
+
+  /** Снять меш с кастинга теней (M4: per-clone LOD — клоны добавляются/убираются при спавне/смерти). */
+  removeShadowCaster(mesh: Mesh): void {
+    this.shadowGen.removeShadowCaster(mesh);
   }
 
   /** Прицепить свечение к маркеру базы (алтарь). Вызывается после построения LevelOverlay. */

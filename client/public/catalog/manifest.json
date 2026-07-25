@@ -1,34 +1,54 @@
 {
   "version": 1,
-  "$comment": "Каталог моделей TD (ADR-5). Записи без glbPath рендерятся процедурными воксель-моделями (client/src/babylon/voxel). Чтобы подключить реальные CC0 GLB — положите файлы в соответствующие подпапки и добавьте glbPath. Процедурные модели авторства проекта (CC0-эквивалент).",
+  "$comment": "Каталог моделей TD (ADR-5). Post-MVP: реальные CC0 GLB (Quaternius Cube World Kit, Aug 2023) подключены для ключевых врагов и персонажей через glbPath. Процедурные воксель-модели остаются как fallback и для слотов, где нет GLB (башни, стены, реликвии, тайлы, slime/bat/spider/ghost). См. README.md в этой папке для расширения.",
   "entries": [
-    { "catalogId": "tower:arrow",  "kind": "tower",      "builder": "tower:arrow",  "baseColor": [0.27, 0.18, 0.10], "emissive": [0.95, 0.45, 0.12] },
-    { "catalogId": "tower:cannon", "kind": "tower",      "builder": "tower:cannon", "baseColor": [0.34, 0.35, 0.40], "emissive": [1.00, 0.85, 0.40] },
-    { "catalogId": "tower:arcane", "kind": "tower",      "builder": "tower:arcane", "baseColor": [0.30, 0.30, 0.33], "emissive": [0.55, 0.28, 0.85] },
-    { "catalogId": "tower:ice",    "kind": "tower",      "builder": "tower:ice",    "baseColor": [0.55, 0.55, 0.58], "emissive": [0.45, 0.82, 0.95] },
-    { "catalogId": "enemy:skeleton", "kind": "enemy",    "builder": "enemy:skeleton", "baseColor": [0.74, 0.71, 0.62], "emissive": [1.00, 0.18, 0.12] },
-    { "catalogId": "enemy:goblin",   "kind": "enemy",    "builder": "enemy:goblin",   "baseColor": [0.36, 0.40, 0.32], "emissive": [1.00, 0.55, 0.10] },
-    { "catalogId": "enemy:zombie",   "kind": "enemy",    "builder": "enemy:zombie",   "baseColor": [0.24, 0.28, 0.22], "emissive": [1.00, 0.18, 0.12] },
-    { "catalogId": "enemy:demon",    "kind": "enemy",    "builder": "enemy:demon",    "baseColor": [0.16, 0.17, 0.20], "emissive": [1.00, 0.55, 0.10] },
-    { "catalogId": "enemy:boss",     "kind": "enemy",    "builder": "enemy:boss",     "baseColor": [0.16, 0.17, 0.20], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "tower:arrow",  "kind": "tower",      "builder": "tower:arrow",  "recipePath": "towers/arrow.json",  "baseColor": [0.27, 0.18, 0.10], "emissive": [0.95, 0.45, 0.12] },
+    { "catalogId": "tower:cannon", "kind": "tower",      "builder": "tower:cannon", "recipePath": "towers/cannon.json", "baseColor": [0.34, 0.35, 0.40], "emissive": [1.00, 0.85, 0.40] },
+    { "catalogId": "tower:arcane", "kind": "tower",      "builder": "tower:arcane", "recipePath": "towers/arcane.json", "baseColor": [0.30, 0.30, 0.33], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "tower:ice",    "kind": "tower",      "builder": "tower:ice",    "recipePath": "towers/ice.json",    "baseColor": [0.55, 0.55, 0.58], "emissive": [0.45, 0.82, 0.95] },
+
+    { "catalogId": "enemy:skeleton", "kind": "enemy", "glbPath": "enemies/skeleton.gltf", "builder": "enemy:skeleton", "baseColor": [0.74, 0.71, 0.62], "emissive": [1.00, 0.18, 0.12], "rotationY": 0 },
+    { "catalogId": "enemy:goblin",   "kind": "enemy", "glbPath": "enemies/goblin.gltf",   "builder": "enemy:goblin",   "baseColor": [0.36, 0.40, 0.32], "emissive": [1.00, 0.55, 0.10] },
+    { "catalogId": "enemy:zombie",   "kind": "enemy", "glbPath": "enemies/zombie.gltf",   "builder": "enemy:zombie",   "baseColor": [0.24, 0.28, 0.22], "emissive": [1.00, 0.18, 0.12] },
+    { "catalogId": "enemy:demon",    "kind": "enemy", "glbPath": "enemies/demon.gltf",    "builder": "enemy:demon",    "baseColor": [0.16, 0.17, 0.20], "emissive": [1.00, 0.55, 0.10] },
+    { "catalogId": "enemy:boss",     "kind": "enemy", "glbPath": "enemies/giant.gltf",    "builder": "enemy:boss",     "baseColor": [0.16, 0.17, 0.20], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "enemy:wizard",   "kind": "enemy", "glbPath": "enemies/wizard.gltf",   "builder": "enemy:demon",    "baseColor": [0.20, 0.18, 0.30], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "enemy:yeti",     "kind": "enemy", "glbPath": "enemies/yeti.gltf",     "builder": "enemy:demon",    "baseColor": [0.55, 0.55, 0.58], "emissive": [0.45, 0.82, 0.95] },
+    { "catalogId": "enemy:skeleton_armor", "kind": "enemy", "glbPath": "enemies/skeleton_armor.gltf", "builder": "enemy:skeleton", "baseColor": [0.50, 0.50, 0.55], "emissive": [1.00, 0.18, 0.12] },
+    { "catalogId": "enemy:slime",    "kind": "enemy",    "builder": "enemy:slime",    "baseColor": [0.20, 0.32, 0.18], "emissive": [0.55, 0.28, 0.85], "alpha": 0.92 },
+    { "catalogId": "enemy:bat",      "kind": "enemy",    "builder": "enemy:bat",      "baseColor": [0.12, 0.12, 0.14], "emissive": [1.00, 0.18, 0.12] },
+    { "catalogId": "enemy:spider",   "kind": "enemy",    "builder": "enemy:spider",   "baseColor": [0.14, 0.12, 0.16], "emissive": [1.00, 0.18, 0.12] },
+    { "catalogId": "enemy:ghost",    "kind": "enemy",    "builder": "enemy:ghost",    "baseColor": [0.55, 0.62, 0.72], "emissive": [0.45, 1.00, 0.75], "alpha": 0.78 },
+
     { "catalogId": "base:altar",     "kind": "base",     "builder": "base:altar",     "baseColor": [0.30, 0.30, 0.33], "emissive": [0.45, 1.00, 0.75] },
     { "catalogId": "spawn:portal",   "kind": "spawn",    "builder": "spawn:portal",   "baseColor": [0.16, 0.17, 0.20], "emissive": [0.95, 0.45, 0.12] },
     { "catalogId": "projectile:bolt","kind": "projectile","builder": "projectile:bolt","baseColor": [0.52, 0.53, 0.58], "emissive": [1.00, 0.85, 0.40] },
+
     { "catalogId": "wall:wood",  "kind": "wall", "builder": "wall:wood",  "baseColor": [0.27, 0.18, 0.10] },
     { "catalogId": "wall:stone", "kind": "wall", "builder": "wall:stone", "baseColor": [0.42, 0.42, 0.46] },
     { "catalogId": "wall:bone",  "kind": "wall", "builder": "wall:bone",  "baseColor": [0.74, 0.71, 0.62], "emissive": [1.00, 0.18, 0.12] },
+
     { "catalogId": "relic:totem-fire",   "kind": "relic", "builder": "relic:totem-fire",   "baseColor": [0.30, 0.26, 0.22], "emissive": [0.95, 0.45, 0.12] },
     { "catalogId": "relic:totem-arcane", "kind": "relic", "builder": "relic:totem-arcane", "baseColor": [0.26, 0.24, 0.34], "emissive": [0.55, 0.28, 0.85] },
     { "catalogId": "relic:totem-gold",   "kind": "relic", "builder": "relic:totem-gold",   "baseColor": [0.40, 0.34, 0.20], "emissive": [0.83, 0.66, 0.22] },
     { "catalogId": "relic:totem-ice",    "kind": "relic", "builder": "relic:totem-ice",    "baseColor": [0.46, 0.52, 0.58], "emissive": [0.45, 0.82, 0.95] },
     { "catalogId": "relic:totem-blood",  "kind": "relic", "builder": "relic:totem-blood",  "baseColor": [0.32, 0.24, 0.22], "emissive": [0.62, 0.10, 0.10] },
-    { "catalogId": "building:sawmill",   "kind": "building", "builder": "building:sawmill",   "baseColor": [0.27, 0.18, 0.10], "emissive": [0.95, 0.45, 0.12] },
-    { "catalogId": "building:mine",      "kind": "building", "builder": "building:mine",      "baseColor": [0.42, 0.42, 0.46], "emissive": [0.83, 0.66, 0.22] },
-    { "catalogId": "building:smelter",   "kind": "building", "builder": "building:smelter",   "baseColor": [0.42, 0.42, 0.46], "emissive": [1.00, 0.85, 0.40] },
-    { "catalogId": "building:barracks",  "kind": "building", "builder": "building:barracks",  "baseColor": [0.42, 0.42, 0.46], "emissive": [0.62, 0.10, 0.10] },
-    { "catalogId": "unit:knight",        "kind": "unit", "builder": "unit:knight",        "baseColor": [0.34, 0.35, 0.40], "emissive": [0.45, 1.00, 0.75] },
-    { "catalogId": "unit:archer",        "kind": "unit", "builder": "unit:archer",        "baseColor": [0.36, 0.40, 0.32], "emissive": [0.83, 0.66, 0.22] },
-    { "catalogId": "unit:mage",          "kind": "unit", "builder": "unit:mage",          "baseColor": [0.30, 0.30, 0.33], "emissive": [0.55, 0.28, 0.85] },
-    { "catalogId": "unit:commander",     "kind": "unit", "builder": "unit:commander",     "baseColor": [0.30, 0.30, 0.33], "emissive": [0.78, 0.55, 1.00] }
+
+    { "catalogId": "building:sawmill",   "kind": "building", "builder": "building:sawmill",   "recipePath": "buildings/sawmill.json",  "baseColor": [0.27, 0.18, 0.10], "emissive": [0.95, 0.45, 0.12] },
+    { "catalogId": "building:mine",      "kind": "building", "builder": "building:mine",      "recipePath": "buildings/mine.json",     "baseColor": [0.42, 0.42, 0.46], "emissive": [0.83, 0.66, 0.22] },
+    { "catalogId": "building:smelter",   "kind": "building", "builder": "building:smelter",   "recipePath": "buildings/smelter.json",  "baseColor": [0.42, 0.42, 0.46], "emissive": [1.00, 0.85, 0.40] },
+    { "catalogId": "building:barracks",  "kind": "building", "builder": "building:barracks",  "recipePath": "buildings/barracks.json", "baseColor": [0.42, 0.42, 0.46], "emissive": [0.62, 0.10, 0.10] },
+
+    { "catalogId": "unit:knight",    "kind": "unit", "glbPath": "characters/knight.gltf",    "builder": "unit:knight",    "baseColor": [0.34, 0.35, 0.40], "emissive": [0.45, 1.00, 0.75] },
+    { "catalogId": "unit:archer",    "kind": "unit", "glbPath": "characters/archer.gltf",    "builder": "unit:archer",    "baseColor": [0.36, 0.40, 0.32], "emissive": [0.83, 0.66, 0.22] },
+    { "catalogId": "unit:mage",      "kind": "unit", "glbPath": "characters/mage.gltf",      "builder": "unit:mage",      "baseColor": [0.30, 0.30, 0.33], "emissive": [0.55, 0.28, 0.85] },
+    { "catalogId": "unit:commander", "kind": "unit", "glbPath": "characters/commander.gltf", "builder": "unit:commander", "baseColor": [0.30, 0.30, 0.33], "emissive": [0.78, 0.55, 1.00] },
+
+    { "catalogId": "tile:grass", "kind": "tile", "builder": "tile:grass", "baseColor": [0.20, 0.30, 0.16] },
+    { "catalogId": "tile:dirt",  "kind": "tile", "builder": "tile:dirt",  "baseColor": [0.20, 0.17, 0.11] },
+    { "catalogId": "tile:road",  "kind": "tile", "builder": "tile:road",  "baseColor": [0.42, 0.42, 0.46] },
+    { "catalogId": "tile:water", "kind": "tile", "builder": "tile:water", "baseColor": [0.05, 0.10, 0.18], "emissive": [0.45, 1.00, 0.75] },
+    { "catalogId": "tile:rock",  "kind": "tile", "builder": "tile:rock",  "baseColor": [0.42, 0.42, 0.46] },
+    { "catalogId": "tile:sand",  "kind": "tile", "builder": "tile:sand",  "baseColor": [0.50, 0.42, 0.28] }
   ]
 }

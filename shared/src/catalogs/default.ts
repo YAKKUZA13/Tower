@@ -12,7 +12,9 @@ import type {
   ProductionBuildingType,
   ResourceId
 } from '../types/economy.js';
+import type { UpgradeType } from '../types/economy.js';
 import type { GameCatalog } from '../types/sim.js';
+import { buildRtsCatalogExtension } from './rts-catalog.js';
 
 // ── Башни (4) ────────────────────────────────────────────────────────
 export const DEFAULT_TOWER_TYPES: TowerType[] = [
@@ -146,6 +148,116 @@ export const DEFAULT_ENEMY_TYPES: EnemyType[] = [
     armor: 10,
     flies: false,
     modelRef: { catalogId: 'enemy:boss', scale: 1 }
+  },
+  // ── Post-MVP: разнообразные силуэты (variety). Не входят в DEFAULT_WAVES;
+  //    используются в новых картах (graveyard/swamp). Доступны для кастомных сценариев.
+  {
+    id: 'slime',
+    name: 'Слизень',
+    category: 'tank',
+    baseHp: 90,
+    speed: 0.7,
+    reward: 14,
+    damageToBase: 2,
+    wallDamage: 6,
+    armor: 1,
+    flies: false,
+    modelRef: { catalogId: 'enemy:slime', scale: 1 }
+  },
+  {
+    id: 'bat',
+    name: 'Нетопырь',
+    category: 'flyer',
+    baseHp: 14,
+    speed: 2.6,
+    reward: 7,
+    damageToBase: 1,
+    wallDamage: 0,
+    armor: 0,
+    flies: true,
+    modelRef: { catalogId: 'enemy:bat', scale: 1 }
+  },
+  {
+    id: 'spider',
+    name: 'Паук',
+    category: 'fast',
+    baseHp: 26,
+    speed: 1.9,
+    reward: 9,
+    damageToBase: 1,
+    wallDamage: 3,
+    armor: 0,
+    flies: false,
+    modelRef: { catalogId: 'enemy:spider', scale: 1 }
+  },
+  {
+    id: 'ghost',
+    name: 'Призрак',
+    category: 'normal',
+    baseHp: 40,
+    speed: 1.4,
+    reward: 11,
+    damageToBase: 1,
+    wallDamage: 2,
+    armor: 1,
+    flies: false,
+    modelRef: { catalogId: 'enemy:ghost', scale: 1 }
+  },
+  // ── Фаза P4: процедурные враги (kit-assembler → assembleCharacter(seed)).
+  // modelRef.catalogId='enemy:procedural', modelRef.seed → RiggedEnemyRenderer
+  // собирает вариантный CharacterDef. Симу модель безразлична (рендер-only).
+  {
+    id: 'proceduralA',
+    name: 'Древний воин',
+    category: 'normal',
+    baseHp: 38,
+    speed: 1.25,
+    reward: 9,
+    damageToBase: 1,
+    wallDamage: 5,
+    armor: 0,
+    flies: false,
+    modelRef: { catalogId: 'enemy:procedural', scale: 1, seed: 1234 }
+  },
+  {
+    id: 'proceduralB',
+    name: 'Жуткий страж',
+    category: 'tank',
+    baseHp: 70,
+    speed: 0.95,
+    reward: 14,
+    damageToBase: 2,
+    wallDamage: 7,
+    armor: 1,
+    flies: false,
+    modelRef: { catalogId: 'enemy:procedural', scale: 1, seed: 5678 }
+  },
+  // M1: расширение процедурной вариантности (больше архетипов в толпе).
+  {
+    id: 'proceduralC',
+    name: 'Костяной берсерк',
+    category: 'fast',
+    baseHp: 30,
+    speed: 1.55,
+    reward: 8,
+    damageToBase: 1,
+    wallDamage: 4,
+    armor: 0,
+    flies: false,
+    modelRef: { catalogId: 'enemy:procedural', scale: 0.95, seed: 9012 }
+  },
+  {
+    id: 'proceduralD',
+    name: 'Демонический отродье',
+    category: 'tank',
+    baseHp: 95,
+    speed: 0.8,
+    reward: 18,
+    damageToBase: 2,
+    wallDamage: 10,
+    armor: 2,
+    flies: false,
+    modelRef: { catalogId: 'enemy:procedural', scale: 1.15, seed: 3456 }
   }
 ];
 
@@ -158,8 +270,8 @@ export const DEFAULT_WAVES: Wave[] = [
   { index: 4, rewardBonus: 40, groups: [{ enemyTypeId: 'zombie', count: 10, interval: 1.0, startDelay: 0 }, { enemyTypeId: 'goblin', count: 10, interval: 0.4, startDelay: 6 }] },
   { index: 5, rewardBonus: 50, groups: [{ enemyTypeId: 'skeleton', count: 18, interval: 0.4, startDelay: 0 }, { enemyTypeId: 'demon', count: 2, interval: 2.5, startDelay: 5 }] },
   { index: 6, rewardBonus: 55, groups: [{ enemyTypeId: 'zombie', count: 14, interval: 0.8, startDelay: 0 }, { enemyTypeId: 'goblin', count: 16, interval: 0.35, startDelay: 4 }] },
-  { index: 7, rewardBonus: 65, groups: [{ enemyTypeId: 'demon', count: 6, interval: 1.6, startDelay: 0 }, { enemyTypeId: 'skeleton', count: 20, interval: 0.35, startDelay: 2 }] },
-  { index: 8, rewardBonus: 80, groups: [{ enemyTypeId: 'zombie', count: 18, interval: 0.6, startDelay: 0 }, { enemyTypeId: 'demon', count: 8, interval: 1.2, startDelay: 6 }] },
+  { index: 7, rewardBonus: 65, groups: [{ enemyTypeId: 'demon', count: 6, interval: 1.6, startDelay: 0 }, { enemyTypeId: 'skeleton', count: 20, interval: 0.35, startDelay: 2 }, { enemyTypeId: 'proceduralC', count: 6, interval: 0.6, startDelay: 5 }] },
+  { index: 8, rewardBonus: 80, groups: [{ enemyTypeId: 'zombie', count: 18, interval: 0.6, startDelay: 0 }, { enemyTypeId: 'demon', count: 8, interval: 1.2, startDelay: 6 }, { enemyTypeId: 'proceduralA', count: 6, interval: 0.9, startDelay: 3 }, { enemyTypeId: 'proceduralB', count: 2, interval: 2.0, startDelay: 8 }, { enemyTypeId: 'proceduralD', count: 3, interval: 1.8, startDelay: 10 }] },
   { index: 9, rewardBonus: 200, isBoss: true, groups: [{ enemyTypeId: 'boss', count: 1, interval: 1, startDelay: 0 }, { enemyTypeId: 'demon', count: 6, interval: 1.5, startDelay: 3 }] }
 ];
 
@@ -423,13 +535,35 @@ export const DEFAULT_COMMANDERS: CommanderType[] = [
 /** Все возможные ресурсы RTS в фиксированном порядке (для UI/итерации). */
 export const RESOURCE_ORDER: ResourceId[] = ['wood', 'stone', 'ore', 'gold'];
 
+/**
+ * M8.3: расширяем DEFAULT_CATALOG RTS-only entries (town-hall/barracks/watch-tower/worker/upgrades).
+ * Эти entries используются только при `map.gameMode === 'rts'` (см. GameSim.initRtsState).
+ * TD-режим их не трогает (placement-проверки не резолвит эти typeIds).
+ *
+ * Список (из rts-catalog.ts):
+ *  - productionBuildings: town-hall, town-hall-l2, rts-barracks, rts-watch-tower
+ *  - defenderUnits: worker (добывает ресурсы)
+ *  - upgrades: 8 апгрейдов (epoch/melee-attack/armor/ranged/gather-capacity/unlock-mage/unlock-smelter)
+ */
+const RTS_EXTENSION = buildRtsCatalogExtension();
+
+const CATALOG_UPGRADES: UpgradeType[] = RTS_EXTENSION.upgrades;
+
 export const DEFAULT_CATALOG: GameCatalog = {
   towers: DEFAULT_TOWER_TYPES,
   enemies: DEFAULT_ENEMY_TYPES,
   waves: DEFAULT_WAVES,
   walls: DEFAULT_WALL_MATERIALS,
   relics: DEFAULT_RELICS,
-  productionBuildings: DEFAULT_PRODUCTION_BUILDINGS,
-  defenderUnits: DEFAULT_DEFENDER_UNITS,
-  commanders: DEFAULT_COMMANDERS
+  // M8.3: existing TD-style production (sawmill/mine/smelter/barracks) + RTS-only (town-hall, rts-barracks, ...)
+  productionBuildings: [
+    ...DEFAULT_PRODUCTION_BUILDINGS,
+    ...RTS_EXTENSION.productionBuildings
+  ],
+  defenderUnits: [
+    ...DEFAULT_DEFENDER_UNITS,
+    ...RTS_EXTENSION.defenderUnits
+  ],
+  commanders: DEFAULT_COMMANDERS,
+  upgrades: CATALOG_UPGRADES
 };

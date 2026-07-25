@@ -1,0 +1,99 @@
+{
+  "format_version": 3,
+  "name": "_v3_smoke",
+  "palette": "default",
+  "seed": 42,
+  "units": [
+    {
+      "type": "Part",
+      "id": "ground_pad",
+      "asset": "slab",
+      "params": { "w": { "Float": 16.0 }, "h": { "Float": 0.4 }, "d": { "Float": 12.0 } },
+      "at": { "type": "Origin", "offset": [0.0, -0.4, 0.0] },
+      "rotation": [0.0, 0.0, 0.0],
+      "label": "grass_pad"
+    },
+    {
+      "type": "Volume",
+      "id": "tower",
+      "footprint": [4.0, 4.0],
+      "height": 5.0,
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] },
+      "rotation_y": 0.0,
+      "walls": { "material": "plaster", "thickness": 0.4, "quoins": "stone_warm", "plinth": "stone_warm" },
+      "roof": { "kind": "Hip", "height": 1.8, "overhang": 0.4, "material": "roof_slate", "low_side": null },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Arch", "w": 2.4, "h": 3.2 }, "off": 0.0, "trim": "stone_warm" }
+      ]
+    },
+    {
+      "type": "Volume",
+      "id": "shed_e",
+      "footprint": [2.6, 4.0],
+      "height": 2.8,
+      "at": { "type": "Beside", "target": "tower", "face": "East", "gap": 0.0, "align": "Center", "offset": [0.0, 0.0] },
+      "rotation_y": 0.0,
+      "walls": { "material": "stone_warm", "thickness": 0.35, "quoins": null, "plinth": null },
+      "roof": { "kind": "Wedge", "height": 1.0, "overhang": 0.3, "material": "oak_dark", "low_side": "East" },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Door", "w": 1.2, "h": 2.0 }, "off": 0.0, "trim": null }
+      ]
+    },
+    { "type": "Mirror", "id": "shed_w", "of": "shed_e" },
+    {
+      "type": "Part",
+      "id": "chimney",
+      "asset": "cylinder",
+      "params": { "r": { "Float": 0.55 }, "h": { "Float": 3.5 }, "segments": { "Uint": 14 } },
+      "at": { "type": "OnTopOf", "target": "tower", "offset": [0.9, -0.8], "sink": 1.2 },
+      "rotation": [0.0, 0.0, 0.0],
+      "label": "chimney"
+    },
+    {
+      "type": "Part",
+      "id": "smoke",
+      "asset": "smoke_column",
+      "params": { "height": { "Float": 2.2 }, "width": { "Float": 0.9 }, "puffs": { "Uint": 4 }, "seed": { "Uint": 7 } },
+      "at": { "type": "OnTopOf", "target": "chimney", "offset": [0.0, 0.0], "sink": 0.1 },
+      "rotation": [0.0, 0.0, 0.0]
+    },
+    {
+      "type": "Row",
+      "id": "vaults",
+      "asset": "barrel_vault",
+      "params": { "w": { "Float": 1.0 }, "d": { "Float": 0.8 }, "r": { "Float": 0.5 }, "segments": { "Uint": 10 } },
+      "label": "stone_warm",
+      "start": { "type": "Origin", "offset": [-3.0, 0.0, 3.6] },
+      "dir": [1.0, 0.0, 0.0],
+      "count": 5,
+      "step": 1.5,
+      "yaw": 0.0
+    },
+    {
+      "type": "Group",
+      "id": "barrels",
+      "at": { "type": "Beside", "target": "shed_e", "face": "South", "gap": 0.3, "align": "Start", "offset": [0.0, 0.0] },
+      "rotation_y": 0.0,
+      "parts": [
+        { "id": "a", "asset": "cylinder", "params": { "r": { "Float": 0.35 }, "h": { "Float": 0.9 }, "segments": { "Uint": 10 } }, "offset": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "label": "oak" },
+        { "id": "b", "asset": "cylinder", "params": { "r": { "Float": 0.3 }, "h": { "Float": 0.7 }, "segments": { "Uint": 10 } }, "offset": [0.8, 0.0, 0.2], "rotation": [0.0, 25.0, 0.0], "label": "oak_dark" }
+      ]
+    }
+  ],
+  "scatters": [
+    {
+      "id": "clutter",
+      "target": "tower",
+      "zone": { "type": "GroundRing", "r_in": 2.5, "r_out": 4.5 },
+      "rule": { "type": "Clutter", "assets": [["pebble", 2.0], ["grass_tuft", 2.0], ["moss_patch", 1.0]], "density": 0.55, "scale_jitter": 0.25, "yaw_jitter_deg": 180.0 },
+      "seed": null
+    },
+    {
+      "id": "ivy",
+      "target": "shed_w",
+      "zone": { "type": "WallFace", "face": "South" },
+      "rule": { "type": "Patch", "asset": "ivy_patch", "count": 1, "u_range": [-0.6, 0.6], "v_range": [0.2, 0.6], "scale_jitter": 0.1 },
+      "seed": 11
+    }
+  ]
+}

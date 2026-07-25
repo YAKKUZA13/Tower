@@ -22,14 +22,19 @@ import { canPlaceWall, canPlaceRelic, canPlaceProductionBuilding, canTrainUnit }
 import { createEngine, createScene, gridToWorld, makePreviewMesh, sampleHeight, setGridVisible } from '../babylon/createScene';
 import { pickGrid } from '../babylon/picking';
 import { LevelOverlay } from '../babylon/level-renderer';
-import { EnemyRenderer } from '../babylon/enemies/enemy-renderer';
+import { EnemyRenderer, type EnemySceneRenderer } from '../babylon/enemies/enemy-renderer';
+import { RiggedEnemyRenderer } from '../babylon/enemies/enemy-renderer-rigged';
 import { TowerRenderer } from '../babylon/towers/tower-renderer';
 import { ProjectilePool } from '../babylon/projectiles/projectile-pool';
 import { WallRenderer } from '../babylon/walls/wall-renderer';
 import { RelicRenderer } from '../babylon/relics/relic-renderer';
-import { UnitRenderer } from '../babylon/units/unit-renderer';
+import { UnitRenderer, type UnitSceneRenderer } from '../babylon/units/unit-renderer';
+import { RiggedUnitRenderer } from '../babylon/units/unit-renderer-rigged';
+import { TileRenderer } from '../babylon/terrain/tile-renderer';
 import { AssetCatalog } from '../babylon/asset-catalog';
 import { AtmosphereRenderer } from '../babylon/atmosphere';
+import { PerfMonitor } from '../babylon/perf-monitor';
+import { applyToonToScene } from '../babylon/voxel/voxel-toon';
 import { startGameLoop } from '../babylon/game-loop';
 import type { GameLoopHandle } from '../babylon/game-loop';
 import { GameSim } from '../sim/game-sim';
@@ -42,6 +47,44 @@ import TowerShop from './TowerShop.vue';
 import RelicDraft from './RelicDraft.vue';
 import ProductionPanel from './ProductionPanel.vue';
 import type { WallMaterial, WallMaterialDef } from '@tower/shared';
+
+/**
+ * M1 (voxel-migration-plan): рендер врагов через part-graph риг + walk-cycle.
+ * true (default) — RiggedEnemyRenderer для ВСЕХ врагов (гуманоиды: skeleton/
+ * goblin/zombie/demon/boss с walk-cycle; нестандартные: bat/flap, spider/scuttle,
+ * ghost/hover, slime/squash). EnemyRenderer (thin instances) — LOD-fallback (M4).
+ * Переключи в false для back-compat / perf-сравнения через SHOW_PERF_HUD.
+ */
+const USE_RIGGED_ENEMIES = true;
+
+/**
+ * Фаза P1: воксельный дебрис при смерти не-rigged врагов (взрыв на кубы, research §6.3).
+ * false (по умолчанию) — обратная совместимость (только particle poof). true —
+ * дополнительно спавнит thin-instance дебрис из Voxel[] мастера врага.
+ */
+const USE_ENEMY_DEBRIS = false;
+
+/**
+ * M0 (voxel-migration-plan): perf-HUD overlay (FPS / draw calls / tri count).
+ * true — рисует DOM-оверлей в углу канваса и включает engine.performanceMonitor.
+ * Для фиксации baseline (50 rigged врагов vs thin) и подбора LOD-порогов (M4).
+ */
+const SHOW_PERF_HUD = false;
+
+/**
+ * M2 (voxel-migration-plan): RTS-юниты и командир через part-graph риг.
+ * true (default) — RiggedUnitRenderer (walk-cycle + attack-swing + cast-pose).
+ * false — UnitRenderer (InstancedMesh, LOD-fallback).
+ */
+const USE_RIGGED_UNITS = true;
+
+/**
+ * M7 (voxel-migration-plan): toon house-style (3-band step lighting + outline).
+ * true (default) — заменяет baked StandardMaterial на общий toon ShaderMaterial + Sobel-outline
+ * post-process для всех voxel-мешей (dark-fantasy cartoon-стиль, D9 — порт forge toon.wgsl).
+ * Переключи в false для baked tint+AO.
+ */
+const USE_TOON = true;
 
 const emit = defineEmits<{ (e: 'back-to-lobby'): void }>();
 
@@ -57,14 +100,17 @@ const sceneRef = shallowRef<Scene | null>(null);
 const simRef = shallowRef<GameSim | null>(null);
 const towerRendererRef = shallowRef<TowerRenderer | null>(null);
 const relicRendererRef = shallowRef<RelicRenderer | null>(null);
-const unitRendererRef = shallowRef<UnitRenderer | null>(null);
+const unitRendererRef = shallowRef<UnitSceneRenderer | null>(null);
 let catalog: AssetCatalog | null = null;
 let overlay: LevelOverlay | null = null;
-let enemyRenderer: EnemyRenderer | null = null;
+let perfMonitor: PerfMonitor | null = null;
+let toonHandle: { dispose: () => void } | null = null;
+let enemyRenderer: EnemySceneRenderer | null = null;
 let projectilePool: ProjectilePool | null = null;
 let wallRenderer: WallRenderer | null = null;
 let relicRenderer: RelicRenderer | null = null;
-let unitRenderer: UnitRenderer | null = null;
+let unitRenderer: UnitSceneRenderer | null = null;
+let tileRenderer: TileRenderer | null = null;
 let atmosphere: AtmosphereRenderer | null = null;
 let loop: GameLoopHandle | null = null;
 let previewMesh: Mesh | null = null;
@@ -192,8 +238,11 @@ function canPlaceWallAt(col: number, row: number, material: WallMaterial): boole
   const def = wallDef(material);
   if (!def) return false;
   if (sim.state.gold < def.cost) return false;
+  // M8: TD-поля опциональны в типе — defaults.
+  const tdSpawn = sim.map.spawnPoint ?? { col: 0, row: 0 };
+  const tdBase = sim.map.base ?? { col: grid.cols - 1, row: grid.rows - 1, hp: 20 };
   return canPlaceWall(
-    { grid, spawn: sim.map.spawnPoint, base: sim.map.base, walls: sim.state.walls, towers: sim.state.towers },
+    { grid, spawn: tdSpawn, base: tdBase, walls: sim.state.walls, towers: sim.state.towers },
     col,
     row
   );
@@ -214,7 +263,7 @@ function canPlaceRelicAt(col: number, row: number): boolean {
   if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false;
   if (sim.isPathCell(col, row)) return false;
   return canPlaceRelic(
-    { grid, spawn: sim.map.spawnPoint, base: sim.map.base, walls: sim.state.walls, towers: sim.state.towers, relics: sim.state.relics },
+    { grid, spawn: (sim.map.spawnPoint ?? { col: 0, row: 0 }), base: (sim.map.base ?? { col: grid.cols - 1, row: grid.rows - 1, hp: 20 }), walls: sim.state.walls, towers: sim.state.towers, relics: sim.state.relics },
     col,
     row
   );
@@ -232,8 +281,8 @@ function canPlaceBuildingAt(col: number, row: number): boolean {
   return canPlaceProductionBuilding(
     {
       grid,
-      spawn: sim.map.spawnPoint,
-      base: sim.map.base,
+      spawn: (sim.map.spawnPoint ?? { col: 0, row: 0 }),
+      base: (sim.map.base ?? { col: grid.cols - 1, row: grid.rows - 1, hp: 20 }),
       walls: sim.state.walls,
       towers: sim.state.towers,
       relics: sim.state.relics,
@@ -252,8 +301,8 @@ function canTrainUnitAt(col: number, row: number): boolean {
   return canTrainUnit(
     {
       grid,
-      spawn: sim.map.spawnPoint,
-      base: sim.map.base,
+      spawn: (sim.map.spawnPoint ?? { col: 0, row: 0 }),
+      base: (sim.map.base ?? { col: grid.cols - 1, row: grid.rows - 1, hp: 20 }),
       walls: sim.state.walls,
       towers: sim.state.towers,
       relics: sim.state.relics,
@@ -505,8 +554,10 @@ function buildSim(map: MapDocument): void {
   simRef.value = sim;
   rtsEnabled.value = sim.isRtsEnabled();
   gameStore.setRtsEnabled(rtsEnabled.value);
-  gameStore.setMaxLives(playable.base.hp);
-  const waveCount = (playable.waves?.length ?? 0) > 0 ? playable.waves.length : DEFAULT_CATALOG.waves.length;
+  // M8: TD-поля опциональны; defaults для back-compat.
+  const tdBaseHp = playable.base?.hp ?? 20;
+  gameStore.setMaxLives(tdBaseHp);
+  const waveCount = (playable.waves?.length ?? 0) > 0 ? playable.waves!.length : DEFAULT_CATALOG.waves.length;
   gameStore.setTotalWaves(waveCount);
   gameStore.setSnapshot(sim.serialize());
   selectedTowerId.value = null;
@@ -534,9 +585,25 @@ async function init(): Promise<void> {
 
   const engine = createEngine(canvasRef.value);
   engineRef.value = engine;
-  const { scene, camera, light, ground } = createScene(engine, playable.grid, playable.heightmap, { editor: false });
+  const { scene, camera, light, ground } = createScene(engine, playable.grid, playable.heightmap, {
+    editor: false,
+    tiles: playable.tiles
+  });
   sceneRef.value = scene;
   setGridVisible(scene, true);
+
+  // M0: perf-HUD для фиксации baseline (toggle SHOW_PERF_HUD=true для замеров FPS / draw calls / tri).
+  perfMonitor = new PerfMonitor(engine, scene);
+  if (SHOW_PERF_HUD) {
+    perfMonitor.setEnabled(true);
+    // лог baseline в консоль каждые ~5с для фиксации цифр в voxel-progress.md
+    perfMonitor.onSample((snap) => {
+      if (snap.samples % 20 === 0) {
+        // eslint-disable-next-line no-console
+        console.log('[perf]', `fps=${snap.current.fps.toFixed(0)} avg=${snap.avgFps.toFixed(0)} min=${snap.minFps.toFixed(0)} draw=${snap.current.drawCalls} tri=${snap.current.totalTriangles}`);
+      }
+    });
+  }
 
   buildSim(map);
   const sim = simRef.value!;
@@ -544,19 +611,37 @@ async function init(): Promise<void> {
   gameStore.setRtsEnabled(rtsEnabled.value);
   catalog = await AssetCatalog.create(scene);
 
+  // ── Phase T: тайловое поле (если карта задала tiles) ──
+  // TileRenderer создаёт thin-instance tile-меши с receiveShadows=true →
+  // тени от акторов ложатся на конкретные клетки (shadow-pass Babylon).
+  if (playable.tiles) {
+    tileRenderer = new TileRenderer(scene, playable.grid, playable.tiles, playable.grid.cellSize, catalog);
+  }
+
   // ── атмосфера (Фаза 3): день/ночь, тени, туман, погода, пост-процесс ──
   const bossTypeIds = new Set(DEFAULT_CATALOG.enemies.filter((e) => e.category === 'boss').map((e) => e.id));
-  atmosphere = new AtmosphereRenderer(scene, camera, playable.grid, {
+  const atm = new AtmosphereRenderer(scene, camera, playable.grid, {
     hemispheric: light,
     ground,
     board: { width: playable.grid.cols * playable.grid.cellSize, height: playable.grid.rows * playable.grid.cellSize },
     bossTypeIds
   });
+  atmosphere = atm;
 
   overlay = new LevelOverlay(scene, playable, catalog);
-  atmosphere.attachBaseMarker(overlay.baseMarker, playable.grid.cellSize);
+  atm.attachBaseMarker(overlay.baseMarker, playable.grid.cellSize);
 
-  enemyRenderer = new EnemyRenderer(scene, DEFAULT_CATALOG.enemies, playable.grid.cellSize, catalog);
+  // M4: shadow controller (per-clone тени rigged) + LOD-фокус (камера).
+  const shadowCtl = {
+    add: (m: import('babylonjs').Mesh) => atm.addShadowCaster(m),
+    remove: (m: import('babylonjs').Mesh) => atm.removeShadowCaster(m)
+  };
+
+  enemyRenderer = USE_RIGGED_ENEMIES
+    ? new RiggedEnemyRenderer(scene, DEFAULT_CATALOG.enemies, playable.grid.cellSize, catalog, camera, shadowCtl)
+    : new EnemyRenderer(scene, DEFAULT_CATALOG.enemies, playable.grid.cellSize, catalog, {
+        enableDebris: USE_ENEMY_DEBRIS
+      });
   const towerRenderer = new TowerRenderer(scene, DEFAULT_CATALOG.towers, playable.grid, playable.heightmap, catalog);
   towerRendererRef.value = towerRenderer;
   projectilePool = new ProjectilePool(scene, playable.grid.cellSize, catalog);
@@ -568,16 +653,28 @@ async function init(): Promise<void> {
   // ── Фаза 6: RTS-рендер (только если режим включён) ──
   if (sim.isRtsEnabled()) {
     const commanderCatalogId = sim.getCommander()?.modelRef.catalogId ?? null;
-    const uRenderer = new UnitRenderer(
-      scene,
-      DEFAULT_CATALOG.defenderUnits ?? [],
-      DEFAULT_CATALOG.productionBuildings ?? [],
-      playable.grid,
-      playable.heightmap,
-      catalog,
-      commanderCatalogId,
-      playable.base
-    );
+    const uRenderer: UnitSceneRenderer = USE_RIGGED_UNITS
+      ? new RiggedUnitRenderer(
+          scene,
+          DEFAULT_CATALOG.defenderUnits ?? [],
+          DEFAULT_CATALOG.productionBuildings ?? [],
+          playable.grid,
+          playable.heightmap,
+          catalog,
+          commanderCatalogId,
+          (playable.base ?? { col: playable.grid.cols - 1, row: playable.grid.rows - 1, hp: 20 }),
+          shadowCtl
+        )
+      : new UnitRenderer(
+          scene,
+          DEFAULT_CATALOG.defenderUnits ?? [],
+          DEFAULT_CATALOG.productionBuildings ?? [],
+          playable.grid,
+          playable.heightmap,
+          catalog,
+          commanderCatalogId,
+          (playable.base ?? { col: playable.grid.cols - 1, row: playable.grid.rows - 1, hp: 20 })
+        );
     unitRenderer = uRenderer;
     unitRendererRef.value = uRenderer;
     for (const m of uRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
@@ -587,6 +684,12 @@ async function init(): Promise<void> {
   for (const m of towerRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
   for (const m of enemyRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
   for (const m of rRenderer.getShadowCasterMeshes()) atmosphere.addShadowCaster(m);
+
+  // M7: toon house-style (переключаемый). Заменяет материалы voxel-мешей на 3-band toon
+  // ShaderMaterial + outline post-process. USE_TOON=false → baked StandardMaterial.
+  if (USE_TOON) {
+    toonHandle = applyToonToScene(scene, camera, [0.3, 1.0, 0.4], { edgeStrength: 0.8 });
+  }
 
   previewMesh = makePreviewMesh(scene);
 
@@ -934,6 +1037,21 @@ watch(gameOver, (over) => {
   }
 });
 
+// Post-MVP: при выборе башни — показать range-ring; при снятии выбора — скрыть.
+watch(selectedTowerId, (id) => {
+  const renderer = towerRendererRef.value;
+  if (!renderer) return;
+  if (!id) {
+    renderer.showRange(null);
+    return;
+  }
+  // радиус в клетках = range TowerType выбранной башни
+  const sim = simRef.value;
+  const tower = sim?.state.towers.find((t) => t.id === id);
+  const range = tower ? sim?.getTowerType(tower.typeId)?.range ?? 0 : 0;
+  renderer.showRange(id, range);
+});
+
 onMounted(() => init());
 onBeforeUnmount(() => {
   // Phase 7: отписаться от coop-событий
@@ -942,12 +1060,16 @@ onBeforeUnmount(() => {
   guestSync = null;
   loop?.stop();
   overlay?.dispose();
+  perfMonitor?.dispose();
+  toonHandle?.dispose();
+  toonHandle = null;
   enemyRenderer?.dispose();
   towerRendererRef.value?.dispose();
   projectilePool?.dispose();
   wallRenderer?.dispose();
   relicRenderer?.dispose();
   unitRenderer?.dispose();
+  tileRenderer?.dispose();
   atmosphere?.dispose();
   catalog?.dispose();
   engineRef.value?.dispose();

@@ -30,6 +30,15 @@ export interface CatalogEntry {
   kind: CatalogKind;
   /** Имя файла GLB относительно /catalog (например 'towers/arrow.glb'). Если задано — GLB грузится. */
   glbPath?: string;
+  /** Имя файла .vox относительно /catalog (например 'enemies/skeleton.vox'). Если задано и есть
+   *  scene-graph (nTRN/nGRP/nSHP) — AssetCatalog.buildRiggedMaster() импортирует его в CharacterDef
+   *  для part-graph рига (Фаза P3, research §5.3). Иначе — процедурный фолбэк. */
+  voxPath?: string;
+  /**
+   * Имя файла recipe JSON относительно /recipes (например 'towers/arrow.json'). Если задано —
+   * AssetCatalog.buildMaster() компилирует recipe (compile + assembleRecipe → greedy mesh,
+   * M3 voxel-migration-plan). Иначе — процедурный билдер (builder) или GLB. */
+  recipePath?: string;
   /** Имя процедурного воксель-билдера; используется, когда glbPath отсутствует или грузится с ошибкой. */
   builder?: VoxelBuilderId;
   /** Базовый RGB (0..1) — для UI-свотчей и тонировки. */
@@ -40,6 +49,8 @@ export interface CatalogEntry {
   scale?: number;
   /** Поворот по Y в радианах (нормализация ориентации GLB). */
   rotationY?: number;
+  /** Альфа-прозрачность материала (post-MVP: для ghost/slime). 1 = непрозрачный. */
+  alpha?: number;
 }
 
 export interface CatalogManifest {

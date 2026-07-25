@@ -9,6 +9,9 @@ export interface ModelRef {
   catalogId: string;
   scale: number;
   rotationY?: number;
+  /** Фаза P4: сид для процедурной генерации (когда catalogId === 'enemy:procedural').
+   *  assembleCharacter(seed) → детерминированный вариантный CharacterDef. */
+  seed?: number;
 }
 
 // ── Башни ───────────────────────────────────────────────
@@ -53,6 +56,8 @@ export interface Tower {
   cooldown: number;          // до след. выстрела (сек)
   rotationY: number;         // визуальный поворот к цели
   targetingMode?: TargetingMode; // per-instance режим (override дефолта TowerType)
+  /** Post-MVP: тик последнего выстрела — для muzzle-flash эффекта в renderer. */
+  lastFireTick?: number;
 }
 
 // ── Враги и волны ─────────────────────────────────────────
@@ -81,6 +86,14 @@ export interface Enemy {
   alive: boolean;
   slowUntilTick?: number;
   slowFactor?: number;       // множитель скорости пока действует slow (0..1)
+  /** Post-MVP: тик до которого враг «мигает» от попадания (renderer → белый tint). */
+  hitFlashUntilTick?: number;
+  /**
+   * M8 RTS-solo: стационарный «враг» (например, AI town-hall как мишень для победы).
+   * Не двигается по пути, не наносит урон базе при спавне. Атакуется юнитами игрока
+   * и башнями как обычный враг. Когда hp<=0 → game-sim фиксирует победу (status='won').
+   */
+  stationary?: boolean;
 }
 
 export interface WaveGroup {

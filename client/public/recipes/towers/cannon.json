@@ -1,0 +1,36 @@
+{
+  "format_version": 3,
+  "name": "cannon_tower",
+  "palette": "default",
+  "seed": 22,
+  "units": [
+    {
+      "type": "Volume", "id": "bunker", "footprint": [4.4, 4.4], "height": 2.8,
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation_y": 0.0,
+      "walls": { "material": "stone_warm", "thickness": 0.5, "quoins": "stone", "plinth": "stone" },
+      "roof": { "kind": "Wedge", "height": 0.8, "overhang": 0.3, "material": "stone", "low_side": "South" },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Arch", "w": 2.0, "h": 2.0 }, "off": 0.0, "trim": "stone" }
+      ]
+    },
+    {
+      "type": "Part", "id": "cannon", "asset": "cylinder",
+      "params": { "r": { "Float": 0.45 }, "h": { "Float": 2.2 }, "segments": { "Uint": 10 } },
+      "at": { "type": "Origin", "offset": [0.0, 1.4, 1.6] },
+      "rotation": [1.5708, 0.0, 0.0], "label": "metal"
+    },
+    {
+      "type": "Part", "id": "muzzle", "asset": "cylinder",
+      "params": { "r": { "Float": 0.55 }, "h": { "Float": 0.4 }, "segments": { "Uint": 10 } },
+      "at": { "type": "Origin", "offset": [0.0, 1.4, 2.8] },
+      "rotation": [1.5708, 0.0, 0.0], "label": "metal"
+    },
+    {
+      "type": "Part", "id": "wheel_l", "asset": "cylinder",
+      "params": { "r": { "Float": 0.5 }, "h": { "Float": 0.3 }, "segments": { "Uint": 8 } },
+      "at": { "type": "Origin", "offset": [-0.9, 0.5, 1.2] },
+      "rotation": [0.0, 0.0, 1.5708], "label": "oak_dark"
+    },
+    { "type": "Mirror", "id": "wheel_r", "of": "wheel_l" }
+  ]
+}

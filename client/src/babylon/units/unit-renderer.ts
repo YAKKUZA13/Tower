@@ -14,27 +14,23 @@
  * state.productionBuildings / state.activeSpells (детерминизм ADR-2 сохранён).
  */
 import {
-  Color3,
-  Color4,
-  DynamicTexture,
   InstancedMesh,
   Mesh,
-  MeshBuilder,
-  ParticleSystem,
-  StandardMaterial,
   Vector3,
   type Scene
 } from 'babylonjs';
 import type {
-  ActiveSpell,
-  DefenderUnitType,
   GameSnapshot,
   GridData,
   ProductionBuildingType,
-  DefenderUnit
+  DefenderUnitType
 } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 import { sampleHeight } from '../terrain/terrain-math';
+import { SpellEffectManager, HpBarManager, type UnitSceneRenderer } from './unit-effects';
+
+// Реэкспорт интерфейса для потребителей (Game.vue, game-loop), импортирующих из этого модуля.
+export type { UnitSceneRenderer };
 
 interface SourceEntry {
   source: Mesh;
@@ -42,20 +38,14 @@ interface SourceEntry {
   rotationY: number;
 }
 
-interface UnitHpBar {
-  mesh: Mesh;
-  tex: DynamicTexture;
-  context: CanvasRenderingContext2D;
-}
-
 const SPELL_PARTICLE_POOL = 8;
+void SPELL_PARTICLE_POOL;
 
-export class UnitRenderer {
+export class UnitRenderer implements UnitSceneRenderer {
   private readonly unitSources = new Map<string, SourceEntry>();
   private readonly buildingSources = new Map<string, SourceEntry>();
   private readonly unitInstances = new Map<string, InstancedMesh>();
   private readonly buildingInstances = new Map<string, InstancedMesh>();
-  private readonly hpBars = new Map<string, UnitHpBar>();
   private readonly unitTypes: Map<string, DefenderUnitType>;
   private readonly grid: GridData;
   private readonly heightmap: number[][];
@@ -63,8 +53,8 @@ export class UnitRenderer {
   private readonly halfH: number;
   private commanderInstance: InstancedMesh | null = null;
   private commanderSource: Mesh | null = null;
-  private readonly particles: ParticleSystem[] = [];
-  private readonly activeSpellSeen = new Set<string>();
+  private readonly spells: SpellEffectManager;
+  private readonly hpBars: HpBarManager;
   private readonly baseCol: number;
   private readonly baseRow: number;
 
@@ -85,6 +75,8 @@ export class UnitRenderer {
     this.unitTypes = new Map(unitTypes.map((u) => [u.id, u]));
     this.baseCol = base.col;
     this.baseRow = base.row;
+    this.spells = new SpellEffectManager(scene, grid, heightmap);
+    this.hpBars = new HpBarManager(scene, grid);
 
     for (const ut of unitTypes) {
       const source = catalog.buildMaster(ut.modelRef.catalogId, `unit-src-${ut.id}`, { emissiveStrength: 0.22 });
@@ -108,28 +100,6 @@ export class UnitRenderer {
       this.commanderSource.isPickable = false;
       this.commanderSource.doNotSyncBoundingInfo = true;
     }
-
-    // пул частиц для заклинаний (переиспользуются; emitRate=0 = «свободна»)
-    for (let i = 0; i < SPELL_PARTICLE_POOL; i++) {
-      const ps = new ParticleSystem(`unit-spell-ps-${i}`, 80, scene);
-      ps.emitter = new Vector3(0, 0, 0);
-      ps.minEmitBox = new Vector3(-0.3, 0, -0.3);
-      ps.maxEmitBox = new Vector3(0.3, 0.6, 0.3);
-      ps.color1 = new Color4(1, 0.5, 0.1, 1);
-      ps.color2 = new Color4(1, 0.85, 0.4, 1);
-      ps.colorDead = new Color4(0, 0, 0, 0);
-      ps.minSize = 0.08;
-      ps.maxSize = 0.18;
-      ps.minLifeTime = 0.4;
-      ps.maxLifeTime = 0.9;
-      ps.emitRate = 0;
-      ps.direction1 = new Vector3(-1, 2, -1);
-      ps.direction2 = new Vector3(1, 4, 1);
-      ps.minEmitPower = 1;
-      ps.maxEmitPower = 3;
-      ps.gravity = new Vector3(0, -3, 0);
-      this.particles.push(ps);
-    }
   }
 
   /** Клик-пикинг по инстансам юнитов: возвращает unitId или null. */
@@ -152,7 +122,7 @@ export class UnitRenderer {
     this.syncBuildings(state);
     this.syncUnits(state);
     this.syncCommander(state);
-    this.syncSpells(state);
+    this.spells.sync(state);
     void dt;
   }
 
@@ -215,59 +185,16 @@ export class UnitRenderer {
         }
       }
 
-      this.updateHpBar(unit, inst.position, groundY);
+      this.hpBars.update(unit, inst.position, groundY);
     }
     // удалить исчезнувших юнитов
     for (const [id, inst] of this.unitInstances) {
       if (!seen.has(id)) {
         inst.dispose();
         this.unitInstances.delete(id);
-        const bar = this.hpBars.get(id);
-        if (bar) {
-          bar.mesh.dispose();
-          bar.tex.dispose();
-          this.hpBars.delete(id);
-        }
+        this.hpBars.remove(id);
       }
     }
-  }
-
-  private updateHpBar(unit: DefenderUnit, pos: Vector3, groundY: number): void {
-    if (unit.hp >= unit.maxHp) {
-      // полный HP — скрыть бар
-      const bar = this.hpBars.get(unit.id);
-      if (bar) bar.mesh.setEnabled(false);
-      return;
-    }
-    let bar = this.hpBars.get(unit.id);
-    if (!bar) {
-      const tex = new DynamicTexture(`unit-hp-tex-${unit.id}`, { width: 64, height: 8 }, this.scene, false);
-      tex.hasAlpha = true;
-      const mat = new StandardMaterial(`unit-hp-mat-${unit.id}`, this.scene);
-      mat.diffuseTexture = tex;
-      mat.opacityTexture = tex;
-      mat.emissiveColor = new Color3(1, 1, 1);
-      mat.disableLighting = true;
-      mat.backFaceCulling = false;
-      mat.zOffset = -2;
-      const plane = MeshBuilder.CreatePlane(`unit-hp-${unit.id}`, { width: 0.8, height: 0.1 }, this.scene);
-      plane.material = mat;
-      plane.isPickable = false;
-      plane.billboardMode = 7; // BILLBOARDMODE_ALL
-      const ctx = tex.getContext() as CanvasRenderingContext2D;
-      bar = { mesh: plane, tex, context: ctx };
-      this.hpBars.set(unit.id, bar);
-    }
-    bar.mesh.setEnabled(true);
-    bar.mesh.position.set(pos.x, groundY + this.grid.cellSize * 1.1, pos.z);
-    const ratio = Math.max(0, Math.min(1, unit.hp / unit.maxHp));
-    const ctx = bar.context;
-    ctx.clearRect(0, 0, 64, 8);
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(0, 0, 64, 8);
-    ctx.fillStyle = ratio > 0.5 ? '#22c55e' : ratio > 0.25 ? '#f59e0b' : '#ef4444';
-    ctx.fillRect(1, 1, Math.round(62 * ratio), 6);
-    bar.tex.update();
   }
 
   // ── Командир ─────────────────────────────────────────────────────────
@@ -291,89 +218,6 @@ export class UnitRenderer {
     this.commanderInstance.rotation.y = _state.tick * 0.01;
   }
 
-  // ── Заклинания: эффекты (particles + rings) ──────────────────────────
-
-  private syncSpells(state: GameSnapshot): void {
-    // новые активные заклинания → запустить эффект
-    for (const active of state.activeSpells ?? []) {
-      if (this.activeSpellSeen.has(active.id)) continue;
-      this.activeSpellSeen.add(active.id);
-      this.spawnSpellEffect(active);
-    }
-    // очистка истёкших
-    const currentIds = new Set((state.activeSpells ?? []).map((a) => a.id));
-    for (const id of Array.from(this.activeSpellSeen)) {
-      if (!currentIds.has(id)) this.activeSpellSeen.delete(id);
-    }
-  }
-
-  private spawnSpellEffect(active: ActiveSpell): void {
-    const cellSize = this.grid.cellSize;
-    const x = (active.col + 0.5) * cellSize - this.halfW;
-    const z = (active.row + 0.5) * cellSize - this.halfH;
-    const groundY = sampleHeight(this.heightmap, this.grid, active.col, active.row, true);
-
-    // подобрать свободную систему частиц
-    const ps = this.particles.find((p) => p.emitRate === 0) ?? this.particles[0];
-    if (ps) {
-      ps.emitter = new Vector3(x, groundY + 0.3, z);
-      ps.targetStopDuration = 0.6;
-      ps.minEmitPower = 2;
-      ps.maxEmitPower = 5;
-      // цвет по типу заклинания
-      if (active.spellId === 'meteor') {
-        ps.color1 = new Color4(1, 0.4, 0.1, 1);
-        ps.color2 = new Color4(1, 0.85, 0.3, 1);
-        ps.minSize = 0.12;
-        ps.maxSize = 0.26;
-        ps.emitRate = 220;
-      } else if (active.spellId === 'gold-rush') {
-        ps.color1 = new Color4(0.9, 0.75, 0.25, 1);
-        ps.color2 = new Color4(1, 0.95, 0.5, 1);
-        ps.minSize = 0.06;
-        ps.maxSize = 0.14;
-        ps.emitRate = 160;
-      } else {
-        ps.color1 = new Color4(0.55, 0.8, 1, 1);
-        ps.color2 = new Color4(0.75, 0.95, 1, 1);
-        ps.minSize = 0.08;
-        ps.maxSize = 0.16;
-        ps.emitRate = 120;
-      }
-      ps.start(0.6);
-    }
-
-    // кольцо-индикатор (freeze/meteor) — короткая анимация расширения
-    if (active.spellId === 'freeze' || active.spellId === 'meteor') {
-      const ring = MeshBuilder.CreateTorus(`spell-ring-${active.id}`, {
-        diameter: cellSize * 4,
-        thickness: 0.18,
-        tessellation: 24
-      }, this.scene);
-      const mat = new StandardMaterial(`spell-ring-mat-${active.id}`, this.scene);
-      mat.emissiveColor = active.spellId === 'freeze'
-        ? new Color3(0.5, 0.85, 1)
-        : new Color3(1, 0.4, 0.1);
-      mat.disableLighting = true;
-      mat.alpha = 0.6;
-      ring.material = mat;
-      ring.isPickable = false;
-      ring.position.set(x, groundY + 0.1, z);
-      const duration = Math.max(0.5, active.remainingTicks / 30);
-      const startTime = performance.now();
-      const observer = this.scene.onBeforeRenderObservable.add(() => {
-        const elapsed = (performance.now() - startTime) / 1000;
-        const t = Math.min(1, elapsed / duration);
-        ring.scaling.set(1 + t * 0.3, 1, 1 + t * 0.3);
-        mat.alpha = 0.6 * (1 - t);
-        if (t >= 1) {
-          this.scene.onBeforeRenderObservable.remove(observer);
-          ring.dispose();
-        }
-      });
-    }
-  }
-
   dispose(): void {
     for (const inst of this.unitInstances.values()) inst.dispose();
     this.unitInstances.clear();
@@ -387,13 +231,7 @@ export class UnitRenderer {
     this.commanderInstance = null;
     this.commanderSource?.dispose();
     this.commanderSource = null;
-    for (const bar of this.hpBars.values()) {
-      bar.mesh.dispose();
-      bar.tex.dispose();
-    }
-    this.hpBars.clear();
-    for (const ps of this.particles) ps.dispose();
-    this.particles.length = 0;
-    this.activeSpellSeen.clear();
+    this.spells.dispose();
+    this.hpBars.dispose();
   }
 }

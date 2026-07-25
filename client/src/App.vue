@@ -3,8 +3,10 @@ import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, watch 
 import { storeToRefs } from 'pinia';
 import LoginForm from './components/LoginForm.vue';
 import CoopLobby from './components/CoopLobby.vue';
+import RtsLobby from './components/RtsLobby.vue';
 // Игровой 3D-компонент грузится лениво (Babylon.js выносится в отдельный чанк).
 const Game = defineAsyncComponent(() => import('./components/Game.vue'));
+const RtsGame = defineAsyncComponent(() => import('./components/RtsGame.vue'));
 import { useAuthStore } from './stores/auth-store';
 import { useCoopStore } from './stores/coop-store';
 
@@ -13,9 +15,10 @@ const coopStore = useCoopStore();
 const { user, isAuthed } = storeToRefs(authStore);
 const { phase: coopPhase } = storeToRefs(coopStore);
 
-type View = 'lobby' | 'game';
+type View = 'lobby' | 'game' | 'rts-lobby' | 'rts-game';
 const view = ref<View>('lobby');
 const username = computed(() => user.value?.username || user.value?.login || '');
+const rtsMapId = ref<string | undefined>(undefined);
 
 function handleAuthed(): void {
   view.value = 'lobby';
@@ -44,6 +47,17 @@ function onBackToLobby(): void {
   view.value = 'lobby';
 }
 
+/** RtsLobby: игрок выбрал карту и нажал «Начать». */
+function onStartRts(mapId: string): void {
+  rtsMapId.value = mapId;
+  view.value = 'rts-game';
+}
+
+/** RtsGame.vue: выход обратно в RTS-лобби. */
+function onRtsBack(): void {
+  view.value = 'rts-lobby';
+}
+
 // Если co-op фаза стала 'playing' (хост стартовал) — автоматически в Game.
 watch(coopPhase, (p) => {
   if (p === 'playing' && view.value !== 'game') view.value = 'game';
@@ -63,13 +77,13 @@ onBeforeUnmount(() => {
   <div class="app">
     <header class="app-header">
       <div class="app-header-left">
-        <div class="app-brand">Tower Defense</div>
-        <div v-if="isAuthed" class="app-nav">
-          <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Co-op лобби</button>
-          <button class="nav-button" :class="{ active: view === 'game' }" @click="view='game'">
-            {{ coopStore.sessionId && coopPhase === 'playing' ? 'Игра (co-op)' : 'Одиночная игра' }}
-          </button>
-        </div>
+        <div class="app-brand">Tower — RTS</div>
+      <div v-if="isAuthed" class="app-nav">
+        <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Co-op лобби</button>
+        <!-- TD-режим (Game.vue) скрыт: проект перешёл на RTS. Co-op сейчас использует
+             тот же TD-рендер, но как отдельный multiplayer-трек; прямой «TD-игра» вход убран. -->
+        <button class="nav-button" :class="{ active: view === 'rts-lobby' || view === 'rts-game' }" @click="view='rts-lobby'">RTS соло</button>
+      </div>
       </div>
       <div v-if="isAuthed" class="app-header-right">
         <div class="user-meta">
@@ -85,7 +99,9 @@ onBeforeUnmount(() => {
       <LoginForm v-if="!isAuthed" @authed="handleAuthed" />
       <template v-else>
         <CoopLobby v-if="view==='lobby'" @start-game="onStartGame" />
-        <Game v-else @back-to-lobby="onBackToLobby" />
+        <Game v-else-if="view==='game'" @back-to-lobby="onBackToLobby" />
+        <RtsLobby v-else-if="view==='rts-lobby'" @start="onStartRts" @back="view='lobby'" />
+        <RtsGame v-else-if="view==='rts-game'" :map-id="rtsMapId" @back="onRtsBack" />
       </template>
     </div>
   </div>

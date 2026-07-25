@@ -10,11 +10,16 @@ import sessionRoutes from './routes/session.js';
 import runRoutes from './routes/run.js';
 import { CoopRooms } from './services/coop-rooms.js';
 import type { CoopClient } from './services/coop-rooms.js';
+import { PvpRooms } from './realtime/pvp-rooms.js';
+import type { PvpClient } from './realtime/pvp-rooms.js';
+import { InMemoryMatchmaker } from './realtime/matchmaking.js';
 import type { FastifyRequest } from 'fastify';
 import type { ServerMessage, WsClient } from './types/realtime.js';
 import type { ClientMessage } from './types/realtime.js';
 import type { GameRole } from './types/game-session.js';
-import type { CoopClientMessage } from '@tower/shared';
+import type { CoopClientMessage, PvpClientMessage } from '@tower/shared';
+import { isPvpMessage } from '@tower/shared';
+import { getRtsMap } from '@tower/shared';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const BODY_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -28,6 +33,10 @@ function isCoopMessage(data: unknown): data is CoopClientMessage {
   if (typeof data !== 'object' || data === null) return false;
   const t = (data as { type?: unknown }).type;
   return typeof t === 'string' && t.startsWith('coop:');
+}
+
+function isPvpMsg(data: unknown): data is PvpClientMessage {
+  return isPvpMessage(data as { type: string });
 }
 
 async function start() {
@@ -50,6 +59,28 @@ async function start() {
   // Co-op маршрутизация идёт через отдельный CoopRooms (Phase 7).
   const clients = new Set<WsClient>();
   const coopRooms = new CoopRooms();
+
+  // ── M8.4: PvP rooms (server-authoritative, 1v1..1v1v1v1) ──
+  // simFactory — зависимый от caller; в этом базовом setup мы не запускаем
+  // server-side GameSim (он hoist'нется в shared в production-сборке).
+  // Заглушка вернёт ошибку при попытке start match — но lobby / matchmaking
+  // работают и тестируются headless.
+  const matchmaker = new InMemoryMatchmaker();
+  const pvpRooms = new PvpRooms(
+    // simFactory — пока сервер не имеет hoist'нутого GameSim, возвращаем stub
+    // с ошибкой. Это позволяет pvp:lobby-* и pvp:match-found работать, а старт
+    // матча — откладывается до полной интеграции sim на сервер.
+    () => {
+      throw new Error('Server-side GameSim not hoisted yet — see M8.4 server-sim-loop integration');
+    },
+    (mapId) => {
+      const map = getRtsMap(mapId);
+      if (map) return map.grid;
+      // fallback: assume 64×64 grid
+      return { cols: 64, rows: 64, cellSize: 1.5 };
+    }
+  );
+  void matchmaker;
 
   app.decorate('wsClients', clients);
   app.decorate('broadcast', (sessionId: string | null, payload: ServerMessage) => {
@@ -122,6 +153,9 @@ async function start() {
       send(welcome as unknown as ServerMessage);
     }
 
+    // ── M8.4: PvP client (всегда регистрируется; матчи начинаются по pvp:queue) ──
+    const pvpClient: PvpClient = pvpRooms.registerClient(socket, user.userId, user.username || user.login);
+
     socket.on('message', (raw: Buffer | string) => {
       let data: ClientMessage | null = null;
       try { data = JSON.parse(String(raw)) as ClientMessage; } catch {}
@@ -135,6 +169,19 @@ async function start() {
           coopRooms.handleMessage(coopClient, data);
         } catch (e) {
           app.log.warn({ err: e }, 'coop message handling failed');
+        }
+        return;
+      }
+      // ── PvP маршрутизация (M8.4) ──
+      if (isPvpMsg(data)) {
+        try {
+          const out = pvpRooms.handleMessage(pvpClient, data);
+          if (out) {
+            const msgs = Array.isArray(out) ? out : [out];
+            for (const m of msgs) socket.send(JSON.stringify(m));
+          }
+        } catch (e) {
+          app.log.warn({ err: e }, 'pvp message handling failed');
         }
       }
     });
@@ -154,6 +201,11 @@ async function start() {
           }
         }
       }
+      // M8.4: PvP disconnect → grace / defeat
+      try {
+        const msgs = pvpRooms.onDisconnect(pvpClient);
+        for (const m of msgs) socket.send(JSON.stringify(m));
+      } catch (e) { app.log.warn(e); }
       if (redis && baseClient.sessionId) {
         redis.hDel(`presence:session:${baseClient.sessionId}`, user.userId).catch((err: unknown) => app.log.warn(err));
       }

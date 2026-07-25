@@ -10,24 +10,26 @@
 import type { Engine, Scene } from 'babylonjs';
 import type { GameSnapshot } from '@tower/shared';
 import type { GameSim } from '../sim/game-sim';
-import type { EnemyRenderer } from './enemies/enemy-renderer';
+import type { EnemySceneRenderer } from './enemies/enemy-renderer';
 import type { TowerRenderer } from './towers/tower-renderer';
 import type { ProjectilePool } from './projectiles/projectile-pool';
 import type { WallRenderer } from './walls/wall-renderer';
 import type { RelicRenderer } from './relics/relic-renderer';
-import type { UnitRenderer } from './units/unit-renderer';
+import type { UnitSceneRenderer } from './units/unit-renderer';
 import type { AtmosphereRenderer } from './atmosphere';
 
 export interface GameRenderers {
-  enemies: EnemyRenderer;
-  towers: TowerRenderer;
-  projectiles: ProjectilePool;
+  enemies: EnemySceneRenderer;
+  /** Башни (TD). Опционально — RTS-режим не использует башни. */
+  towers?: TowerRenderer;
+  /** Снаряды (TD-башен). Опционально — RTS (атака мгновенная) не использует. */
+  projectiles?: ProjectilePool;
   /** Стены лабиринта (Фаза 4). Опционально. */
   walls?: WallRenderer;
   /** Реликвии-тотемы (Фаза 5). Опционально. */
   relics?: RelicRenderer;
   /** RTS юниты/здания/заклинания (Фаза 6). Опционально. */
-  units?: UnitRenderer;
+  units?: UnitSceneRenderer;
   /** Атмосфера (день/ночь/погода/пост-процесс). Опционально (нет в редакторе). */
   atmosphere?: AtmosphereRenderer;
 }
@@ -85,8 +87,8 @@ export function startGameLoop(
     }
     const state = sim.state;
     renderers.enemies.sync(state);
-    renderers.towers.sync(state);
-    renderers.projectiles.sync(state);
+    renderers.towers?.sync(state);
+    renderers.projectiles?.sync(state);
     renderers.walls?.sync(state);
     renderers.relics?.sync(state);
     renderers.units?.sync(state, dt);

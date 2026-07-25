@@ -9,11 +9,13 @@ import {
   Scene,
   StandardMaterial,
   TransformNode,
+  VertexBuffer,
   Vector3
 } from 'babylonjs';
-import type { GridData } from '../domain/map';
+import type { GridData, TileType } from '../domain/map';
 import { gridToWorld, worldToGrid, sampleHeight } from './terrain/terrain-math';
 import { createVoxelBoard } from './voxel/voxel-floor';
+import { createRtsGround } from './terrain/rts-terrain';
 // re-export pure geometry helpers for consumers
 export { gridToWorld, worldToGrid, sampleHeight } from './terrain/terrain-math';
 
@@ -32,16 +34,24 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 }
 
 /**
- * Создание сцены TD (Phase D новая концепция).
+ * Создание сцены TD (Phase D новая концепция + Phase T тайловый рендер).
  *
- * Поле боя: воксельная плита cols×rows клеток + каменный бордюр крепости по
- * краям + тёмная подложка под плитой (пол не висит в воздухе). Камера —
- * стандартный TD-ракурс (изометрия ~35° над горизонтом), вращаемая мышью.
+ * Поле боя:
+ *  - ЕСЛИ задан `options.tiles` (Phase T): invisible ground-plane (для pick) +
+ *    каменный бордюр + тёмная подложка. Сами тайлы рисует TileRenderer отдельно
+ *    (после загрузки AssetCatalog, через thin instances).
+ *  - ИНАЧЕ (back-compat): воксельная плита cols×rows + каменный бордюр + подложка.
  *
+ * Камера — стандартный TD-ракурс (изометрия ~35° над горизонтом), вращаемая мышью.
  * heightmap игнорируется: всё поле плоское (sampleHeight = 0). Контракт
- * sampleHeight сохранён для всех рендереров и sim’а.
+ * sampleHeight сохранён для всех рендереров и sim'а.
  */
-export function createScene(engine: Engine, grid: GridData, _heightmap: number[][] = [], options: { editor?: boolean } = {}) {
+export function createScene(
+  engine: Engine,
+  grid: GridData,
+  _heightmap: number[][] = [],
+  options: { editor?: boolean; tiles?: TileType[][] } = {}
+) {
   const scene = new Scene(engine);
   // Ястрый «день» (TD: смены дня/ночи нет). AtmosphereRenderer в своём конструкторе
   // зафиксирует эти значения под яркий день; здесь — светлый стартовый кадр, чтобы
@@ -56,17 +66,14 @@ export function createScene(engine: Engine, grid: GridData, _heightmap: number[]
   const maxSpan = Math.max(boardWidth, boardDepth);
 
   // ── Камера: стандартный TD-ракурс (изометрия, ~35° над горизонтом) ──
-  // alpha = -Math.PI/4 → северо-восточный угол (привычная «верх-право» перспектива).
-  // beta = Math.PI/3.2 → ~58° от вертикали ≈ 32° над горизонтом (читаемый TD-вид).
-  // radius = maxSpan * 1.25 → плотный кадр, плита занимает почти весь канвас.
   const cameraDistance = Math.max(20, maxSpan * 1.25);
   const camera = new ArcRotateCamera('cam', -Math.PI / 4, Math.PI / 3.2, cameraDistance, new Vector3(0, 0, 0), scene);
   camera.lowerRadiusLimit = Math.max(8, maxSpan * 0.4);
   camera.upperRadiusLimit = Math.max(40, maxSpan * 2.4);
-  camera.lowerBetaLimit = 0.2;            // нельзя уйти в чистый top-down (визуал ломается)
-  camera.upperBetaLimit = Math.PI / 2.15; // нельзя упасть до горизонта (плита становится линией)
+  camera.lowerBetaLimit = 0.2;
+  camera.upperBetaLimit = Math.PI / 2.15;
   camera.wheelPrecision = 18;
-  camera.panningSensibility = 0;          // запретить панорамирование — поле всегда по центру
+  camera.panningSensibility = 0;
   camera.minZ = 0.1;
   camera.attachControl(engine.getRenderingCanvas(), true);
 
@@ -75,17 +82,55 @@ export function createScene(engine: Engine, grid: GridData, _heightmap: number[]
   light.intensity = 0.95;
   light.groundColor = new Color3(0.25, 0.28, 0.24);
 
-  // ── Воксельная плита + бордюр + подложка ──
-  const { ground, decorations } = createVoxelBoard(scene, grid);
+  // ── Поле боя: tile-board (если есть tiles) или voxel-board (back-compat) ──
+  const { ground, decorations } = options.tiles
+    ? createTileBoard(scene, grid)
+    : createVoxelBoard(scene, grid);
 
   // ── Сетка редактора (по умолчанию скрыта; включается только в режиме debug) ──
   const gridLines = createGridLines(scene, grid, boardWidth, boardDepth);
   gridLines.setEnabled(Boolean(options.editor));
 
   const towersParent = new TransformNode('objects', scene);
-  // decorations добавлен в сцену внутри createVoxelBoard; возвращаем для полноты API.
   void decorations;
   return { scene, camera, light, ground, towersParent };
+}
+
+/**
+ * Tile-board (Phase T): invisible ground-plane для pick + каменный бордюр +
+ * тёмная подложка. Сами тайлы рисует TileRenderer после загрузки каталога.
+ *
+ * Контракт идентичен createVoxelBoard: возвращает { ground, decorations },
+ * где ground имеет name='ground' (важно для pickWorld) и pickable=true.
+ */
+function createTileBoard(scene: Scene, grid: GridData): { ground: Mesh; decorations: Mesh } {
+  const cs = grid.cellSize;
+  const boardW = grid.cols * cs;
+  const boardD = grid.rows * cs;
+
+  // Invisible ground-plane для pick (имя 'ground' важно для pickWorld).
+  // receiveShadows=false: тени ложатся на тайлы (TileRenderer), не на плейн.
+  const ground = MeshBuilder.CreateGround(
+    'ground',
+    { width: boardW, height: boardD, subdivisionsX: 1, subdivisionsY: 1 },
+    scene
+  );
+  const groundMat = new StandardMaterial('tile-ground-mat', scene);
+  groundMat.diffuseColor = new Color3(0, 0, 0);
+  groundMat.alpha = 0;
+  ground.material = groundMat;
+  ground.receiveShadows = false;
+  ground.isPickable = true;
+  ground.isVisible = true; // видимый, но полностью прозрачный (alpha=0) — для pick
+  ground.metadata = { playableGround: true };
+
+  // Подложка под плитой (тёмная бездна) + бордюр — переиспользуем из voxel-floor.
+  // Для этого делегируем в createVoxelBoard и берём только decorations
+  // (ground от туда выбрасываем — у нас свой).
+  const board = createVoxelBoard(scene, grid);
+  // Освободить «лишний» ground от voxel-board — он не нужен (наш invisible выше).
+  board.ground.dispose();
+  return { ground, decorations: board.decorations };
 }
 
 function createGridLines(scene: Scene, grid: GridData, boardWidth: number, boardDepth: number): Mesh {
@@ -130,4 +175,64 @@ export function makePreviewMesh(scene: Scene): Mesh {
   mesh.isPickable = false;
   mesh.setEnabled(false);
   return mesh;
+}
+
+/**
+ * M8-fix — Сцена для RTS-режима (большая открытая карта).
+ *
+ * Отличия от TD `createScene`:
+ *  - НЕТ «доски в космосе»: нет каменного бордюра / зубцов / рун / черепов /
+ *    тёмной подложки-бездны. Вместо этого — сплошной террейн (createRtsGround),
+ *    следующий heightmap, с tile-цветами и плавным фадом в fog (aprоn).
+ *  - heightmap НЕ игнорируется (как в TD): вершины террейна смещаются по heightmap,
+ *    так что top-surface в клетке = sampleHeight → юниты/здания/ресурсы стоят на
+ *    поверхности, а не парят над ней (тот самый баг после заимствования из Magnum-Opus).
+ *  - Камера та же (ArcRotate, будет переключена в ORTHO + RTS-controls снаружи),
+ *    но初始ная дистанция/position адаптирована под большую карту.
+ *
+ * Возвращает { scene, camera, light, ground }. Ground имеет name='ground'
+ * (контракт pickGrid/pickWorld сохранён), receiveShadows=true, isPickable=true.
+ */
+export function createRtsScene(
+  engine: Engine,
+  grid: GridData,
+  heightmap: number[][] = [],
+  options: { tiles?: TileType[][]; apronRings?: number } = {}
+) {
+  const scene = new Scene(engine);
+  // Тёмный «воздух» как fog — террейн растворяется в нём апроном.
+  scene.clearColor.set(0.05, 0.06, 0.09, 1);
+  scene.fogMode = Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.006;
+  scene.fogColor = new Color3(0.05, 0.06, 0.09);
+
+  const boardWidth = grid.cols * grid.cellSize;
+  const boardDepth = grid.rows * grid.cellSize;
+  const maxSpan = Math.max(boardWidth, boardDepth);
+
+  // Камера: ArcRotate-обёртка; RTS-controls (ORTHO + pan/zoom/rotate) навешиваются
+  // снаружи через attachRtsCamera. Начальная дистанция — чтобы видеть центр карты.
+  const cameraDistance = Math.max(20, maxSpan * 0.8);
+  const camera = new ArcRotateCamera('cam', -Math.PI / 4, Math.PI / 3.2, cameraDistance, new Vector3(0, 0, 0), scene);
+  camera.lowerRadiusLimit = Math.max(8, maxSpan * 0.4);
+  camera.upperRadiusLimit = Math.max(40, maxSpan * 2.4);
+  camera.lowerBetaLimit = 0.2;
+  camera.upperBetaLimit = Math.PI / 2.15;
+  camera.wheelPrecision = 18;
+  camera.panningSensibility = 0;
+  camera.minZ = 0.1;
+  // НЕ вызываем attachControl — RTS-controls снаружи (attachRtsCamera сбрасывает inputs).
+
+  // Свет: hemispheric ambient-fill (атмосфера добавит DirectionalLight + тени).
+  const light = new HemisphericLight('light', new Vector3(0.3, 1, 0.4), scene);
+  light.intensity = 0.95;
+  light.groundColor = new Color3(0.25, 0.28, 0.24);
+
+  // RTS-террейн: сплошной, по heightmap, с apron-фадом в fog.
+  const ground = createRtsGround(scene, grid, heightmap, options.tiles ?? null, {
+    apronRings: options.apronRings ?? 18
+  });
+
+  const towersParent = new TransformNode('objects', scene);
+  return { scene, camera, light, ground, towersParent };
 }

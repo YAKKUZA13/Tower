@@ -30,6 +30,8 @@ export function tickMovement(deps: MoveDeps): MoveOutcome {
   let reached = 0;
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
+    // M8 RTS-solo: стационарные «враги» (AI town-hall) не двигаются по пути.
+    if (enemy.stationary) continue;
     const type = enemyTypes.get(enemy.typeId);
     if (!type) continue;
     const slowed = enemy.slowUntilTick != null && tick < enemy.slowUntilTick;

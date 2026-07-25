@@ -21,6 +21,9 @@ export type ResourceId = 'wood' | 'stone' | 'ore' | 'gold';
 
 export type ResourceBag = Partial<Record<ResourceId, number>>;
 
+/** Внешний вид ресурсного узла (M8.3). */
+export type ResourceKind = 'wood' | 'stone' | 'ore' | 'gold';
+
 // ── Производственные здания ──────────────────────────────────────────
 export interface ProductionBuildingType {
   id: string;
@@ -66,6 +69,15 @@ export interface DefenderUnitType {
   fireRate: number;
   modelRef: ModelRef;
   description: string;
+  /**
+   * M8.3: юнит — worker (добывает ресурсы из resource-nodes).
+   * Worker НЕ атакует юнитов, но может move/gather. default false.
+   */
+  worker?: boolean;
+  /** M8.3: сколько единиц ресурса worker уносит за один trip (default 5). */
+  carryCapacity?: number;
+  /** M8.3: сколько секунд worker копает на узле за one-load (default 1.5). */
+  gatherTime?: number;
 }
 
 /** Экземпляр защитного юнита (runtime, не персистится в карте). */
@@ -86,6 +98,51 @@ export interface DefenderUnit {
   /** Якорь стоянки (для guard/patrol-режима — возврат после погони). */
   homeCol: number;
   homeRow: number;
+  // ── M8.2 (voxel-migration-plan): прямой контроль юнитов игроком (RTS-приказы). ──
+  /** Приказ движения к клетке (override AI пока активен; null = нет приказа). */
+  moveOrderCol?: number;
+  moveOrderRow?: number;
+  /** Приказ атаки конкретного врага (override auto-targeting). */
+  attackOrderEnemyId?: string | null;
+  // ── M8.2: waypoint queue (shift-накопленные приказы). ──
+  /** Очередь последующих точек движения (FIFO после moveOrderCol/Row). */
+  waypoints?: Array<{ col: number; row: number }>;
+  /** patrol-loop: после достижения последнего waypoint возвращается к первому. */
+  patrolLoop?: boolean;
+  // ── M8.3: worker state (gathering). ──
+  /** Id ресурсного узла, к которому worker приписан/копает. */
+  gatherNodeId?: string | null;
+  /** Накопленный carry (0..carryCapacity). */
+  carry?: number;
+  /** Текущий carry-kind (для рендера мешка на спине). */
+  carryKind?: ResourceKind | null;
+  /** Состояние worker-FSM: 'idle' | 'to-node' | 'gathering' | 'to-base'. */
+  gatherState?: 'idle' | 'to-node' | 'gathering' | 'to-base';
+  /** Таймер копания (0..gatherTime). */
+  gatherTimer?: number;
+}
+
+// ── M8.3: Tech tree / upgrades ────────────────────────────────────────
+export type UpgradeTargetKind = 'unit-damage' | 'unit-armor' | 'unit-speed' | 'building-production' | 'unlock-unit' | 'unlock-building' | 'epoch';
+
+export interface UpgradeType {
+  id: string;
+  name: string;
+  description: string;
+  /** К какому зданию крепится апгрейд (Town Hall / Barracks / ...). */
+  buildingTypeId: string;
+  cost: ResourceBag;
+  /** Время исследования (сек). */
+  researchTime: number;
+  target: UpgradeTargetKind;
+  /** Какой typeId юнита/здания затрагивает (для unlock-* / specific buffs). */
+  targetType?: string;
+  /** Величина эффекта (для unit-damage = множитель; для unit-speed = +%). */
+  magnitude?: number;
+  /** Tech-эпоха, в которую апгрейд доступен (1..3 типично). */
+  epoch?: number;
+  /** Какие апгрейды должны быть исследованы до этого. */
+  requires?: string[];
 }
 
 // ── Командир-заклинатель ──────────────────────────────────────────────

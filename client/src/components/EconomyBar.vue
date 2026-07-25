@@ -59,7 +59,7 @@ const statusLabel: Record<string, string> = {
       <span class="stat-label">Осталось</span>
       <span class="stat-value">{{ waveEnemiesRemaining }} <span class="muted">({{ enemiesAlive }} на поле)</span></span>
     </div>
-    <button class="btn primary start" :disabled="!canStartWave" @click="emit('start-wave')">
+    <button v-if="!rtsEnabled" class="btn primary start" :disabled="!canStartWave" @click="emit('start-wave')">
       Старт волны
     </button>
   </div>

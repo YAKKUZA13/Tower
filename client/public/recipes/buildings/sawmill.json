@@ -1,0 +1,29 @@
+{
+  "format_version": 3,
+  "name": "sawmill",
+  "palette": "default",
+  "seed": 51,
+  "units": [
+    {
+      "type": "Volume", "id": "shed", "footprint": [4.0, 3.2], "height": 2.4,
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation_y": 0.0,
+      "walls": { "material": "oak", "thickness": 0.3, "quoins": null, "plinth": "stone_warm" },
+      "roof": { "kind": "Wedge", "height": 1.0, "overhang": 0.3, "material": "oak_dark", "low_side": "East" },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Door", "w": 1.4, "h": 1.8 }, "off": 0.0, "trim": "oak_dark" }
+      ]
+    },
+    {
+      "type": "Part", "id": "blade", "asset": "cylinder",
+      "params": { "r": { "Float": 0.9 }, "h": { "Float": 0.25 }, "segments": { "Uint": 12 } },
+      "at": { "type": "Origin", "offset": [0.0, 1.6, 1.8] },
+      "rotation": [1.5708, 0.0, 0.0], "label": "metal"
+    },
+    {
+      "type": "Part", "id": "logpile", "asset": "cylinder",
+      "params": { "r": { "Float": 0.35 }, "h": { "Float": 1.2 }, "segments": { "Uint": 8 } },
+      "at": { "type": "Beside", "target": "shed", "face": "West", "gap": 0.2, "align": "Start", "offset": [0.0, 0.0] },
+      "rotation": [0.0, 0.0, 1.5708], "label": "oak"
+    }
+  ]
+}

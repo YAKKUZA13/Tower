@@ -21,13 +21,15 @@ export interface TargetDeps {
   cellSize: number;
   dt: number;
   nextProjectileId: () => string;
+  /** Текущий тик сима (post-MVP: для muzzle-flash пометки lastFireTick). */
+  tick: number;
   /** Модификаторы реликвий (Фаза 5). Опционально. */
   relicMods?: RelicModifiers;
 }
 
 /** Уменьшает cooldown; башня, готовая стрелять с целью в радиусе, выпускает снаряд. */
 export function tickTargeting(deps: TargetDeps): TargetOutcome {
-  const { towers, towerTypes, enemies, grid, heightmap, cellSize, dt, nextProjectileId, relicMods } = deps;
+  const { towers, towerTypes, enemies, grid, heightmap, cellSize, dt, nextProjectileId, relicMods, tick } = deps;
   const projectiles: Projectile[] = [];
   for (const tower of towers) {
     tower.cooldown = Math.max(0, tower.cooldown - dt);
@@ -59,6 +61,8 @@ export function tickTargeting(deps: TargetDeps): TargetOutcome {
     });
     const fireRate = type.fireRate * (mods?.fireRateMult ?? 1);
     tower.cooldown += 1 / Math.max(1e-3, fireRate);
+    // post-MVP: пометить выстрел для renderer-эффекта muzzle-flash.
+    tower.lastFireTick = tick;
   }
   return { projectiles };
 }

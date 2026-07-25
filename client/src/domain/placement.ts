@@ -3,9 +3,10 @@
  * Чистые функции без зависимости от Babylon -> headless-тесты.
  */
 
-import type { GridData, Tower, Waypoint, Wall } from '@tower/shared';
+import type { GridData, Tower, Waypoint, Wall, TileType } from '@tower/shared';
 import type { PlacedRelic } from '@tower/shared';
 import { hasValidRoute } from './pathfinding';
+import { isTileBuildable, isTileBlocking } from './tiles';
 
 // ── TD-сетка: стены и башни (Фаза 4) ────────────────────────────────────────────
 
@@ -17,6 +18,12 @@ export interface PlacementContext {
   towers: Tower[];
   /** Размещённые реликвии (Фаза 5). Опционально для совместимости. */
   relics?: PlacedRelic[];
+  /**
+   * Тайловая разметка поля боя (Phase T). Опционально для back-compat.
+   * Если задано — water/rock тайлы блокируют застройку и учитываются
+   * в валидации маршрута (нельзя запереть базу с учётом тайлов).
+   */
+  tiles?: TileType[][];
 }
 
 export function cellKey(col: number, row: number): string {
@@ -45,22 +52,25 @@ function cellOccupied(ctx: PlacementContext, col: number, row: number): boolean 
  *  - ПОСЛЕ установки остаётся валидный маршрут spawn→base (нельзя запереть базу).
  */
 export function canPlaceWall(ctx: PlacementContext, col: number, row: number): boolean {
-  const { grid, walls } = ctx;
+  const { grid, walls, tiles } = ctx;
   if (!inBounds(grid, col, row)) return false;
   if (cellOccupied(ctx, col, row)) return false;
-  // валидность маршрута с учётом новой стены
+  if (!isTileBuildable(tiles, grid, col, row)) return false;
+  // валидность маршрута с учётом новой стены И непроходимых тайлов
   const blockedSet = new Set<string>();
   for (const w of walls) blockedSet.add(cellKey(w.col, w.row));
   blockedSet.add(cellKey(col, row));
-  const isBlocked = (c: number, r: number) => blockedSet.has(cellKey(c, r));
+  const isBlocked = (c: number, r: number) =>
+    blockedSet.has(cellKey(c, r)) || isTileBlocking(tiles, grid, c, r);
   return hasValidRoute(ctx.spawn, ctx.base, grid, isBlocked);
 }
 
 /** Можно ли поставить башню (вне стен, вне других башен, вне реликвий, вне спавна/базы). */
 export function canPlaceTower(ctx: PlacementContext, col: number, row: number): boolean {
-  const { grid } = ctx;
+  const { grid, tiles } = ctx;
   if (!inBounds(grid, col, row)) return false;
   if (cellOccupied(ctx, col, row)) return false;
+  if (!isTileBuildable(tiles, grid, col, row)) return false;
   return true;
 }
 
@@ -68,12 +78,13 @@ export function canPlaceTower(ctx: PlacementContext, col: number, row: number): 
  * Можно ли разместить реликвию (Фаза 5). Реликвия занимает клетку, но НЕ блокирует
  * маршрут врагов (не участвует в A*). Запрещено ставить на занятые клетки и на
  * spawn/base. Проверка «не на пути» делается в GameSim (isPathCell), т.к. маршрут
- * динамически перестраивается стенами.
+ * динамически перестраивается стенами. Также нельзя ставить на water/rock (Phase T).
  */
 export function canPlaceRelic(ctx: PlacementContext, col: number, row: number): boolean {
-  const { grid } = ctx;
+  const { grid, tiles } = ctx;
   if (!inBounds(grid, col, row)) return false;
   if (cellOccupied(ctx, col, row)) return false;
+  if (!isTileBuildable(tiles, grid, col, row)) return false;
   return true;
 }
 
@@ -94,6 +105,7 @@ export interface RtsPlacementContext extends PlacementContext {
 export function canPlaceProductionBuilding(ctx: RtsPlacementContext, col: number, row: number): boolean {
   if (!inBounds(ctx.grid, col, row)) return false;
   if (rtsCellOccupied(ctx, col, row)) return false;
+  if (!isTileBuildable(ctx.tiles, ctx.grid, col, row)) return false;
   return true;
 }
 
@@ -104,13 +116,14 @@ export function canPlaceProductionBuilding(ctx: RtsPlacementContext, col: number
  */
 export function canTrainUnit(ctx: RtsPlacementContext, col: number, row: number): boolean {
   if (!inBounds(ctx.grid, col, row)) return false;
-  // юнит не может стоять на стене/башне/здании/spawn/base
-  const { spawn, base, walls, towers, productionBuildings } = ctx;
+  // юнит не может стоять на стене/башне/здании/spawn/base/water/rock
+  const { spawn, base, walls, towers, productionBuildings, tiles, grid } = ctx;
   if (col === spawn.col && row === spawn.row) return false;
   if (col === base.col && row === base.row) return false;
   for (const w of walls) if (w.col === col && w.row === row) return false;
   for (const t of towers) if (t.col === col && t.row === row) return false;
   if (productionBuildings) for (const b of productionBuildings) if (b.col === col && b.row === row) return false;
+  if (isTileBlocking(tiles, grid, col, row)) return false;
   return true;
 }
 

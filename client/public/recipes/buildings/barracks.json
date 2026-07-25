@@ -1,0 +1,37 @@
+{
+  "format_version": 3,
+  "name": "barracks",
+  "palette": "default",
+  "seed": 54,
+  "units": [
+    {
+      "type": "Volume", "id": "hall", "footprint": [4.4, 3.4], "height": 2.8,
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation_y": 0.0,
+      "walls": { "material": "stone_warm", "thickness": 0.4, "quoins": "stone", "plinth": "stone" },
+      "roof": { "kind": "Hip", "height": 1.4, "overhang": 0.4, "material": "oak_dark", "low_side": null },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Door", "w": 1.2, "h": 2.0 }, "off": -0.8, "trim": "oak_dark" },
+        { "face": "East", "kind": { "kind": "Window", "w": 0.8, "h": 0.8 }, "off": 0.0, "trim": "oak_dark" }
+      ]
+    },
+    {
+      "type": "Part", "id": "banner", "asset": "box",
+      "params": { "w": { "Float": 0.3 }, "h": { "Float": 1.4 }, "d": { "Float": 0.1 } },
+      "at": { "type": "OnTopOf", "target": "hall", "offset": [0.0, -0.2], "sink": 1.4 },
+      "rotation": [0.0, 0.0, 0.0], "label": "metal"
+    },
+    {
+      "type": "Part", "id": "training_dummy", "asset": "cylinder",
+      "params": { "r": { "Float": 0.3 }, "h": { "Float": 1.6 }, "segments": { "Uint": 8 } },
+      "at": { "type": "Beside", "target": "hall", "face": "East", "gap": 0.3, "align": "Center", "offset": [0.0, 0.0] },
+      "rotation": [0.0, 0.0, 0.0], "label": "oak"
+    }
+  ],
+  "scatters": [
+    {
+      "id": "yard", "target": "hall", "zone": { "type": "GroundRing", "r_in": 2.0, "r_out": 3.0 },
+      "rule": { "type": "Clutter", "assets": [["pebble", 2.0], ["grass_tuft", 1.0]], "density": 0.35, "scale_jitter": 0.2, "yaw_jitter_deg": 180.0 },
+      "seed": null
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 
 import type {
   ActiveSpell,
+  BaseDef,
   CommanderType,
   DefenderUnit,
   DefenderUnitType,
@@ -30,12 +31,13 @@ import type {
   Weather,
   Waypoint
 } from '@tower/shared';
-import type { ResourceId } from '@tower/shared';
+import type { ResourceId, ResourceKind, ResourceNode } from '@tower/shared';
 import { buildPath, positionAtProgress } from '../domain/path';
 import type { BuiltPath } from '../domain/path';
 import { findGridRoute } from '../domain/pathfinding';
 import { gridToWorldData } from '../domain/grid-math';
 import { canPlaceWall, canPlaceRelic, canPlaceProductionBuilding, canTrainUnit } from '../domain/placement';
+import { isTileBuildable, isTileBlocking } from '../domain/tiles';
 import { mulberry32 } from './rng';
 import { DEFAULT_SEED, FIXED_DT, DAY_LENGTH_SECONDS, BURN_DURATION } from './constants';
 import { allSpawned, createWaveState, tickSpawner } from './systems/spawner';
@@ -64,6 +66,8 @@ import {
   tickCommanderCooldowns,
   tickUnits
 } from './systems/rts';
+import { computeFormation } from './systems/formations';
+import { tickGathering, pruneDepletedNodes } from './systems/gathering';
 
 export interface GameSimConfig {
   map: MapDocument;
@@ -73,6 +77,17 @@ export interface GameSimConfig {
 }
 
 const MAX_STEPS_PER_FRAME = 6;
+
+/**
+ * M8 RTS-solo: HP town-hall игрока и AI. Enemy-units, дошедшие до town-hall игрока,
+ * снимают HP из state.lives (= tdBase.hp). При 0 → 'lost'.
+ * AI town-hall = stationary-Enemy с этим HP; при уничтожении → 'won'.
+ */
+const RTS_TOWN_HALL_HP = 1500;
+/** Секунд до первой волны AI (даёт игроку развернуть экономику). */
+const RTS_AI_FIRST_WAVE_DELAY = 35;
+/** Секунд между волнами AI. */
+const RTS_AI_WAVE_INTERVAL = 30;
 
 export class GameSim {
   /**
@@ -90,6 +105,9 @@ export class GameSim {
   private readonly relicTypes: Map<string, RelicType>;
   private readonly relicList: RelicType[];
   private readonly waves: Wave[];
+  // M8: TD legacy path/spawn/base — defaults для back-compat с RTS-only картами
+  private readonly tdSpawn: Waypoint;
+  private readonly tdBase: BaseDef;
   // ── RTS (Фаза 6) ──
   private readonly productionTypes: Map<string, ProductionBuildingType>;
   private readonly unitTypes: Map<string, DefenderUnitType>;
@@ -108,6 +126,15 @@ export class GameSim {
   private relicMods: RelicModifiers = EMPTY_MODS;
   /** Последний routeVersion, применённый в гостевом режиме (для recompute-гарда). */
   private lastAppliedRouteVersion = -1;
+  // ── M8 RTS-solo: AI opponent state ──
+  /** True, если карта — каноническая RTS (gameMode='rts' + playerStarts). */
+  private readonly rtsSolo: boolean;
+  /** Id stationary-Enemy = AI town-hall (мишень победы). */
+  private aiTownHallId: string | null = null;
+  /** Таймер до следующей волны AI-атаки (сек). */
+  private aiAttackTimer = 0;
+  /** Какой набор юнитов спавнить следующей волной (растёт со временем). */
+  private aiWaveIndex = 0;
 
   constructor(config: GameSimConfig) {
     this.map = config.map;
@@ -123,16 +150,31 @@ export class GameSim {
     this.productionTypes = new Map((config.catalog.productionBuildings ?? []).map((p) => [p.id, p]));
     this.unitTypes = new Map((config.catalog.defenderUnits ?? []).map((u) => [u.id, u]));
     this.commander = this.resolveCommander(config.map, config.catalog);
-    this.rtsEnabled = !!config.map.rts?.enabled && !!this.commander;
+    // M8 RTS-solo: rts-режим включается либо явно (map.rts.enabled — legacy fortress),
+    // либо по gameMode='rts' (канонические RTS-карты с playerStarts + resourceNodes).
+    this.rtsEnabled = (!!config.map.rts?.enabled || config.map.gameMode === 'rts') && !!this.commander;
 
     this.routeWaypoints = [];
     this.routeCells = new Set();
-    this.routePath = buildPath(config.map.path.waypoints, config.map.grid, config.map.heightmap);
+    // M8 RTS-solo: на канонических RTS-картах (playerStarts) tdSpawn/tdBase берём из
+    // стартовых позиций: враги (AI slot 1) идут от своего town-hall к town-hall игрока.
+    // Для legacy TD/fortress-карт — прежние defaults из map.spawnPoint/base.
+    this.rtsSolo = config.map.gameMode === 'rts' && (config.map.playerStarts?.length ?? 0) >= 2;
+    const starts = config.map.playerStarts ?? [];
+    const p0TownHall = this.rtsSolo && starts[0] ? starts[0].townHall : null;
+    const p1TownHall = this.rtsSolo && starts[1] ? starts[1].townHall : null;
+    const tdPath = config.map.path ?? { waypoints: [] };
+    this.tdSpawn = p1TownHall ?? config.map.spawnPoint ?? { col: 0, row: 0 };
+    this.tdBase = p0TownHall
+      ? { col: p0TownHall.col, row: p0TownHall.row, hp: RTS_TOWN_HALL_HP }
+      : (config.map.base ?? { col: Math.max(0, config.map.grid.cols - 1), row: Math.max(0, config.map.grid.rows - 1), hp: 20 });
+    this.routePath = buildPath(tdPath.waypoints, config.map.grid, config.map.heightmap);
 
-    const lives = Number(config.map.base.hp) || 20;
+    const lives = Number(this.tdBase.hp) || 20;
     this._state = {
       tick: 0,
-      status: 'prep',
+      // M8 RTS-solo: статус 'playing' сразу (нет TD-волн; AI сам спавнит врагов).
+      status: this.rtsSolo ? 'wave' : 'prep',
       waveIndex: -1,
       gold: Number(config.map.startingGold) || 0,
       lives,
@@ -174,7 +216,7 @@ export class GameSim {
 
   /** Инициализирует RTS-поля снапшота: стартовые ресурсы, здания, кулдауны. */
   private initRtsState(map: MapDocument): void {
-    const rts = map.rts!;
+    const rts = map.rts ?? { enabled: true };
     // gold живёт в state.gold; в bag — только wood/stone/ore
     const startBag = ensureResources({
       wood: rts.startingResources?.wood ?? 60,
@@ -197,8 +239,83 @@ export class GameSim {
         accum: {}
       });
     }
+
+    // M8 RTS-solo: для канонических RTS-карт — стартовый town-hall игрока (slot 0) +
+    // workers (из playerStarts[0]); AI town-hall (slot 1+) — stationary-Enemy как
+    // мишень победы. tdSpawn/tdBase уже выставлены в конструкторе из playerStarts.
+    if (this.rtsSolo) {
+      const starts = map.playerStarts ?? [];
+      const p0 = starts[0];
+      if (p0) {
+        // town-hall игрока
+        if (this.productionTypes.has('town-hall')) {
+          buildings.push({
+            id: this.nextId('pb'),
+            typeId: 'town-hall',
+            col: p0.townHall.col,
+            row: p0.townHall.row,
+            accum: {}
+          });
+        }
+        // workers игрока
+        const workerType = this.unitTypes.get('worker');
+        const units: DefenderUnit[] = [];
+        // auto-gather: найдём ближайший к town-hall ресурсный узел (wood приоритет),
+        // чтобы workers сразу начали приносить ресурсы без ручного приказа.
+        const nodes = map.resourceNodes ?? [];
+        const thPos = gridToWorldData(this.map.grid, p0.townHall.col, p0.townHall.row);
+        const autoNode = this.pickAutoGatherNode(nodes, thPos);
+        for (const w of p0.workers ?? []) {
+          const pos = gridToWorldData(this.map.grid, w.col, w.row);
+          units.push({
+            id: this.nextId('unit'),
+            typeId: 'worker',
+            col: w.col,
+            row: w.row,
+            position: { x: pos.x, y: 0, z: pos.z },
+            hp: workerType?.hp ?? 30,
+            maxHp: workerType?.hp ?? 30,
+            stance: 'guard',
+            cooldown: 0,
+            targetEnemyId: null,
+            homeCol: w.col,
+            homeRow: w.row,
+            // auto-gather к ближайшему wood-узлу (детерминировано: фиксированный nodeId).
+            gatherNodeId: autoNode?.id ?? null,
+            gatherState: autoNode ? 'to-node' : 'idle',
+            gatherTimer: 0,
+            carry: 0,
+            carryKind: null
+          });
+        }
+        this.state.defenderUnits = units;
+      }
+      // AI town-hall (slot 1) — stationary boss-Enemy как мишень победы.
+      // Если playerStarts > 2 (3p/4p карты) — добавляем по мишени на каждый слот.
+      for (let i = 1; i < starts.length; i++) {
+        const ps = starts[i];
+        if (!ps) continue;
+        const pos = gridToWorldData(this.map.grid, ps.townHall.col, ps.townHall.row);
+        const aiTh: Enemy = {
+          id: this.nextId('ai-th'),
+          typeId: 'boss',
+          hp: RTS_TOWN_HALL_HP,
+          maxHp: RTS_TOWN_HALL_HP,
+          pathProgress: 0,
+          position: { x: pos.x, y: 0, z: pos.z },
+          alive: true,
+          stationary: true
+        };
+        this.state.enemies.push(aiTh);
+        if (i === 1) this.aiTownHallId = aiTh.id;
+      }
+      this.aiAttackTimer = RTS_AI_FIRST_WAVE_DELAY;
+      this.aiWaveIndex = 0;
+    } else {
+      this.state.defenderUnits = [];
+    }
+
     this.state.productionBuildings = buildings;
-    this.state.defenderUnits = [];
 
     if (this.commander) {
       const cds: Record<string, number> = {};
@@ -251,6 +368,38 @@ export class GameSim {
       case 'cast-spell':
         this.castCommanderSpell(input.action.spellId, input.action.col, input.action.row);
         break;
+      case 'order-unit-move':
+        this.orderUnitMove(input.action.unitIds, input.action.col, input.action.row, input.action.formation);
+        break;
+      case 'order-unit-attack':
+        this.orderUnitAttack(input.action.unitIds, input.action.enemyId);
+        break;
+      case 'order-unit-stop':
+        this.orderUnitStop(input.action.unitIds);
+        break;
+      case 'order-unit-attack-move':
+        this.orderUnitAttackMove(input.action.unitIds, input.action.col, input.action.row);
+        break;
+      case 'order-unit-patrol':
+        this.orderUnitPatrol(input.action.unitIds, input.action.waypoints);
+        break;
+      case 'order-unit-waypoint-queue':
+        this.orderUnitWaypointQueue(input.action.unitIds, input.action.waypoints, input.action.append);
+        break;
+      case 'order-unit-gather':
+        this.orderUnitGather(input.action.unitIds, input.action.nodeId);
+        break;
+      case 'research-upgrade':
+        this.researchUpgrade(input.action.upgradeId, input.action.buildingId);
+        break;
+      case 'assign-control-group':
+        // control-group — client-only state; server no-op (snapshot не меняется)
+        break;
+      case 'rts-slot-action': {
+        // M8.4: reroute к конкретному slot (PvP); для single-player host — применяем как обычно.
+        this.applyInput({ ...input, action: input.action.inner });
+        break;
+      }
     }
   }
 
@@ -322,6 +471,55 @@ export class GameSim {
     return this.unitTypes.get(id);
   }
 
+  /** M8 RTS-solo: включён ли канонический RTS-режим (gameMode='rts' + playerStarts). */
+  isRtsSolo(): boolean {
+    return this.rtsSolo;
+  }
+
+  /**
+   * Выбирает resource-node для auto-gather стартовых workers:
+   * 优先 wood → stone → ore → gold, тай-брейк = ближайший к town-hall игрока.
+   * Детерминировано (без rng).
+   */
+  private pickAutoGatherNode(
+    nodes: ResourceNode[],
+    thPos: { x: number; z: number }
+  ): ResourceNode | null {
+    if (nodes.length === 0) return null;
+    const order: ResourceKind[] = ['wood', 'stone', 'ore', 'gold'];
+    for (const kind of order) {
+      const ofKind = nodes.filter((n) => n.kind === kind && n.amount > 0);
+      if (ofKind.length === 0) continue;
+      // ближайший к town-hall игрока
+      let best = ofKind[0]!;
+      let bestD = Infinity;
+      for (const n of ofKind) {
+        const np = gridToWorldData(this.map.grid, n.col, n.row);
+        const d = (np.x - thPos.x) ** 2 + (np.z - thPos.z) ** 2;
+        if (d < bestD) { bestD = d; best = n; }
+      }
+      return best;
+    }
+    return null;
+  }
+
+  /** M8 RTS-solo: town-hall игрока (slot 0). Берётся из productionBuildings по typeId. */
+  getPlayerTownHall(): ProductionBuilding | null {
+    const list = this.state.productionBuildings ?? [];
+    return list.find((b) => b.typeId === 'town-hall' || b.typeId === 'town-hall-l2') ?? null;
+  }
+
+  /** M8 RTS-solo: AI town-hall Enemy (мишень победы). null если уже уничтожен. */
+  getAiTownHall(): Enemy | null {
+    if (!this.aiTownHallId) return null;
+    return this.state.enemies.find((e) => e.id === this.aiTownHallId && e.alive) ?? null;
+  }
+
+  /** Секунд до следующей волны AI (для UI-индикатора). */
+  getAiNextWaveIn(): number {
+    return Math.max(0, this.aiAttackTimer);
+  }
+
   /** Клетки, занятые текущим маршрутом врагов (нельзя строить башни). */
   isPathCell(col: number, row: number): boolean {
     return this.routeCells.has(`${col}:${row}`);
@@ -343,6 +541,8 @@ export class GameSim {
     if (this.state.towers.some((t) => t.col === col && t.row === row)) return;
     if (this.state.walls.some((w) => w.col === col && w.row === row)) return;
     if (this.state.relics.some((r) => r.col === col && r.row === row)) return;
+    // Phase T: нельзя ставить башню на water/rock тайлах
+    if (!isTileBuildable(this.map.tiles, this.map.grid, col, row)) return;
     if (!canAfford(this.state, type.cost)) return;
     spend(this.state, type.cost);
     const tower: Tower = {
@@ -379,11 +579,12 @@ export class GameSim {
     if (!def) return;
     const ctx = {
       grid: this.map.grid,
-      spawn: this.map.spawnPoint,
-      base: this.map.base,
+      spawn: this.tdSpawn,
+      base: this.tdBase,
       walls: this.state.walls,
       towers: this.state.towers,
-      relics: this.state.relics
+      relics: this.state.relics,
+      tiles: this.map.tiles
     };
     if (!canPlaceWall(ctx, col, row)) return;
     if (!canAfford(this.state, def.cost)) return;
@@ -428,11 +629,12 @@ export class GameSim {
     if (this.isPathCell(col, row)) return;
     const ctx = {
       grid: this.map.grid,
-      spawn: this.map.spawnPoint,
-      base: this.map.base,
+      spawn: this.tdSpawn,
+      base: this.tdBase,
       walls: this.state.walls,
       towers: this.state.towers,
-      relics: this.state.relics
+      relics: this.state.relics,
+      tiles: this.map.tiles
     };
     if (!canPlaceRelic(ctx, col, row)) return;
     this.state.relics.push({ id: this.nextId('relic'), typeId: relicTypeId, col, row });
@@ -468,11 +670,12 @@ export class GameSim {
     if (!canAffordCost(this.state, type.cost)) return;
     const ctx = {
       grid: this.map.grid,
-      spawn: this.map.spawnPoint,
-      base: this.map.base,
+      spawn: this.tdSpawn,
+      base: this.tdBase,
       walls: this.state.walls,
       towers: this.state.towers,
       relics: this.state.relics,
+      tiles: this.map.tiles,
       productionBuildings: this.state.productionBuildings ?? []
     };
     if (!canPlaceProductionBuilding(ctx, col, row)) return;
@@ -497,11 +700,12 @@ export class GameSim {
     if (!canAffordCost(this.state, type.cost)) return;
     const ctx = {
       grid: this.map.grid,
-      spawn: this.map.spawnPoint,
-      base: this.map.base,
+      spawn: this.tdSpawn,
+      base: this.tdBase,
       walls: this.state.walls,
       towers: this.state.towers,
       relics: this.state.relics,
+      tiles: this.map.tiles,
       productionBuildings: this.state.productionBuildings ?? []
     };
     if (!canTrainUnit(ctx, col, row)) return;
@@ -532,6 +736,156 @@ export class GameSim {
       // при смене stance — обновляем home (anchor), чтобы guard/patrol держались новой точки
       unit.homeCol = unit.col;
       unit.homeRow = unit.row;
+    }
+  }
+
+  // ── M8.2: прямой контроль юнитов (RTS-приказы, additive — override AI). ──
+
+  private orderUnitMove(unitIds: string[], col: number, row: number, formation?: import('@tower/shared').FormationKind): void {
+    if (!this.rtsEnabled) return;
+    // M8.2: формация — распределяет target по выбранным юнитам
+    if (formation && formation !== 'none' && unitIds.length > 1) {
+      const positions = computeFormation(unitIds.length, { col, row }, formation, { spacing: 1.2 });
+      for (let i = 0; i < unitIds.length; i++) {
+        const p = positions[i] ?? { col, row };
+        this.applyMoveOrder(unitIds[i], Math.round(p.col), Math.round(p.row));
+      }
+      return;
+    }
+    for (const id of unitIds) {
+      this.applyMoveOrder(id, col, row);
+    }
+  }
+
+  private applyMoveOrder(unitId: string, col: number, row: number): void {
+    const unit = this.state.defenderUnits?.find((u) => u.id === unitId);
+    if (!unit) return;
+    unit.moveOrderCol = col;
+    unit.moveOrderRow = row;
+    unit.attackOrderEnemyId = null;
+    unit.patrolLoop = false;
+    unit.waypoints = undefined;
+    // home сдвигаем к цели, чтобы guard/patrol после приказа держались новой точки
+    unit.homeCol = col;
+    unit.homeRow = row;
+  }
+
+  private orderUnitAttack(unitIds: string[], enemyId: string): void {
+    if (!this.rtsEnabled) return;
+    for (const id of unitIds) {
+      const unit = this.state.defenderUnits?.find((u) => u.id === id);
+      if (!unit) continue;
+      unit.attackOrderEnemyId = enemyId;
+      unit.moveOrderCol = undefined;
+      unit.moveOrderRow = undefined;
+    }
+  }
+
+  private orderUnitStop(unitIds: string[]): void {
+    if (!this.rtsEnabled) return;
+    for (const id of unitIds) {
+      const unit = this.state.defenderUnits?.find((u) => u.id === id);
+      if (!unit) continue;
+      unit.moveOrderCol = undefined;
+      unit.moveOrderRow = undefined;
+      unit.attackOrderEnemyId = null;
+      unit.targetEnemyId = null;
+      unit.waypoints = undefined;
+      unit.patrolLoop = false;
+      unit.homeCol = unit.col;
+      unit.homeRow = unit.row;
+    }
+  }
+
+  /** M8.2: attack-move — двигаться к точке, по пути атакуя любых врагов. */
+  private orderUnitAttackMove(unitIds: string[], col: number, row: number): void {
+    if (!this.rtsEnabled) return;
+    for (const id of unitIds) {
+      const unit = this.state.defenderUnits?.find((u) => u.id === id);
+      if (!unit) continue;
+      unit.moveOrderCol = col;
+      unit.moveOrderRow = row;
+      // attackOrderEnemyId = null = "любой ближайший враг" (агрессивный auto-target)
+      unit.attackOrderEnemyId = null;
+      unit.stance = 'aggressive';
+      unit.homeCol = col;
+      unit.homeRow = row;
+    }
+  }
+
+  /** M8.2: patrol — циклический обход waypoints. */
+  private orderUnitPatrol(unitIds: string[], waypoints: Array<{ col: number; row: number }>): void {
+    if (!this.rtsEnabled) return;
+    if (waypoints.length === 0) return;
+    for (const id of unitIds) {
+      const unit = this.state.defenderUnits?.find((u) => u.id === id);
+      if (!unit) continue;
+      unit.waypoints = [...waypoints];
+      unit.patrolLoop = true;
+      const first = waypoints[0];
+      unit.moveOrderCol = first.col;
+      unit.moveOrderRow = first.row;
+      unit.attackOrderEnemyId = null;
+      unit.homeCol = first.col;
+      unit.homeRow = first.row;
+      unit.stance = 'aggressive';
+    }
+  }
+
+  /** M8.2: waypoint-queue — накапливает shift-click точки после текущего приказа. */
+  private orderUnitWaypointQueue(unitIds: string[], waypoints: Array<{ col: number; row: number }>, append?: boolean): void {
+    if (!this.rtsEnabled) return;
+    if (waypoints.length === 0) return;
+    for (const id of unitIds) {
+      const unit = this.state.defenderUnits?.find((u) => u.id === id);
+      if (!unit) continue;
+      if (append && (unit.waypoints?.length ?? 0) > 0) {
+        unit.waypoints = [...(unit.waypoints ?? []), ...waypoints];
+      } else {
+        unit.waypoints = [...waypoints];
+      }
+      // если активного приказа нет — начать выполнять первый waypoint сразу
+      if (unit.moveOrderCol === undefined || unit.moveOrderRow === undefined) {
+        const first = unit.waypoints.shift();
+        if (first) {
+          unit.moveOrderCol = first.col;
+          unit.moveOrderRow = first.row;
+        }
+      }
+    }
+  }
+
+  /** M8.3: order-gather — worker направляется к ресурсному узлу на добычу. */
+  private orderUnitGather(unitIds: string[], nodeId: string): void {
+    if (!this.rtsEnabled) return;
+    for (const id of unitIds) {
+      const unit = this.state.defenderUnits?.find((u) => u.id === id);
+      if (!unit) continue;
+      const type = this.unitTypes.get(unit.typeId);
+      if (!type?.worker) continue; // gather могут только workers
+      unit.gatherNodeId = nodeId;
+      unit.gatherState = 'to-node';
+      unit.gatherTimer = 0;
+      // снимаем бой/движение
+      unit.attackOrderEnemyId = null;
+      unit.targetEnemyId = null;
+    }
+  }
+
+  /** M8.3: research-upgrade — старт исследования в указанном здании. */
+  private researchUpgrade(upgradeId: string, _buildingId: string): void {
+    if (!this.rtsEnabled) return;
+    const upgrades = this.catalog.upgrades ?? [];
+    const up = upgrades.find((u) => u.id === upgradeId);
+    if (!up) return;
+    if (!canAffordCost(this.state, up.cost)) return;
+    spendCost(this.state, up.cost);
+    // single-player: researches хранятся прямо в state.ownerPlayer.researching (если есть)
+    // (Для PvP — это per-player; см. playersState[].researching.)
+    if (this.state.playersState && this.state.playersState.length > 0) {
+      const p = this.state.playersState[0];
+      p.researching = p.researching ?? [];
+      p.researching.push({ upgradeId, remainingSec: up.researchTime });
     }
   }
 
@@ -601,6 +955,67 @@ export class GameSim {
     this.state.waveEnemiesRemaining = this.waveState.totalToSpawn;
   }
 
+  /**
+   * M8 RTS-solo: AI-opponent tick.
+   * Каждые RTS_AI_WAVE_INTERVAL сек спавнит волну вражеских юнитов у AI town-hall
+   * (slot 1+). Юниты идут по маршруту (tdSpawn→tdBase) к town-hall игрока.
+   * Сложность растёт по aiWaveIndex: на каждой волне добавляются более тяжёлые типы.
+   *
+   * Не использует tickSpawner/waveState — те привязаны к TD-волнам с фиксированным
+   * расписанием. Здесь — простой таймер + мгновенный спавн пачки.
+   */
+  private tickRtsAi(dt: number): void {
+    this.aiAttackTimer -= dt;
+    if (this.aiAttackTimer > 0) return;
+    this.aiAttackTimer = RTS_AI_WAVE_INTERVAL;
+    this.aiWaveIndex += 1;
+
+    const state = this.state;
+    // AI town-hall-ы = источники спавна (slot 1+).
+    const aiTowns = state.enemies.filter((e) => e.stationary && e.alive);
+    if (aiTowns.length === 0) return;
+
+    // Рост сложности: первые волны — goblin/skeleton, дальше — zombie/demon.
+    // Прогрессия: wave 1: 6 goblin; 2: 8 skeleton; 3: 5 goblin + 5 zombie;
+    //             4: 6 zombie + 3 demon; 5+: +demon каждый раз.
+    const w = this.aiWaveIndex;
+    const groups: Array<{ typeId: string; count: number }> = [];
+    if (w === 1) groups.push({ typeId: 'goblin', count: 6 });
+    else if (w === 2) groups.push({ typeId: 'skeleton', count: 8 });
+    else if (w === 3) groups.push({ typeId: 'goblin', count: 5 }, { typeId: 'zombie', count: 5 });
+    else if (w === 4) groups.push({ typeId: 'zombie', count: 6 }, { typeId: 'demon', count: 3 });
+    else {
+      // w >= 5: мешаем всё с нарастающим количеством демонов
+      const demonN = Math.min(12, 3 + (w - 5));
+      groups.push({ typeId: 'skeleton', count: 6 }, { typeId: 'zombie', count: 6 }, { typeId: 'demon', count: demonN });
+    }
+
+    // Спавним у первого живого AI town-hall (slot 1). Каждый юнит стартует с pathProgress=0.
+    const spawnAt = aiTowns[0]!.position;
+    for (const g of groups) {
+      const type = this.enemyTypes.get(g.typeId);
+      if (!type) continue;
+      for (let i = 0; i < g.count; i++) {
+        // лёгкий разброс вокруг точки спавна (детерминированный — по индексу)
+        const ang = (i * Math.PI * 2) / Math.max(1, g.count);
+        const r = this.map.grid.cellSize * 0.8;
+        state.enemies.push({
+          id: this.nextId('ai-u'),
+          typeId: g.typeId,
+          hp: type.baseHp,
+          maxHp: type.baseHp,
+          pathProgress: 0,
+          position: {
+            x: spawnAt.x + Math.cos(ang) * r,
+            y: 0,
+            z: spawnAt.z + Math.sin(ang) * r
+          },
+          alive: true
+        });
+      }
+    }
+  }
+
   // ── fixed step ───────────────────────────────────────────────────
 
   private fixedStep(dt: number): void {
@@ -634,6 +1049,7 @@ export class GameSim {
         cellSize: this.map.grid.cellSize,
         dt,
         nextProjectileId: () => this.nextId('proj'),
+        tick: state.tick,
         relicMods: this.relicMods
       });
       for (const p of projectiles) state.projectiles.push(p);
@@ -680,9 +1096,10 @@ export class GameSim {
       damageToBase = out.damageToBase;
     }
 
-    // 4a. RTS (Фаза 6): защитные юниты атакуют врагов + production-тик + кулдауны
+    // 4a. RTS (Фаза 6): защитные юниты (AI + M8.2 приказы игрока) + production-тик + кулдауны
     if (this.rtsEnabled) {
-      if (state.defenderUnits && state.defenderUnits.length > 0 && state.enemies.length > 0) {
+      // M8.2: tickUnits запускается при наличии юнитов (приказы move работают и без врагов).
+      if (state.defenderUnits && state.defenderUnits.length > 0) {
         const out = tickUnits({
           units: state.defenderUnits,
           unitTypes: this.unitTypes,
@@ -716,6 +1133,44 @@ export class GameSim {
       if (state.activeSpells && state.activeSpells.length > 0) {
         state.activeSpells = tickActiveSpells(state.activeSpells);
       }
+      // M8.3: workers gathering (worker FSM + resource depletion)
+      if (state.defenderUnits && state.defenderUnits.some((u) => u.gatherNodeId)) {
+        const nodes = this.map.resourceNodes ?? [];
+        if (nodes.length > 0 && state.resources && state.productionBuildings) {
+          const out = tickGathering({
+            units: state.defenderUnits,
+            unitTypes: this.unitTypes,
+            nodes,
+            buildings: state.productionBuildings,
+            bag: state.resources,
+            grid: this.map.grid,
+            dt
+          });
+          // sync depletion обратно в map (если узлы закончились)
+          if (out.depletedNodeIds.length > 0 && this.map.resourceNodes) {
+            this.map.resourceNodes = pruneDepletedNodes(this.map.resourceNodes, out.depletedNodeIds);
+          }
+        }
+      }
+      // M8.3: research-progress (single-player: state.playersState[0])
+      if (state.playersState && state.playersState.length > 0) {
+        for (const p of state.playersState) {
+          if (p.researching && p.researching.length > 0) {
+            for (const r of p.researching) r.remainingSec -= dt;
+            const finished = p.researching.filter((r) => r.remainingSec <= 0);
+            p.researching = p.researching.filter((r) => r.remainingSec > 0);
+            if (finished.length > 0) {
+              p.researchedUpgrades = p.researchedUpgrades ?? [];
+              for (const f of finished) p.researchedUpgrades.push(f.upgradeId);
+            }
+          }
+        }
+      }
+      // M8 RTS-solo: AI-opponent — периодический спавн атакующих юнитов от AI town-hall
+      // к player town-hall. Сложность растёт по aiWaveIndex (больше/тяжелее юнитов).
+      if (this.rtsSolo && this.aiTownHallId) {
+        this.tickRtsAi(dt);
+      }
     }
 
     // 4b. стены: горение (DoT) + урон от врагов по соседним стенам (maze-bashing)
@@ -744,6 +1199,15 @@ export class GameSim {
     if (this.waveState) {
       this.waveState.resolved += killed + reached;
       state.waveEnemiesRemaining = Math.max(0, this.waveState.totalToSpawn - this.waveState.resolved);
+    }
+
+    // M8 RTS-solo: победа — все AI town-hall-ы уничтожены. Поражение (lives=0) обработает
+    // tickRules ниже; здесь мы лишь фиксируем 'won' если ни одного живого AI town-hall не осталось.
+    if (this.rtsSolo && state.status !== 'lost' && state.status !== 'won') {
+      const aiThreatsAlive = state.enemies.some((e) => e.stationary && e.alive);
+      if (!aiThreatsAlive) {
+        state.status = 'won';
+      }
     }
 
     // 6. cleanup
@@ -811,14 +1275,18 @@ export class GameSim {
    */
   private recomputeRoute(remap: boolean): void {
     const grid = this.map.grid;
-    const blocked = (c: number, r: number) => this.state.walls.some((w) => w.col === c && w.row === r);
-    const route = findGridRoute(this.map.spawnPoint, this.map.base, grid, blocked);
+    const tiles = this.map.tiles;
+    // blocked = стены И непроходимые тайлы (water/rock) — Phase T
+    const blocked = (c: number, r: number) =>
+      this.state.walls.some((w) => w.col === c && w.row === r) ||
+      isTileBlocking(tiles, grid, c, r);
+    const route = findGridRoute(this.tdSpawn, this.tdBase, grid, blocked);
     let wps: Waypoint[];
     if (route && route.length >= 1) {
       wps = route;
     } else {
       // defensively: прямая spawn→base (валидация установки не должна сюда пускать)
-      wps = [this.map.spawnPoint, this.map.base];
+      wps = [this.tdSpawn, this.tdBase];
     }
     this.routeWaypoints = wps;
     this.routePath = buildPath(wps, grid, this.map.heightmap);

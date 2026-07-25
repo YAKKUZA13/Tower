@@ -1,0 +1,33 @@
+{
+  "format_version": 3,
+  "name": "mine",
+  "palette": "default",
+  "seed": 52,
+  "units": [
+    {
+      "type": "Part", "id": "mound", "asset": "hip_roof",
+      "params": { "w": { "Float": 5.0 }, "h": { "Float": 2.2 }, "d": { "Float": 5.0 } },
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone_warm"
+    },
+    {
+      "type": "Volume", "id": "entrance", "footprint": [2.4, 1.6], "height": 2.0,
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 1.6] }, "rotation_y": 0.0,
+      "walls": { "material": "stone_warm", "thickness": 0.4, "quoins": "stone", "plinth": null },
+      "roof": { "kind": "Wedge", "height": 0.6, "overhang": 0.2, "material": "stone", "low_side": "South" },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Arch", "w": 1.4, "h": 1.6 }, "off": 0.0, "trim": "oak_dark" }
+      ]
+    },
+    {
+      "type": "Part", "id": "beam", "asset": "box",
+      "params": { "w": { "Float": 2.6 }, "h": { "Float": 0.3 }, "d": { "Float": 0.3 } },
+      "at": { "type": "Origin", "offset": [0.0, 2.0, 1.6] }, "rotation": [0.0, 0.0, 0.0], "label": "oak_dark"
+    },
+    {
+      "type": "Part", "id": "cart", "asset": "box",
+      "params": { "w": { "Float": 1.0 }, "h": { "Float": 0.6 }, "d": { "Float": 0.7 } },
+      "at": { "type": "Origin", "offset": [0.0, 0.3, 2.8] }, "rotation": [0.0, 0.0, 0.0], "label": "oak"
+    }
+  ]
+}

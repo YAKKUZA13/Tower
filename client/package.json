@@ -1,6 +1,6 @@
 {
   "name": "tower-defense-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
   "dependencies": {
     "@tower/shared": "*",
     "babylonjs": "^7.48.4",
-    "babylonjs-loaders": "^9.9.1",
+    "babylonjs-loaders": "7.54.3",
     "pinia": "^3.0.4",
     "vue": "^3.5.12"
   },

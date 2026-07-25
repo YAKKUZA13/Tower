@@ -9,6 +9,9 @@ import { SLOW_DURATION, PROJECTILE_HIT_RADIUS, FIXED_DT } from '../constants';
 import { gridToWorldData } from '../../domain/grid-math';
 import type { RelicModifiers } from './relics';
 
+/** Post-MVP: длительность визуального «мигания» врага при попадании (сек). */
+const HIT_FLASH_SECONDS = 0.18;
+
 export interface ProjectileOutcome {
   /** Награда золота за этот шаг (сумма reward убитых, с учётом реликвий). */
   goldGained: number;
@@ -78,7 +81,7 @@ export function tickProjectiles(deps: ProjectileDeps): ProjectileOutcome {
 /** Применяет урон; возвращает true, если враг перешёл alive→dead именно от этого удара. */
 function onHit(proj: Projectile, target: Enemy, deps: ProjectileDeps): boolean {
   const { enemies, enemyTypes, tick, grid, walls, burnTicks } = deps;
-  const mainKilled = applyDamage(target, proj.damage, proj.category, enemyTypes);
+  const mainKilled = applyDamage(target, proj.damage, proj.category, enemyTypes, tick);
   if (proj.splashRadius && proj.splashRadius > 0) {
     const r2 = proj.splashRadius * proj.splashRadius;
     for (const other of enemies) {
@@ -86,7 +89,7 @@ function onHit(proj: Projectile, target: Enemy, deps: ProjectileDeps): boolean {
       const dx = other.position.x - target.position.x;
       const dz = other.position.z - target.position.z;
       if (dx * dx + dz * dz <= r2) {
-        applyDamage(other, proj.damage * 0.6, proj.category, enemyTypes);
+        applyDamage(other, proj.damage * 0.6, proj.category, enemyTypes, tick);
       }
     }
     // Фаза 4: осадные/зажигательные снаряды поджигают стены в радиусе splash.
@@ -109,8 +112,15 @@ function onHit(proj: Projectile, target: Enemy, deps: ProjectileDeps): boolean {
   return mainKilled;
 }
 
-/** Физ/siege урон снижается бронёй (плоско, min 1); magic игнорирует броню. */
-function applyDamage(enemy: Enemy, rawDamage: number, category: Projectile['category'], enemyTypes: Map<string, EnemyType>): boolean {
+/** Физ/siege урон снижается бронёй (плоско, min 1); magic игнорирует броню.
+ *  Post-MVP: помечает врага hitFlashUntilTick для визуального мигания в renderer. */
+function applyDamage(
+  enemy: Enemy,
+  rawDamage: number,
+  category: Projectile['category'],
+  enemyTypes: Map<string, EnemyType>,
+  tick: number
+): boolean {
   if (!enemy.alive) return false;
   const armor = enemyTypes.get(enemy.typeId)?.armor ?? 0;
   let dmg = rawDamage;
@@ -118,6 +128,7 @@ function applyDamage(enemy: Enemy, rawDamage: number, category: Projectile['cate
     dmg = Math.max(1, rawDamage - armor);
   }
   enemy.hp -= dmg;
+  enemy.hitFlashUntilTick = tick + Math.round(HIT_FLASH_SECONDS / FIXED_DT);
   if (enemy.hp <= 0) {
     enemy.hp = 0;
     enemy.alive = false;

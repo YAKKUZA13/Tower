@@ -1,0 +1,39 @@
+{
+  "format_version": 3,
+  "name": "arcane_tower",
+  "palette": "default",
+  "seed": 33,
+  "units": [
+    {
+      "type": "Part", "id": "base", "asset": "cylinder",
+      "params": { "r": { "Float": 2.2 }, "h": { "Float": 1.4 }, "segments": { "Uint": 12 } },
+      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone_warm"
+    },
+    {
+      "type": "Part", "id": "shaft", "asset": "cylinder",
+      "params": { "r": { "Float": 1.4 }, "h": { "Float": 4.0 }, "segments": { "Uint": 12 } },
+      "at": { "type": "OnTopOf", "target": "base", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone"
+    },
+    {
+      "type": "Part", "id": "capstone", "asset": "cylinder",
+      "params": { "r": { "Float": 1.7 }, "h": { "Float": 0.6 }, "segments": { "Uint": 12 } },
+      "at": { "type": "OnTopOf", "target": "shaft", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone_warm"
+    },
+    {
+      "type": "Part", "id": "crystal", "asset": "crystal",
+      "params": { "r": { "Float": 1.1 }, "h": { "Float": 2.6 } },
+      "at": { "type": "OnTopOf", "target": "capstone", "offset": [0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
+      "label": "metal"
+    },
+    {
+      "type": "Part", "id": "horn_l", "asset": "horn",
+      "params": { "r": { "Float": 0.45 }, "h": { "Float": 2.2 } },
+      "at": { "type": "OnTopOf", "target": "base", "offset": [1.3, 1.3], "sink": 0.4 }, "rotation": [0.0, 0.0, 0.0],
+      "label": "stone_warm"
+    },
+    { "type": "Mirror", "id": "horn_r", "of": "horn_l" }
+  ]
+}
