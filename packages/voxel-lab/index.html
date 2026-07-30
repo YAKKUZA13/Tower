@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voxel Lab — Pure Engine Playground</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', system-ui, sans-serif; }
+    #canvas { width: 100vw; height: 100vh; display: block; }
+    #panel {
+      position: fixed; top: 12px; right: 12px; z-index: 10;
+      background: rgba(10,10,20,0.92); color: #ccc; border: 1px solid #333;
+      border-radius: 8px; padding: 16px 20px; min-width: 260px;
+      font-size: 13px; line-height: 1.6;
+      backdrop-filter: blur(8px);
+    }
+    #panel h2 { font-size: 15px; margin: 0 0 10px; color: #e0c080; }
+    #panel label { display: block; margin: 6px 0 2px; color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    #panel select, #panel input[type=range] { width: 100%; margin-bottom: 6px; }
+    #panel input[type=range] { accent-color: #c08040; }
+    #stats { margin-top: 10px; padding-top: 8px; border-top: 1px solid #333; color: #8a8; font-size: 12px; }
+    #stats span { color: #ad0; font-weight: bold; }
+    #tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    #tabs button {
+      flex: 1; padding: 5px 8px; border: 1px solid #444; background: #1a1a2e;
+      color: #888; border-radius: 4px; cursor: pointer; font-size: 11px;
+    }
+    #tabs button.active { background: #2a2a3e; color: #e0c080; border-color: #c08040; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="panel">
+    <div id="tabs">
+      <button id="tab-greedy" class="active">Greedy</button>
+      <button id="tab-models">Models</button>
+      <button id="tab-kit">Kit</button>
+    </div>
+    <div id="tab-content"></div>
+    <div id="stats">
+      <div>Triangles: <span id="stat-tri">0</span></div>
+      <div>Voxels: <span id="stat-vox">0</span></div>
+      <div>Meshing: <span id="stat-mesh">—</span></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

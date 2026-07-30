@@ -1,0 +1,100 @@
+/**
+ * Voxel Lab — main entry
+ * Babylon playground for pure voxel-core engine demos.
+ */
+import { Engine } from '@babylonjs/core/Engines/engine';
+import { Scene } from '@babylonjs/core/scene';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Color4 } from '@babylonjs/core/Maths/math.color';
+import { createGreedyScene, type LabScene } from './scenes/greedy-lab';
+import { createModelViewerScene } from './scenes/model-viewer';
+import { createKitScene } from './scenes/kit-lab';
+
+const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+const scene = new Scene(engine);
+scene.clearColor = new Color4(0.08, 0.08, 0.14, 1);
+
+// camera
+const camera = new ArcRotateCamera('cam', -Math.PI / 4, Math.PI / 4, 12, Vector3.Zero(), scene);
+camera.lowerRadiusLimit = 2;
+camera.upperRadiusLimit = 40;
+camera.wheelPrecision = 60;
+camera.attachControl(canvas, true);
+
+// lights
+const hemi = new HemisphericLight('hemi', new Vector3(0.3, 0.8, -0.4), scene);
+hemi.intensity = 0.7;
+hemi.diffuse.set(0.88, 0.82, 0.72);
+const sun = new DirectionalLight('sun', new Vector3(-0.6, -0.9, 0.5), scene);
+sun.intensity = 0.8;
+sun.diffuse.set(1.0, 0.96, 0.88);
+
+// ground grid
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
+const grid = MeshBuilder.CreateGround('grid', { width: 20, height: 20, subdivisions: 20 }, scene);
+const gridMat = new StandardMaterial('gridMat', scene);
+gridMat.diffuseColor = new Color3(0.12, 0.12, 0.16);
+gridMat.wireframe = true;
+gridMat.alpha = 0.3;
+grid.material = gridMat;
+grid.position.y = -3;
+
+// stats elements
+const statTri = document.getElementById('stat-tri')!;
+const statVox = document.getElementById('stat-vox')!;
+const statMesh = document.getElementById('stat-mesh')!;
+
+export function updateStats(tri: number, vox: number, meshing: string) {
+  statTri.textContent = String(tri);
+  statVox.textContent = String(vox);
+  statMesh.textContent = meshing;
+}
+
+// scene management
+let current: LabScene | null = null;
+
+async function switchTab(tab: string) {
+  current?.dispose();
+  const content = document.getElementById('tab-content')!;
+  content.innerHTML = '';
+
+  switch (tab) {
+    case 'greedy': {
+      document.getElementById('tab-greedy')!.className = 'active';
+      document.getElementById('tab-models')!.className = '';
+      document.getElementById('tab-kit')!.className = '';
+      current = await createGreedyScene(scene, updateStats);
+      break;
+    }
+    case 'models': {
+      document.getElementById('tab-greedy')!.className = '';
+      document.getElementById('tab-models')!.className = 'active';
+      document.getElementById('tab-kit')!.className = '';
+      current = await createModelViewerScene(scene, updateStats, content);
+      break;
+    }
+    case 'kit': {
+      document.getElementById('tab-greedy')!.className = '';
+      document.getElementById('tab-models')!.className = '';
+      document.getElementById('tab-kit')!.className = 'active';
+      current = await createKitScene(scene, updateStats, content);
+      break;
+    }
+  }
+}
+
+document.getElementById('tab-greedy')!.onclick = () => switchTab('greedy');
+document.getElementById('tab-models')!.onclick = () => switchTab('models');
+document.getElementById('tab-kit')!.onclick = () => switchTab('kit');
+
+// start
+switchTab('greedy');
+
+engine.runRenderLoop(() => scene.render());
+window.addEventListener('resize', () => engine.resize());
