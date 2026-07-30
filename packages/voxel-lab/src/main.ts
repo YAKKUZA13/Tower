@@ -12,6 +12,7 @@ import { Color4 } from '@babylonjs/core/Maths/math.color';
 import { createGreedyScene, type LabScene } from './scenes/greedy-lab';
 import { createModelViewerScene } from './scenes/model-viewer';
 import { createKitScene } from './scenes/kit-lab';
+import { createTerrainScene } from './scenes/terrain-lab';
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
@@ -82,8 +83,18 @@ async function switchTab(tab: string) {
     case 'kit': {
       document.getElementById('tab-greedy')!.className = '';
       document.getElementById('tab-models')!.className = '';
-      document.getElementById('tab-kit')!.className = 'active';
+      document.getElementById('tab-kit')!.className = '';
+      document.getElementById('tab-terrain')!.className = '';
       current = await createKitScene(scene, updateStats, content);
+      document.getElementById('tab-kit')!.className = 'active';
+      break;
+    }
+    case 'terrain': {
+      document.getElementById('tab-greedy')!.className = '';
+      document.getElementById('tab-models')!.className = '';
+      document.getElementById('tab-kit')!.className = '';
+      document.getElementById('tab-terrain')!.className = 'active';
+      current = await createTerrainScene(scene, updateStats, content);
       break;
     }
   }
@@ -92,6 +103,7 @@ async function switchTab(tab: string) {
 document.getElementById('tab-greedy')!.onclick = () => switchTab('greedy');
 document.getElementById('tab-models')!.onclick = () => switchTab('models');
 document.getElementById('tab-kit')!.onclick = () => switchTab('kit');
+document.getElementById('tab-terrain')!.onclick = () => switchTab('terrain');
 
 // start
 switchTab('greedy');

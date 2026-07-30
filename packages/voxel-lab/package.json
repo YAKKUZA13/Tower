@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tower/voxel-core": "*",
+    "@tower/engine-terrain": "*",
     "@babylonjs/core": "^7.48.4"
   },
   "devDependencies": {
