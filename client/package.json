@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@tower/shared": "*",
+    "@tower/voxel-core": "*",
+    "@tower/engine-terrain": "*",
     "babylonjs": "^7.48.4",
     "babylonjs-loaders": "7.54.3",
     "pinia": "^3.0.4",
