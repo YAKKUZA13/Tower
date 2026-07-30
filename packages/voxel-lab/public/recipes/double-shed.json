@@ -1,0 +1,27 @@
+{
+  "format_version": 3,
+  "name": "double_shed",
+  "palette": "default",
+  "seed": 7,
+  "units": [
+    {
+      "type": "Part", "id": "pad", "asset": "slab",
+      "params": { "w": { "Float": 10 }, "h": { "Float": 0.3 }, "d": { "Float": 6 } },
+      "at": { "type": "Origin", "offset": [0, -0.3, 0] },
+      "rotation": [0, 0, 0]
+    },
+    {
+      "type": "Volume", "id": "shed_e", "footprint": [3, 4], "height": 3,
+      "at": { "type": "Origin", "offset": [2.5, 0, 0] },
+      "rotation_y": 0,
+      "walls": { "material": "stone_warm", "thickness": 0.35, "quoins": null, "plinth": null },
+      "roof": { "kind": "Wedge", "height": 1.2, "overhang": 0.3, "material": "oak_dark", "low_side": "East" },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Door", "w": 1.2, "h": 2 }, "off": 0 }
+      ]
+    },
+    {
+      "type": "Mirror", "id": "shed_w", "of": "shed_e"
+    }
+  ]
+}

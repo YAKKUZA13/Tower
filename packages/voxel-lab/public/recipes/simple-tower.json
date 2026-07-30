@@ -1,0 +1,31 @@
+{
+  "format_version": 3,
+  "name": "simple_tower",
+  "palette": "default",
+  "seed": 1,
+  "units": [
+    {
+      "type": "Part", "id": "base", "asset": "box",
+      "params": { "w": { "Float": 4 }, "h": { "Float": 1 }, "d": { "Float": 4 } },
+      "at": { "type": "Origin", "offset": [0, 0, 0] },
+      "rotation": [0, 0, 0],
+      "label": "stone_warm"
+    },
+    {
+      "type": "Volume", "id": "body", "footprint": [3, 3], "height": 4,
+      "at": { "type": "OnTopOf", "target": "base", "offset": [0, 0] },
+      "rotation_y": 0,
+      "walls": { "material": "oak", "thickness": 0.35, "quoins": "stone_warm", "plinth": null },
+      "roof": { "kind": "Hip", "height": 1.5, "overhang": 0.3, "material": "oak_dark", "low_side": null },
+      "openings": [
+        { "face": "South", "kind": { "kind": "Arch", "w": 1.6, "h": 2.4 }, "off": 0 }
+      ]
+    },
+    {
+      "type": "Part", "id": "flag", "asset": "cylinder",
+      "params": { "r": { "Float": 0.12 }, "h": { "Float": 2 }, "segments": { "Uint": 6 } },
+      "at": { "type": "OnTopOf", "target": "body", "offset": [0, 0], "sink": 0.4 },
+      "rotation": [0, 0, 0]
+    }
+  ]
+}

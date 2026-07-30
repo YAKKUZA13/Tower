@@ -13,6 +13,7 @@ import { createGreedyScene, type LabScene } from './scenes/greedy-lab';
 import { createModelViewerScene } from './scenes/model-viewer';
 import { createKitScene } from './scenes/kit-lab';
 import { createTerrainScene } from './scenes/terrain-lab';
+import { createRecipeScene } from './scenes/recipe-lab';
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
@@ -65,36 +66,33 @@ async function switchTab(tab: string) {
   const content = document.getElementById('tab-content')!;
   content.innerHTML = '';
 
+  const tabs = ['greedy', 'models', 'kit', 'terrain', 'recipe'];
+  for (const t of tabs) document.getElementById(`tab-${t}`)!.className = '';
+
   switch (tab) {
     case 'greedy': {
       document.getElementById('tab-greedy')!.className = 'active';
-      document.getElementById('tab-models')!.className = '';
-      document.getElementById('tab-kit')!.className = '';
       current = await createGreedyScene(scene, updateStats);
       break;
     }
     case 'models': {
-      document.getElementById('tab-greedy')!.className = '';
       document.getElementById('tab-models')!.className = 'active';
-      document.getElementById('tab-kit')!.className = '';
       current = await createModelViewerScene(scene, updateStats, content);
       break;
     }
     case 'kit': {
-      document.getElementById('tab-greedy')!.className = '';
-      document.getElementById('tab-models')!.className = '';
-      document.getElementById('tab-kit')!.className = '';
-      document.getElementById('tab-terrain')!.className = '';
-      current = await createKitScene(scene, updateStats, content);
       document.getElementById('tab-kit')!.className = 'active';
+      current = await createKitScene(scene, updateStats, content);
       break;
     }
     case 'terrain': {
-      document.getElementById('tab-greedy')!.className = '';
-      document.getElementById('tab-models')!.className = '';
-      document.getElementById('tab-kit')!.className = '';
       document.getElementById('tab-terrain')!.className = 'active';
       current = await createTerrainScene(scene, updateStats, content);
+      break;
+    }
+    case 'recipe': {
+      document.getElementById('tab-recipe')!.className = 'active';
+      current = await createRecipeScene(scene, updateStats, content);
       break;
     }
   }
@@ -104,6 +102,7 @@ document.getElementById('tab-greedy')!.onclick = () => switchTab('greedy');
 document.getElementById('tab-models')!.onclick = () => switchTab('models');
 document.getElementById('tab-kit')!.onclick = () => switchTab('kit');
 document.getElementById('tab-terrain')!.onclick = () => switchTab('terrain');
+document.getElementById('tab-recipe')!.onclick = () => switchTab('recipe');
 
 // start
 switchTab('greedy');

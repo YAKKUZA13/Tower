@@ -1,0 +1,33 @@
+{
+  "format_version": 3,
+  "name": "wall_section",
+  "palette": "default",
+  "seed": 3,
+  "units": [
+    {
+      "type": "Volume", "id": "gate", "footprint": [2, 1], "height": 4,
+      "at": { "type": "Origin", "offset": [0, 0, 0] },
+      "rotation_y": 0,
+      "walls": { "material": "stone_warm", "thickness": 0.5, "quoins": "stone_warm", "plinth": "stone_warm" },
+      "roof": null,
+      "openings": [
+        { "face": "North", "kind": { "kind": "Arch", "w": 2, "h": 3 }, "off": 0 },
+        { "face": "South", "kind": { "kind": "Arch", "w": 2, "h": 3 }, "off": 0 }
+      ]
+    },
+    {
+      "type": "Row", "id": "wall_n", "asset": "box",
+      "params": { "w": { "Float": 1 }, "h": { "Float": 2.5 }, "d": { "Float": 0.4 } },
+      "label": "stone_warm",
+      "start": { "type": "At", "pos": [-3.5, 0, 0] },
+      "dir": [1, 0, 0], "count": 3, "step": 1.5
+    },
+    {
+      "type": "Row", "id": "wall_s", "asset": "box",
+      "params": { "w": { "Float": 1 }, "h": { "Float": 2.5 }, "d": { "Float": 0.4 } },
+      "label": "stone_warm",
+      "start": { "type": "At", "pos": [3.5, 0, 0] },
+      "dir": [-1, 0, 0], "count": 3, "step": 1.5
+    }
+  ]
+}
