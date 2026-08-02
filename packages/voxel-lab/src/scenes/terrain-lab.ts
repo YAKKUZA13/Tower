@@ -2,11 +2,7 @@
  * Terrain Lab — 3D heightmap renderer for engine-terrain
  * Value-noise terrain with vertex-colors by altitude.
  */
-import { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
-import type { Scene } from '@babylonjs/core/scene';
+import { Color3, Mesh, StandardMaterial, VertexData, type Scene } from 'babylonjs';
 import {
   sampleHeight,
   computeHeightRange
@@ -116,10 +112,12 @@ export async function createTerrainScene(
     vd.indices = indices;
     vd.colors = colors;
     vd.applyToMesh(mesh, false);
+    mesh.useVertexColors = true;
+    mesh.hasVertexAlpha = false;
     mesh.convertToFlatShadedMesh();
 
     const mat = new StandardMaterial('terrain-mat', scene);
-    mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+    mat.diffuseColor = new Color3(1, 1, 1);
     mat.specularColor = new Color3(0.02, 0.02, 0.02);
     mesh.material = mat;
     mesh.position.y = -2;

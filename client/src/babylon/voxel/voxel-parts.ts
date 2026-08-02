@@ -31,7 +31,7 @@ export function assembleRig(
 ): TransformNode {
   const meshing = options.meshing ?? 'greedy';
   const mat = new StandardMaterial(`${def.name}-rig-mat`, scene);
-  mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+  mat.diffuseColor = new Color3(1, 1, 1);
   if (options.matte !== false) mat.specularColor = new Color3(0.04, 0.04, 0.04);
   const em = options.emissive;
   const es = options.emissiveStrength ?? 0.18;
@@ -106,6 +106,8 @@ function buildPartMesh(
       vd.colors = geo.colors;
       vd.normals = geo.normals;
       vd.applyToMesh(mesh, false);
+      mesh.useVertexColors = true;
+      mesh.hasVertexAlpha = false;
     }
     return mesh;
   }

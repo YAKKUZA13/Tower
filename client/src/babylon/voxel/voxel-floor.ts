@@ -34,7 +34,7 @@ export function createVoxelBoard(
   // Единый материал для всей подложки+бордюра: vertex colors задают цвет
   // каждой детали (тёмный камень для плиты, кость/золото для акцентов).
   const boardMat = new StandardMaterial('voxel-board-mat', scene);
-  boardMat.diffuseColor = new Color3(0.95, 0.95, 0.95); // базис → видны vertex colors
+  boardMat.diffuseColor = new Color3(1, 1, 1); // базис → видны vertex colors
   boardMat.specularColor = new Color3(0.03, 0.03, 0.03);
   boardMat.roughness = 0.95;
 
@@ -49,7 +49,7 @@ export function createVoxelBoard(
   paintStoneTileVariation(ground, grid);
 
   const groundMat = new StandardMaterial('voxel-ground-mat', scene);
-  groundMat.diffuseColor = new Color3(0.95, 0.95, 0.95); // базис → видны vertex colors
+  groundMat.diffuseColor = new Color3(1, 1, 1); // базис → видны vertex colors
   groundMat.specularColor = new Color3(0.03, 0.03, 0.03);
   groundMat.roughness = 0.95;
   ground.material = groundMat;

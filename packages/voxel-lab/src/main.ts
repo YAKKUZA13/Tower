@@ -2,13 +2,7 @@
  * Voxel Lab — main entry
  * Babylon playground for pure voxel-core engine demos.
  */
-import { Engine } from '@babylonjs/core/Engines/engine';
-import { Scene } from '@babylonjs/core/scene';
-import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
-import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
-import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { Color4 } from '@babylonjs/core/Maths/math.color';
+import { ArcRotateCamera, Color3, Color4, DirectionalLight, Engine, HemisphericLight, MeshBuilder, Scene, StandardMaterial, Vector3 } from 'babylonjs';
 import { createGreedyScene, type LabScene } from './scenes/greedy-lab';
 import { createModelViewerScene } from './scenes/model-viewer';
 import { createKitScene } from './scenes/kit-lab';
@@ -36,9 +30,6 @@ sun.intensity = 0.8;
 sun.diffuse.set(1.0, 0.96, 0.88);
 
 // ground grid
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
 const grid = MeshBuilder.CreateGround('grid', { width: 20, height: 20, subdivisions: 20 }, scene);
 const gridMat = new StandardMaterial('gridMat', scene);
 gridMat.diffuseColor = new Color3(0.12, 0.12, 0.16);

@@ -84,7 +84,7 @@ export class VoxelDebrisPool {
     this.mesh.alwaysSelectAsActiveMesh = true;
     // материал: vertex/per-instance color несёт цвет; общий диффуз белый.
     const mat = new StandardMaterial('voxel-debris-mat', scene);
-    mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+    mat.diffuseColor = new Color3(1, 1, 1);
     mat.specularColor = new Color3(0.06, 0.06, 0.06);
     mat.emissiveColor = new Color3(0.18, 0.14, 0.10); // лёгкое «тление»
     this.mesh.material = mat;

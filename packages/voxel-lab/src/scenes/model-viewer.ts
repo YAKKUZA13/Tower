@@ -2,12 +2,7 @@
  * Model Viewer — browse all VOXEL_BUILDERS models
  * Rebuilds on model switch; shows tri/voxel counts.
  */
-import { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import type { Scene } from '@babylonjs/core/scene';
+import { Color3, Mesh, MeshBuilder, StandardMaterial, VertexData, type Scene } from 'babylonjs';
 import {
   computeGreedyGeometry,
   VOXEL_BUILDERS,
@@ -50,6 +45,8 @@ export async function createModelViewerScene(
     vd.colors = geo.colors;
     vd.normals = geo.normals;
     vd.applyToMesh(mesh, false);
+    mesh.useVertexColors = true;
+    mesh.hasVertexAlpha = false;
 
     mesh.refreshBoundingInfo();
     const bb = mesh.getBoundingInfo().boundingBox;
@@ -62,7 +59,7 @@ export async function createModelViewerScene(
 
   function applyMaterial(m: Mesh, name: string) {
     const mat = new StandardMaterial('mat', scene);
-    mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+    mat.diffuseColor = new Color3(1, 1, 1);
     mat.specularColor = new Color3(0.06, 0.06, 0.06);
     const em = builderEmissive(name);
     if (em) mat.emissiveColor = new Color3(em[0] * 0.25, em[1] * 0.25, em[2] * 0.25);

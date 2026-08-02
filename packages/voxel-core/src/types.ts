@@ -32,3 +32,48 @@ export interface GreedyGeometry {
   colors: number[];   // RGBA per vertex (baked tint*ao)
   normals: number[];  // face normal per vertex
 }
+
+/**
+ * Validate that a GreedyGeometry's vertex color buffer has the expected format:
+ * - Length is a multiple of 16 (4 vertices × 4 RGBA components)
+ * - No NaN values
+ * - All alpha values are in [0, 1]
+ *
+ * Returns an array of warning strings (empty = valid).
+ */
+export function validateVertexColors(geo: GreedyGeometry): string[] {
+  const warnings: string[] = [];
+  if (geo.colors.length % 16 !== 0) {
+    warnings.push(`colors length ${geo.colors.length} is not a multiple of 16 (expected 4*RGBA per quad)`);
+  }
+  if (geo.colors.length !== geo.positions.length / 3 * 4) {
+    warnings.push(`colors length ${geo.colors.length} != positions/3*4 = ${geo.positions.length / 3 * 4}`);
+  }
+  for (let i = 0; i < geo.colors.length; i++) {
+    if (Number.isNaN(geo.colors[i]!)) {
+      warnings.push(`NaN at colors[${i}]`);
+      break; // one NaN warning is enough
+    }
+  }
+  for (let v = 0; v < geo.colors.length / 4; v++) {
+    const a = geo.colors[v * 4 + 3]!;
+    if (a < 0 || a > 1) {
+      warnings.push(`alpha out of range at vertex ${v}: ${a}`);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * Extract a flat RGBA tuple for a specific quad vertex from a GreedyGeometry.
+ * Quad index = quadIdx (0-based), vertex = 0..3 (CCW from bottom-left).
+ */
+export function getQuadVertexColor(geo: GreedyGeometry, quadIdx: number, vertex: number): [number, number, number, number] {
+  const base = (quadIdx * 4 + vertex) * 4;
+  return [
+    geo.colors[base]!,
+    geo.colors[base + 1]!,
+    geo.colors[base + 2]!,
+    geo.colors[base + 3]!,
+  ];
+}

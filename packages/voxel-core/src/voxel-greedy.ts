@@ -11,6 +11,9 @@ import { FACE_TINT_TOP, FACE_TINT_SIDE, FACE_TINT_BOTTOM, AO_FACTORS, isAccentCo
 
 /**
  * Pure (no-Scene) greedy geometry: Voxel[] → {positions, indices, colors, normals}.
+ *
+ * Throws if any voxel has non-unit size (sx/sy/sz !== 1). The greedy algorithm
+ * assumes unit cubes. Route non-unit voxels to the naive builder instead.
  */
 export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeometry {
   const positions: number[] = [];
@@ -20,6 +23,13 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
 
   const cells = new Map<string, RGB>();
   for (const v of voxels) {
+    // Phase 4.1: reject non-unit voxels — greedy algorithm assumes unit cubes.
+    if (v.sx !== 1 || v.sy !== 1 || v.sz !== 1) {
+      throw new Error(
+        `computeGreedyGeometry: non-unit voxel at (${v.x},${v.y},${v.z}) ` +
+        `size (${v.sx},${v.sy},${v.sz}). Use the naive builder for non-unit voxels.`
+      );
+    }
     cells.set(`${Math.round(v.x)},${Math.round(v.y)},${Math.round(v.z)}`, v.color);
   }
   if (cells.size === 0) return { positions, indices, colors, normals };

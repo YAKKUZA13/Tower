@@ -243,7 +243,7 @@ export class VoxelField {
       -(this.data.rows * this.cellSize) / 2 + this.cellSize / 2
     );
     const mat = new StandardMaterial('voxel-field-mat', this.scene);
-    mat.diffuseColor = new Color3(0.95, 0.95, 0.95);
+    mat.diffuseColor = new Color3(1, 1, 1);
     mat.specularColor = new Color3(0.03, 0.03, 0.03);
     mesh.material = mat;
     mesh.receiveShadows = true;

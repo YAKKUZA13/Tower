@@ -12,7 +12,7 @@
     "@tower/voxel-core": "*",
     "@tower/engine-terrain": "*",
     "@tower/engine-recipe": "*",
-    "@babylonjs/core": "^7.48.4"
+    "babylonjs": "^7.48.4"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

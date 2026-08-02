@@ -2,11 +2,7 @@
  * Recipe Lab — live recipe editor + 3D preview
  * Edit JSON, compile, see assembled voxels immediately.
  */
-import { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
-import type { Scene } from '@babylonjs/core/scene';
+import { Color3, Mesh, StandardMaterial, VertexData, type Scene } from 'babylonjs';
 import {
   compile,
   loadRecipe,
@@ -52,6 +48,8 @@ export async function createRecipeScene(
     vd.colors = geo.colors;
     vd.normals = geo.normals;
     vd.applyToMesh(mesh, false);
+    mesh.useVertexColors = true;
+    mesh.hasVertexAlpha = false;
 
     mesh.refreshBoundingInfo();
     const bb = mesh.getBoundingInfo().boundingBox;
@@ -95,7 +93,7 @@ export async function createRecipeScene(
     const mesh = buildMesh(voxels);
 
     const mat = new StandardMaterial('rcp-mat', scene);
-    mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+    mat.diffuseColor = new Color3(1, 1, 1);
     mat.specularColor = new Color3(0.06, 0.06, 0.06);
     mesh.material = mat;
     meshes.push(mesh);

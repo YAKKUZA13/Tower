@@ -88,7 +88,8 @@ export function buildVoxelMesh(scene: Scene, voxels: Voxel[], options: VoxelMesh
   normalizeMesh(merged);
 
   const mat = new StandardMaterial(`${options.name}-mat`, scene);
-  mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+  // Phase 2 fix: diffuseColor (1,1,1) — vertex colors pass through unmodified.
+  mat.diffuseColor = new Color3(1, 1, 1);
   if (options.matte !== false) {
     mat.specularColor = new Color3(0.04, 0.04, 0.04);
   }
@@ -103,6 +104,9 @@ export function buildVoxelMesh(scene: Scene, voxels: Voxel[], options: VoxelMesh
   merged.material = mat;
   merged.isPickable = false;
   merged.doNotSyncBoundingInfo = true;
+  // Phase 2 fix: ensure vertex colors consumed by shader.
+  merged.useVertexColors = true;
+  merged.hasVertexAlpha = options.alpha !== undefined && options.alpha < 1;
   return merged;
 }
 
@@ -122,7 +126,8 @@ export function buildVoxelMeshGreedy(scene: Scene, voxels: Voxel[], options: Vox
   normalizeMesh(mesh);
 
   const mat = new StandardMaterial(`${options.name}-mat`, scene);
-  mat.diffuseColor = new Color3(0.82, 0.82, 0.82);
+  // Phase 2 fix: diffuseColor (1,1,1) — vertex colors pass through unmodified.
+  mat.diffuseColor = new Color3(1, 1, 1);
   if (options.matte !== false) {
     mat.specularColor = new Color3(0.04, 0.04, 0.04);
   }
@@ -137,5 +142,8 @@ export function buildVoxelMeshGreedy(scene: Scene, voxels: Voxel[], options: Vox
   mesh.material = mat;
   mesh.isPickable = false;
   mesh.doNotSyncBoundingInfo = true;
+  // Phase 2 fix: ensure vertex colors consumed by shader.
+  mesh.useVertexColors = true;
+  mesh.hasVertexAlpha = options.alpha !== undefined && options.alpha < 1;
   return mesh;
 }
