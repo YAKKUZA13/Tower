@@ -16,19 +16,16 @@
  * Реализация: отдельный ShaderMaterial `toon-pixel-art` (не модифицирует M7),
  * который можно применить к сцене через applyPixelArtToon (зеркало applyToonToScene).
  */
-import {
-  Color3,
-  Effect,
-  Mesh,
-  RawTexture,
-  Constants,
-  ShaderMaterial,
-  Vector2,
-  Vector3,
-  type Camera,
-  type Scene,
-  type Texture
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
+import { Vector2, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
+import { type Scene } from '@babylonjs/core/scene.js';
+import { type Texture } from '@babylonjs/core/Materials/Textures/texture.js';
 
 const TOON_PA_VERTEX = `
 attribute vec3 position;

@@ -1,8 +1,12 @@
+import { applyGreedyGeometry } from '@tower/voxel-babylon';
 /**
  * Kit Lab — procedural character kit assembler
  * Seed → assembleCharacter → greedy mesh preview
  */
-import { Color3, Mesh, StandardMaterial, VertexData, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import {
   computeGreedyGeometry,
   assembleCharacter,
@@ -37,12 +41,7 @@ export async function createKitScene(
     const geo = computeGreedyGeometry(voxels, false);
     const mesh = new Mesh('kit', scene);
     if (geo.positions.length === 0) return mesh;
-    const vd = new VertexData();
-    vd.positions = geo.positions;
-    vd.indices = geo.indices;
-    vd.colors = geo.colors;
-    vd.normals = geo.normals;
-    vd.applyToMesh(mesh, false);
+    applyGreedyGeometry(mesh, geo);
     mesh.useVertexColors = true;
     mesh.hasVertexAlpha = false;
 
@@ -56,7 +55,7 @@ export async function createKitScene(
   }
 
   function rebuild() {
-    meshes.forEach(m => m.dispose());
+    meshes.forEach(m => m.dispose(false, true));
     meshes.length = 0;
 
     const def = assembleCharacter(seed, { archetype });
@@ -107,6 +106,6 @@ export async function createKitScene(
   rebuild();
 
   return {
-    dispose() { meshes.forEach(m => m.dispose()); }
+    dispose() { meshes.forEach(m => m.dispose(false, true)); }
   };
 }

@@ -10,7 +10,8 @@
  *
  * Run: npx tsx scripts/smoke-voxel-field.ts
  */
-import { NullEngine, Scene } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
 import {
   makeFieldData,
   tilesToField,

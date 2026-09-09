@@ -13,12 +13,10 @@
  * Сим/domain не тронуты — рендер только читает state.defenderUnits /
  * state.productionBuildings / state.activeSpells (детерминизм ADR-2 сохранён).
  */
-import {
-  InstancedMesh,
-  Mesh,
-  Vector3,
-  type Scene
-} from 'babylonjs';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type {
   GameSnapshot,
   GridData,

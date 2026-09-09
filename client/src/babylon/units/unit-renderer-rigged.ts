@@ -10,7 +10,10 @@
  * Сим НЕ знает о риге (инвариант ADR-2): вся анимация рендер-only. Attack-swing
  * детектится по reset `DefenderUnit.cooldown` (он скачет вверх при атаке).
  */
-import { InstancedMesh, Mesh, TransformNode, type Scene } from 'babylonjs';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type {
   DefenderUnitType,
   GameSnapshot,
@@ -215,7 +218,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
 
   /** Множитель размера зданий относительно cellSize. Здания должны быть крупнее
    *  юнитов (Town Hall выше солдата), иначе база читается как «кубик у ног юнита». */
-  private static readonly BUILDING_SIZE_MULT = 2.4;
+  private static readonly BUILDING_SIZE_MULT = 2.1;
 
   private syncBuildings(state: GameSnapshot): void {
     const seen = new Set<string>();

@@ -16,18 +16,16 @@
  *    (dithered noise). Recolour света делается вызывающим (передать warm→cool lerp).
  *  - `ParticleSpawner` — обёртка над SpriteManager + sprite-pulse для effects.
  */
-import {
-  Color3,
-  Constants,
-  DynamicTexture,
-  Effect,
-  PostProcess,
-  RawTexture,
-  Scene,
-  SpriteManager,
-  Texture,
-  type Camera
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { PostProcess } from '@babylonjs/core/PostProcesses/postProcess.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { SpriteManager } from '@babylonjs/core/Sprites/spriteManager.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
 
 // ── Sprite-sheet helpers (bake-time, runtime просто используют SpriteManager) ──
 

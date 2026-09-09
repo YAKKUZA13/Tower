@@ -14,7 +14,14 @@
  * Совместим с pixel-snap (cam-snap.ts): после движения, target снапается к
  * view-aligned texel-grid в onBeforeRender.
  */
-import { ArcRotateCamera, EventConstants, KeyboardEventTypes, PointerEventTypes, type Engine, type KeyboardInfo, type Observer, type PointerInfo, type Scene, Vector3 } from 'babylonjs';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
+import { EventConstants } from '@babylonjs/core/Events/deviceInputEvents.js';
+import { KeyboardEventTypes, type KeyboardInfo } from '@babylonjs/core/Events/keyboardEvents.js';
+import { PointerEventTypes, type PointerInfo } from '@babylonjs/core/Events/pointerEvents.js';
+import { type Engine } from '@babylonjs/core/Engines/engine.js';
+import { type Observer } from '@babylonjs/core/Misc/observable.js';
+import { type Scene } from '@babylonjs/core/scene.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 
 export interface RtsCameraOptions {
   /** Начальный target (центр карты). */

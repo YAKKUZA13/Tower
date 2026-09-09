@@ -12,16 +12,14 @@
  *  - Финальный fullscreen-quad blit-PostProcess с NEAREST sampling (Texture.NEAREST_SAMPLINGMODE).
  *  - Sub-pixel offset uniform (см. cam-snap.ts) закрывает pixel-snap loop.
  */
-import {
-  Constants,
-  Effect,
-  Engine,
-  PostProcess,
-  RenderTargetTexture,
-  Scene,
-  Texture,
-  type Camera
-} from 'babylonjs';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { Engine } from '@babylonjs/core/Engines/engine.js';
+import { PostProcess } from '@babylonjs/core/PostProcesses/postProcess.js';
+import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
 
 export interface LowresOptions {
   /** Внутренняя высота рендера (по умолчанию 360). */

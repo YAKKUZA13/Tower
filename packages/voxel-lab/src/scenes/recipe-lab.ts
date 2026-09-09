@@ -1,8 +1,12 @@
+import { applyGreedyGeometry } from '@tower/voxel-babylon';
 /**
  * Recipe Lab — live recipe editor + 3D preview
  * Edit JSON, compile, see assembled voxels immediately.
  */
-import { Color3, Mesh, StandardMaterial, VertexData, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import {
   compile,
   loadRecipe,
@@ -25,12 +29,15 @@ const SAMPLES: Record<string, { name: string; url: string }> = {
   'wall-gate': { name: 'Wall + Gate (row)', url: '/recipes/wall-gate.json' }
 };
 
-export async function createRecipeScene(
+export function createRecipeScene(
   scene: Scene,
   onStats: StatsFn,
   content: HTMLElement
-): Promise<LabScene> {
+): LabScene {
   const meshes: Mesh[] = [];
+  let disposed = false;
+  let requestVersion = 0;
+  const abort = new AbortController();
   const registry = new VoxelStampRegistry();
 
   // panel layout: switch to wider with textarea
@@ -42,12 +49,7 @@ export async function createRecipeScene(
     const geo = computeGreedyGeometry(voxels, false);
     const mesh = new Mesh('recipe-preview', scene);
     if (geo.positions.length === 0) return mesh;
-    const vd = new VertexData();
-    vd.positions = geo.positions;
-    vd.indices = geo.indices;
-    vd.colors = geo.colors;
-    vd.normals = geo.normals;
-    vd.applyToMesh(mesh, false);
+    applyGreedyGeometry(mesh, geo);
     mesh.useVertexColors = true;
     mesh.hasVertexAlpha = false;
 
@@ -63,7 +65,7 @@ export async function createRecipeScene(
   }
 
   function rebuildFromJson(json: string) {
-    meshes.forEach(m => m.dispose());
+    meshes.forEach(m => m.dispose(false, true));
     meshes.length = 0;
 
     const errEl = document.getElementById('rcp-errors')!;
@@ -128,10 +130,20 @@ export async function createRecipeScene(
   async function loadSample(key: string) {
     const sample = SAMPLES[key];
     if (!sample) return;
-    const res = await fetch(sample.url);
-    const text = await res.text();
-    textarea.value = text;
-    rebuildFromJson(text);
+    const version = ++requestVersion;
+    try {
+      const res = await fetch(sample.url, { signal: abort.signal });
+      if (!res.ok) throw new Error(`Sample request failed: ${res.status}`);
+      const text = await res.text();
+      if (disposed || version !== requestVersion) return;
+      textarea.value = text;
+      rebuildFromJson(text);
+    } catch (error) {
+      if (disposed || version !== requestVersion) return;
+      const errorEl = content.querySelector<HTMLElement>('#rcp-errors')!;
+      errorEl.style.display = 'block';
+      errorEl.textContent = String(error);
+    }
   }
 
   document.getElementById('rcp-sample')!.onchange = (e) => {
@@ -142,12 +154,14 @@ export async function createRecipeScene(
   compileBtn.onclick = () => rebuildFromJson(textarea.value);
 
   // load first sample by default
-  await loadSample('simple-tower');
+  void loadSample('simple-tower');
 
   return {
     dispose() {
+      disposed = true;
+      abort.abort();
       panel.style.minWidth = origWidth;
-      meshes.forEach(m => m.dispose());
+      meshes.forEach(m => m.dispose(false, true));
     }
   };
 }

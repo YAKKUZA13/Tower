@@ -11,7 +11,12 @@
  *
  * Сим/domain не тронуты — рендер только читает state.relics (детерминизм ADR-2 сохранён).
  */
-import { Color3, InstancedMesh, Mesh, PointLight, Vector3, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { PointLight } from '@babylonjs/core/Lights/pointLight.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GameSnapshot, GridData, PlacedRelic, RelicRarity, RelicType } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 import { sampleHeight } from '../terrain/terrain-math';

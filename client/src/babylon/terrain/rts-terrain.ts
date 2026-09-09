@@ -27,13 +27,11 @@
  * Контракт для пикеров и рендереров сохранён: name='ground', isPickable=true,
  * receiveShadows=true, top-surface y = sampleHeight value.
  */
-import {
-  Color3,
-  Mesh,
-  StandardMaterial,
-  VertexData,
-  type Scene
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GridData, TileType } from '@tower/shared';
 import { fieldMaterialColor, tileToFieldMaterial } from '../voxel/voxel-field';
 import { shade } from '../voxel/dark-palette';

@@ -4,7 +4,7 @@
  */
 
 import type { Enemy, EnemyType } from '@tower/shared';
-import { positionAtProgress } from '../../domain/path';
+import { positionAtProgressWithOffset } from '../../domain/path';
 import type { BuiltPath } from '../../domain/path';
 
 export interface MoveDeps {
@@ -46,7 +46,7 @@ export function tickMovement(deps: MoveDeps): MoveOutcome {
       enemy.pathProgress = path.totalLength;
       continue;
     }
-    enemy.position = positionAtProgress(path, enemy.pathProgress);
+    enemy.position = positionAtProgressWithOffset(path, enemy.pathProgress, enemy.pathLateralOffset);
   }
   return { damageToBase, reached };
 }

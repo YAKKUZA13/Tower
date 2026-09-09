@@ -7,7 +7,8 @@
  * через `GameSim.reconcile(snapshot)` извне по сети). Рендереры и атмосфера
  * продолжают синхронизироваться каждый кадр.
  */
-import type { Engine, Scene } from 'babylonjs';
+import { type Engine } from '@babylonjs/core/Engines/engine.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GameSnapshot } from '@tower/shared';
 import type { GameSim } from '../sim/game-sim';
 import type { EnemySceneRenderer } from './enemies/enemy-renderer';

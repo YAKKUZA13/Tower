@@ -4,7 +4,11 @@
  *
  * ВАЖНО (thin instances): masterWorld = identity; масштаб закладывается в thin-matrix.
  */
-import { Color3, Matrix, Mesh, Quaternion, StandardMaterial, Vector3, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GameSnapshot } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 import { PROJECTILE_COLOR } from '../colors';

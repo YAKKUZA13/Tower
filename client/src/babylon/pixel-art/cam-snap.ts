@@ -14,7 +14,10 @@
  * controls), форсируя mode=ORTHOGRAPHIC_CAMERA + ortho-полуразмеры из viewport-параметров.
  * Pixel-snap — внешний helper computePixelSnap, который клиент применяет в onBeforeRender.
  */
-import { Camera, Matrix, Vector3, type ArcRotateCamera, type Scene } from 'babylonjs';
+import { Camera } from '@babylonjs/core/Cameras/camera.js';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 
 export interface OrthoDimetricOptions {
   /** Видимая высота в world-unit (ortho half-height * 2). По умолчанию 16. */

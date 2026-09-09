@@ -2,7 +2,9 @@
 import { computed, ref } from 'vue';
 import { useAuthStore } from '../stores/auth-store';
 
-const emit = defineEmits(['authed']);
+const emit = defineEmits<{
+  (e: 'authed', destination?: 'coop' | 'rts'): void;
+}>();
 
 const authStore = useAuthStore();
 const mode = ref<'login' | 'register'>('login');
@@ -53,7 +55,7 @@ function submit() {
 
 function playAsGuest() {
   authStore.loginAsGuest();
-  emit('authed');
+  emit('authed', 'rts');
 }
 </script>
 

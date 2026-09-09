@@ -570,8 +570,13 @@ export function townHallBuilding(): Voxel[] {
   box3(v, -5, 5, 6, 6, -3, -3, PALETTE.metalDark); box3(v, -5, 5, 6, 6, 3, 3, PALETTE.metalDark);
   box3(v, -3, -3, 5, 6, -4, -4, PALETTE.metalDark); box3(v, 3, 4, 5, 6, -4, -4, PALETTE.metalDark);
   box3(v, -3, -3, 5, 6, 4, 4, PALETTE.metalDark);   box3(v, 3, 4, 5, 6, 4, 4, PALETTE.metalDark);
-  box3(v, -2, 2, 2, 5, 0, 0, PALETTE.metalDark);
-  cube(v, -2, 4, 1, wd); cube(v, 2, 4, 1, wd);
+  // Front facade must sit outside the solid z=-4..4 hall volume. The old
+  // z=0/1 details were fully occluded, making the normalized building read as
+  // an unbroken black slab from the RTS camera.
+  box3(v, -2, 2, 2, 6, -5, -5, w);
+  box3(v, -3, 3, 7, 7, -5, -5, sd);
+  cube(v, -1, 3, -6, g); cube(v, 1, 3, -6, g);
+  cube(v, -1, 5, -6, shade(g, 0.78)); cube(v, 1, 5, -6, shade(g, 0.78));
   box3(v, -6, 6, 9, 10, -5, 5, shade(wd, 0.85));
   box3(v, -5, 5, 11, 12, -4, 4, shade(wd, 0.8));
   box3(v, -4, 4, 13, 13, -3, 3, shade(wd, 0.75));
@@ -580,9 +585,14 @@ export function townHallBuilding(): Voxel[] {
   cube(v, 0, 13, 5, wd); cube(v, 0, 14, 5, wd); cube(v, 0, 15, 5, wd);
   cube(v, 1, 15, 5, g); cube(v, 2, 15, 5, g);
   cube(v, 1, 14, 5, shade(g, 0.85));
-  cube(v, -3, 5, 1, wd); cube(v, -3, 6, 1, fire);
-  cube(v, 3, 5, 1, wd); cube(v, 3, 6, 1, fire);
-  void sl; void w; void wl;
+  cube(v, -4, 5, -5, wd); cube(v, -4, 6, -5, fire);
+  cube(v, 4, 5, -5, wd); cube(v, 4, 6, -5, fire);
+  // Side windows keep the building readable under any 45-degree RTS rotation.
+  box3(v, -6, -6, 4, 6, -2, -1, fire);
+  box3(v, 6, 6, 4, 6, -2, -1, fire);
+  box3(v, -6, -6, 4, 6, 1, 2, shade(g, 0.8));
+  box3(v, 6, 6, 4, 6, 1, 2, shade(g, 0.8));
+  void sl; void wl;
   return v;
 }
 

@@ -32,7 +32,7 @@ import type {
   Waypoint
 } from '@tower/shared';
 import type { ResourceId, ResourceKind, ResourceNode } from '@tower/shared';
-import { buildPath, positionAtProgress } from '../domain/path';
+import { buildPath, positionAtProgress, positionAtProgressWithOffset } from '../domain/path';
 import type { BuiltPath } from '../domain/path';
 import { findGridRoute } from '../domain/pathfinding';
 import { gridToWorldData } from '../domain/grid-math';
@@ -74,6 +74,7 @@ export interface GameSimConfig {
   catalog: GameCatalog;
   ownerId: string;
   seed?: number;
+  staticBlockedCells?: readonly { col: number; row: number }[];
 }
 
 const MAX_STEPS_PER_FRAME = 6;
@@ -129,6 +130,7 @@ export class GameSim {
   // ── M8 RTS-solo: AI opponent state ──
   /** True, если карта — каноническая RTS (gameMode='rts' + playerStarts). */
   private readonly rtsSolo: boolean;
+  private readonly staticBlockedCells: ReadonlySet<string>;
   /** Id stationary-Enemy = AI town-hall (мишень победы). */
   private aiTownHallId: string | null = null;
   /** Таймер до следующей волны AI-атаки (сек). */
@@ -140,6 +142,7 @@ export class GameSim {
     this.map = config.map;
     this.catalog = config.catalog;
     this.rng = mulberry32(config.seed ?? DEFAULT_SEED);
+    this.staticBlockedCells = new Set((config.staticBlockedCells ?? []).map((cell) => `${cell.col}:${cell.row}`));
 
     this.waves = this.resolveWaves(config.map, config.catalog);
     this.enemyTypes = new Map(config.catalog.enemies.map((e) => [e.id, e]));
@@ -525,6 +528,10 @@ export class GameSim {
     return this.routeCells.has(`${col}:${row}`);
   }
 
+  isStaticBlockedCell(col: number, row: number): boolean {
+    return this.staticBlockedCells.has(`${col}:${row}`);
+  }
+
   /** Текущий маршрут врагов (клетки) — для рендера tube. */
   getRouteWaypoints(): Waypoint[] {
     return this.routeWaypoints;
@@ -538,6 +545,7 @@ export class GameSim {
     if (!type) return;
     if (!this.inBounds(col, row)) return;
     if (this.isPathCell(col, row)) return;
+    if (this.isStaticBlockedCell(col, row)) return;
     if (this.state.towers.some((t) => t.col === col && t.row === row)) return;
     if (this.state.walls.some((w) => w.col === col && w.row === row)) return;
     if (this.state.relics.some((r) => r.col === col && r.row === row)) return;
@@ -584,7 +592,8 @@ export class GameSim {
       walls: this.state.walls,
       towers: this.state.towers,
       relics: this.state.relics,
-      tiles: this.map.tiles
+      tiles: this.map.tiles,
+      staticBlocked: this.staticBlockedCells
     };
     if (!canPlaceWall(ctx, col, row)) return;
     if (!canAfford(this.state, def.cost)) return;
@@ -627,6 +636,7 @@ export class GameSim {
     if (!this.relicTypes.has(relicTypeId)) return;
     if (!this.inBounds(col, row)) return;
     if (this.isPathCell(col, row)) return;
+    if (this.isStaticBlockedCell(col, row)) return;
     const ctx = {
       grid: this.map.grid,
       spawn: this.tdSpawn,
@@ -634,7 +644,8 @@ export class GameSim {
       walls: this.state.walls,
       towers: this.state.towers,
       relics: this.state.relics,
-      tiles: this.map.tiles
+      tiles: this.map.tiles,
+      staticBlocked: this.staticBlockedCells
     };
     if (!canPlaceRelic(ctx, col, row)) return;
     this.state.relics.push({ id: this.nextId('relic'), typeId: relicTypeId, col, row });
@@ -667,6 +678,7 @@ export class GameSim {
     if (!type) return;
     if (!this.inBounds(col, row)) return;
     if (this.isPathCell(col, row)) return;
+    if (this.isStaticBlockedCell(col, row)) return;
     if (!canAffordCost(this.state, type.cost)) return;
     const ctx = {
       grid: this.map.grid,
@@ -676,7 +688,8 @@ export class GameSim {
       towers: this.state.towers,
       relics: this.state.relics,
       tiles: this.map.tiles,
-      productionBuildings: this.state.productionBuildings ?? []
+      productionBuildings: this.state.productionBuildings ?? [],
+      staticBlocked: this.staticBlockedCells
     };
     if (!canPlaceProductionBuilding(ctx, col, row)) return;
     spendCost(this.state, type.cost);
@@ -697,6 +710,7 @@ export class GameSim {
     const type = this.unitTypes.get(typeId);
     if (!type) return;
     if (!this.inBounds(col, row)) return;
+    if (this.isStaticBlockedCell(col, row)) return;
     if (!canAffordCost(this.state, type.cost)) return;
     const ctx = {
       grid: this.map.grid,
@@ -706,7 +720,8 @@ export class GameSim {
       towers: this.state.towers,
       relics: this.state.relics,
       tiles: this.map.tiles,
-      productionBuildings: this.state.productionBuildings ?? []
+      productionBuildings: this.state.productionBuildings ?? [],
+      staticBlocked: this.staticBlockedCells
     };
     if (!canTrainUnit(ctx, col, row)) return;
     spendCost(this.state, type.cost);
@@ -990,28 +1005,32 @@ export class GameSim {
       groups.push({ typeId: 'skeleton', count: 6 }, { typeId: 'zombie', count: 6 }, { typeId: 'demon', count: demonN });
     }
 
-    // Спавним у первого живого AI town-hall (slot 1). Каждый юнит стартует с pathProgress=0.
-    const spawnAt = aiTowns[0]!.position;
+    // Временный RTS-solo adapter всё ещё использует TD route, но формирует пачку
+    // в несколько полос/рядов, чтобы одинаковый pathProgress не схлопывал модели.
+    const laneCount = 4;
+    const lateralSpacing = this.map.grid.cellSize * 0.42;
+    const forwardSpacing = this.map.grid.cellSize * 0.58;
+    let formationIndex = 0;
     for (const g of groups) {
       const type = this.enemyTypes.get(g.typeId);
       if (!type) continue;
       for (let i = 0; i < g.count; i++) {
-        // лёгкий разброс вокруг точки спавна (детерминированный — по индексу)
-        const ang = (i * Math.PI * 2) / Math.max(1, g.count);
-        const r = this.map.grid.cellSize * 0.8;
+        const lane = formationIndex % laneCount;
+        const row = Math.floor(formationIndex / laneCount);
+        const pathProgress = Math.min(row * forwardSpacing, Math.max(0, this.routePath.totalLength - 0.01));
+        const pathLateralOffset = (lane - (laneCount - 1) * 0.5) * lateralSpacing;
+        const position = positionAtProgressWithOffset(this.routePath, pathProgress, pathLateralOffset);
         state.enemies.push({
           id: this.nextId('ai-u'),
           typeId: g.typeId,
           hp: type.baseHp,
           maxHp: type.baseHp,
-          pathProgress: 0,
-          position: {
-            x: spawnAt.x + Math.cos(ang) * r,
-            y: 0,
-            z: spawnAt.z + Math.sin(ang) * r
-          },
+          pathProgress,
+          pathLateralOffset,
+          position,
           alive: true
         });
+        formationIndex += 1;
       }
     }
   }
@@ -1279,6 +1298,7 @@ export class GameSim {
     // blocked = стены И непроходимые тайлы (water/rock) — Phase T
     const blocked = (c: number, r: number) =>
       this.state.walls.some((w) => w.col === c && w.row === r) ||
+      this.staticBlockedCells.has(`${c}:${r}`) ||
       isTileBlocking(tiles, grid, c, r);
     const route = findGridRoute(this.tdSpawn, this.tdBase, grid, blocked);
     let wps: Waypoint[];
@@ -1303,7 +1323,7 @@ export class GameSim {
     for (const e of this.state.enemies) {
       if (!e.alive) continue;
       e.pathProgress = nearestProgressOnPath(path, e.position);
-      e.position = positionAtProgress(path, e.pathProgress);
+      e.position = positionAtProgressWithOffset(path, e.pathProgress, e.pathLateralOffset);
     }
   }
 

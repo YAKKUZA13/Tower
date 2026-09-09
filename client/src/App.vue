@@ -20,8 +20,8 @@ const view = ref<View>('lobby');
 const username = computed(() => user.value?.username || user.value?.login || '');
 const rtsMapId = ref<string | undefined>(undefined);
 
-function handleAuthed(): void {
-  view.value = 'lobby';
+function handleAuthed(destination: 'coop' | 'rts' = 'coop'): void {
+  view.value = destination === 'rts' ? 'rts-lobby' : 'lobby';
 }
 
 async function logout(): Promise<void> {

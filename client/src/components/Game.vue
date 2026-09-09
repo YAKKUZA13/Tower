@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { PointerEventTypes } from 'babylonjs';
-import type { Engine, Mesh, Scene } from 'babylonjs';
+import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents.js';
+import type { Engine } from '@babylonjs/core/Engines/engine.js';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import type { Scene } from '@babylonjs/core/scene.js';
 import { DEFAULT_CATALOG, DEFAULT_RELICS, DEFAULT_MAP_ID } from '@tower/shared';
 import type {
   CommanderType,
@@ -633,8 +635,8 @@ async function init(): Promise<void> {
 
   // M4: shadow controller (per-clone тени rigged) + LOD-фокус (камера).
   const shadowCtl = {
-    add: (m: import('babylonjs').Mesh) => atm.addShadowCaster(m),
-    remove: (m: import('babylonjs').Mesh) => atm.removeShadowCaster(m)
+    add: (m: Mesh) => atm.addShadowCaster(m),
+    remove: (m: Mesh) => atm.removeShadowCaster(m)
   };
 
   enemyRenderer = USE_RIGGED_ENEMIES

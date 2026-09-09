@@ -15,22 +15,18 @@
  * Зависимости: M8.1 (большая карта + VoxelField terrain). На плоской TD-доске
  * трава выглядит чужеродно → активируется ТОЛЬКО при наличии terrainHeightSampler.
  */
-import {
-  Color3,
-  Constants,
-  DynamicTexture,
-  Effect,
-  Matrix,
-  Mesh,
-  MeshBuilder,
-  Quaternion,
-  ShaderMaterial,
-  Texture,
-  Vector2,
-  Vector3,
-  type Camera,
-  type Scene
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { Matrix, Quaternion, Vector2, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import '@babylonjs/core/Meshes/thinInstanceMesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 
 const GRASS_VERTEX = `
 attribute vec3 position;

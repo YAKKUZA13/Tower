@@ -8,17 +8,14 @@
  *
  * Оба — render-only (инвариант ADR-2: сим не трогаем).
  */
-import {
-  Color3,
-  Color4,
-  DynamicTexture,
-  Mesh,
-  MeshBuilder,
-  ParticleSystem,
-  StandardMaterial,
-  Vector3,
-  type Scene
-} from 'babylonjs';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { ActiveSpell, DefenderUnit, GameSnapshot, GridData } from '@tower/shared';
 import { sampleHeight } from '../terrain/terrain-math';
 

@@ -2,11 +2,20 @@
  * Voxel Lab — main entry
  * Babylon playground for pure voxel-core engine demos.
  */
-import { ArcRotateCamera, Color3, Color4, DirectionalLight, Engine, HemisphericLight, MeshBuilder, Scene, StandardMaterial, Vector3 } from 'babylonjs';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight.js';
+import { Engine } from '@babylonjs/core/Engines/engine.js';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { createGreedyScene, type LabScene } from './scenes/greedy-lab';
 import { createModelViewerScene } from './scenes/model-viewer';
 import { createKitScene } from './scenes/kit-lab';
 import { createTerrainScene } from './scenes/terrain-lab';
+import { createMaterialLab } from './scenes/material-lab';
 import { createRecipeScene } from './scenes/recipe-lab';
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -57,10 +66,17 @@ async function switchTab(tab: string) {
   const content = document.getElementById('tab-content')!;
   content.innerHTML = '';
 
-  const tabs = ['greedy', 'models', 'kit', 'terrain', 'recipe'];
+  const isMaterial = tab === 'material';
+  hemi.setEnabled(!isMaterial); sun.setEnabled(!isMaterial); grid.setEnabled(!isMaterial);
+  const tabs = ['material', 'greedy', 'models', 'kit', 'terrain', 'recipe'];
   for (const t of tabs) document.getElementById(`tab-${t}`)!.className = '';
 
   switch (tab) {
+    case 'material': {
+      document.getElementById('tab-material')!.className = 'active';
+      current = createMaterialLab(scene, camera, updateStats, content);
+      break;
+    }
     case 'greedy': {
       document.getElementById('tab-greedy')!.className = 'active';
       current = await createGreedyScene(scene, updateStats);
@@ -83,7 +99,7 @@ async function switchTab(tab: string) {
     }
     case 'recipe': {
       document.getElementById('tab-recipe')!.className = 'active';
-      current = await createRecipeScene(scene, updateStats, content);
+      current = createRecipeScene(scene, updateStats, content);
       break;
     }
   }
@@ -95,8 +111,10 @@ document.getElementById('tab-kit')!.onclick = () => switchTab('kit');
 document.getElementById('tab-terrain')!.onclick = () => switchTab('terrain');
 document.getElementById('tab-recipe')!.onclick = () => switchTab('recipe');
 
-// start
-switchTab('greedy');
+document.getElementById('tab-material')!.onclick = () => switchTab('material');
+
+// Direct links make visual fixtures repeatable.
+switchTab(location.hash === '#material' ? 'material' : 'greedy');
 
 engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());

@@ -20,7 +20,9 @@
  * Тайлы статичны на карте — populate() один раз в конструкторе. Не зависит
  * от GameSnapshot (визуальный слой, не сим).
  */
-import { Matrix, Mesh, Quaternion, Vector3, type Scene } from 'babylonjs';
+import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GridData, TileType } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 

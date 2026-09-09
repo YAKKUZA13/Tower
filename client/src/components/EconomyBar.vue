@@ -4,7 +4,7 @@ import { useGameStore } from '../stores/game-store';
 
 const emit = defineEmits<{ (e: 'start-wave'): void }>();
 const store = useGameStore();
-const { gold, lives, maxLives, waveLabel, status, canStartWave, waveEnemiesRemaining, enemiesAlive, timePhase, weatherLabel, rtsEnabled, resources, resourcesLabel } = storeToRefs(store);
+const { gold, lives, maxLives, waveLabel, status, canStartWave, waveEnemiesRemaining, enemiesAlive, timePhase, weatherLabel, rtsEnabled, resources } = storeToRefs(store);
 
 const statusLabel: Record<string, string> = {
   prep: 'Подготовка',
@@ -36,17 +36,19 @@ const statusLabel: Record<string, string> = {
       </div>
     </template>
     <div class="stat lives">
-      <span class="stat-label">Жизни</span>
+      <span class="stat-label">{{ rtsEnabled ? 'Ратуша' : 'Жизни' }}</span>
       <span class="stat-value">{{ lives }}<span class="muted">/{{ maxLives }}</span></span>
     </div>
-    <div class="stat wave">
-      <span class="stat-label">Волна</span>
-      <span class="stat-value">{{ waveLabel }}</span>
-    </div>
-    <div class="stat status">
-      <span class="stat-label">Статус</span>
-      <span class="stat-value" :class="status">{{ statusLabel[status] }}</span>
-    </div>
+    <template v-if="!rtsEnabled">
+      <div class="stat wave">
+        <span class="stat-label">Волна</span>
+        <span class="stat-value">{{ waveLabel }}</span>
+      </div>
+      <div class="stat status">
+        <span class="stat-label">Статус</span>
+        <span class="stat-value" :class="status">{{ statusLabel[status] }}</span>
+      </div>
+    </template>
     <div class="stat env">
       <span class="stat-label">Время суток</span>
       <span class="stat-value">{{ timePhase }}</span>
@@ -55,7 +57,7 @@ const statusLabel: Record<string, string> = {
       <span class="stat-label">Погода</span>
       <span class="stat-value">{{ weatherLabel }}</span>
     </div>
-    <div v-if="status === 'wave'" class="stat minor">
+    <div v-if="!rtsEnabled && status === 'wave'" class="stat minor">
       <span class="stat-label">Осталось</span>
       <span class="stat-value">{{ waveEnemiesRemaining }} <span class="muted">({{ enemiesAlive }} на поле)</span></span>
     </div>

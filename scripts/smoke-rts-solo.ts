@@ -63,6 +63,11 @@ console.log('2. AI-opponent wave spawn:');
   advance(35);
   const after1 = sim.serialize().enemies.length;
   check('after 35s: 6 goblins spawned (some may have reached base)', after1 >= 1, `(enemies=${after1})`);
+  const mobile = sim.serialize().enemies.filter((enemy) => !enemy.stationary && enemy.alive);
+  const uniquePositions = new Set(mobile.map((enemy) => `${enemy.position.x.toFixed(3)},${enemy.position.z.toFixed(3)}`));
+  check('AI formation does not collapse mobile units to one position',
+    mobile.length < 2 || uniquePositions.size === mobile.length,
+    `(mobile=${mobile.length}, unique=${uniquePositions.size})`);
   // Next wave due in <=30s (some drift due to fixed-step granularity).
   const nextIn = sim.getAiNextWaveIn();
   check('next wave timer in (0,30] after first wave', nextIn > 0 && nextIn <= 30, `(got ${nextIn})`);
@@ -125,6 +130,22 @@ console.log('5. All 3 RTS maps init as rtsSolo:');
       sim.isRtsSolo() && !!sim.getPlayerTownHall() && !!sim.getAiTownHall(),
       `(${name})`);
   }
+}
+
+console.log('6. Static scene colliders participate in simulation placement:');
+{
+  const map = getRtsMap('rts-2p-crossroads')!;
+  const blocked = { col: 20, row: 20 };
+  const sim = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'player', staticBlockedCells: [blocked] });
+  check('rasterized scene cell is visible to simulation', sim.isStaticBlockedCell(blocked.col, blocked.row));
+  const before = sim.serialize().productionBuildings?.length ?? 0;
+  sim.applyInput({
+    tick: sim.state.tick,
+    userId: 'player',
+    action: { kind: 'build-production', typeId: 'rts-barracks', col: blocked.col, row: blocked.row }
+  });
+  const after = sim.serialize().productionBuildings?.length ?? 0;
+  check('production building cannot overlap static scene collider', after === before, `(before=${before}, after=${after})`);
 }
 
 console.log('===');

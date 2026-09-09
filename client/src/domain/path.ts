@@ -72,3 +72,27 @@ export function positionAtProgress(path: BuiltPath, progress: number): Vector3Da
   const last = path.segments[path.segments.length - 1].end;
   return { ...last };
 }
+
+/** Position on the path shifted sideways in the XZ plane. */
+export function positionAtProgressWithOffset(
+  path: BuiltPath,
+  progress: number,
+  lateralOffset = 0
+): Vector3Data {
+  const center = positionAtProgress(path, progress);
+  if (lateralOffset === 0 || path.segments.length === 0) return center;
+
+  const clamped = Math.min(Math.max(0, progress), path.totalLength);
+  const segment = path.segments.find((candidate) =>
+    clamped <= candidate.cumulativeStart + candidate.length
+  ) ?? path.segments[path.segments.length - 1]!;
+  const dx = segment.end.x - segment.start.x;
+  const dz = segment.end.z - segment.start.z;
+  const lengthXZ = Math.hypot(dx, dz);
+  if (lengthXZ < 1e-6) return center;
+  return {
+    x: center.x - (dz / lengthXZ) * lateralOffset,
+    y: center.y,
+    z: center.z + (dx / lengthXZ) * lateralOffset
+  };
+}

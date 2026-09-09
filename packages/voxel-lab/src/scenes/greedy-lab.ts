@@ -2,12 +2,12 @@
  * Greedy Lab — explore greedy meshing parameters
  * Compare naive vs greedy on a single model, live tri-count.
  *
- * Uses the shared game builders from client/src/babylon/voxel/voxel-builder.ts
- * (single source of truth per VOXEL_ENGINE_PLAN.md Phase 1/4).
+ * Uses the public Babylon adapter package; the lab never imports client internals.
  */
-import { Mesh, type Scene } from 'babylonjs';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import { VOXEL_BUILDERS, type Voxel } from '@tower/voxel-core';
-import { buildVoxelMesh, buildVoxelMeshGreedy } from '../../../../client/src/babylon/voxel/voxel-builder';
+import { buildVoxelMesh, buildVoxelMeshGreedy } from '@tower/voxel-babylon';
 
 export interface LabScene {
   dispose(): void;
@@ -27,7 +27,7 @@ export async function createGreedyScene(
   const modelKeys = Object.keys(VOXEL_BUILDERS).filter(k => k.startsWith('enemy:') || k.startsWith('tower:'));
 
   function rebuild() {
-    meshes.forEach(m => m.dispose());
+    meshes.forEach(m => m.dispose(false, true));
     meshes.length = 0;
 
     const builder = VOXEL_BUILDERS[currentModel];
@@ -81,6 +81,6 @@ export async function createGreedyScene(
   rebuild();
 
   return {
-    dispose() { meshes.forEach(m => m.dispose()); }
+    dispose() { meshes.forEach(m => m.dispose(false, true)); }
   };
 }

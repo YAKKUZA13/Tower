@@ -1,4 +1,4 @@
-﻿import { Vector3 } from 'babylonjs';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import type { GridData, Vector3Data } from '../../domain/map';
 import { gridToWorldData, worldToGridData, sampleHeight as sampleHeightPure, computeHeightRange } from '../../domain/grid-math';
 

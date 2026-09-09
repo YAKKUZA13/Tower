@@ -14,8 +14,17 @@
  * управляется rtscam.ts: ORTHOGRAPHIC + свободный pan/zoom + вращение по Q/E.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { Color3, Matrix, MeshBuilder, PointerEventTypes, StandardMaterial, Vector3, Viewport } from 'babylonjs';
-import type { Engine, Mesh, Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Viewport } from '@babylonjs/core/Maths/math.viewport.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import type { Engine } from '@babylonjs/core/Engines/engine.js';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import type { Scene } from '@babylonjs/core/scene.js';
+import { generateProceduralSanctum, rasterizeNavBlockers } from '@tower/engine-scene';
+import { buildSceneKit, type SceneKitHandle } from '@tower/scene-babylon';
 import {
   DEFAULT_CATALOG,
   DEFAULT_RELICS,
@@ -94,6 +103,9 @@ let toonHandle: { dispose: () => void } | null = null;
 let enemyRenderer: EnemySceneRenderer | null = null;
 let unitRenderer: UnitSceneRenderer | null = null;
 let atmosphere: AtmosphereRenderer | null = null;
+let ritualSanctum: SceneKitHandle | null = null;
+let disposed = false;
+let staticSceneBlocked = new Set<string>();
 let loop: ReturnType<typeof startGameLoop> | null = null;
 let rtsCam: RtsCameraHandle | null = null;
 let previewMesh: Mesh | null = null;
@@ -214,7 +226,8 @@ function canPlaceBuildingAt(col: number, row: number): boolean {
       towers: sim.state.towers,
       relics: sim.state.relics,
       tiles: sim.map.tiles,
-      productionBuildings: sim.state.productionBuildings ?? []
+      productionBuildings: sim.state.productionBuildings ?? [],
+      staticBlocked: staticSceneBlocked
     },
     col,
     row
@@ -235,7 +248,8 @@ function canTrainUnitAt(col: number, row: number): boolean {
       towers: sim.state.towers,
       relics: sim.state.relics,
       tiles: sim.map.tiles,
-      productionBuildings: sim.state.productionBuildings ?? []
+      productionBuildings: sim.state.productionBuildings ?? [],
+      staticBlocked: staticSceneBlocked
     },
     col,
     row
@@ -655,8 +669,8 @@ function onMinimapFocus(wx: number, wz: number): void {
 }
 
 // ── init / dispose ──
-function buildSim(map: MapDocument): void {
-  const sim = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'local' });
+function buildSim(map: MapDocument, staticBlockedCells: readonly { col: number; row: number }[]): void {
+  const sim = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'local', staticBlockedCells });
   simRef.value = sim;
   gameStore.setRtsEnabled(sim.isRtsEnabled());
   gameStore.setMaxLives(sim.state.lives);
@@ -680,6 +694,10 @@ async function init(): Promise<void> {
   if (!canvasRef.value) return;
 
   const engine = createEngine(canvasRef.value);
+  // Render the 3D layer on a stable low-resolution grid; CSS performs the
+  // nearest-neighbour upscale while the DOM HUD remains native-resolution.
+  const pixelTargetWidth = 640;
+  engine.setHardwareScalingLevel(Math.max(1, canvasRef.value.clientWidth / pixelTargetWidth));
   engineRef.value = engine;
   // M8-fix: createRtsScene вместо TD createScene — нет «доски в космосе»,
   // террейн следует heightmap (объекты больше не парят над плоским полом).
@@ -689,15 +707,36 @@ async function init(): Promise<void> {
   sceneRef.value = scene;
   setGridVisible(scene, false);
 
-  buildSim(map);
+  const start = map.playerStarts?.find((candidate) => candidate.slot === 0)?.townHall;
+  const landmarkCol = start?.col ?? Math.floor(map.grid.cols / 2);
+  const landmarkRow = start?.row ?? Math.floor(map.grid.rows / 2);
+  const landmarkWorld = gridToWorld(map.grid, landmarkCol, landmarkRow);
+  const landmarkGroundY = sampleHeight(map.heightmap, map.grid, landmarkCol, landmarkRow, true);
+  const sceneSeed = 0x51a7c7 ^ landmarkCol * 73856093 ^ landmarkRow * 19349663;
+  const generatedSanctumSpec = generateProceduralSanctum({
+    scale: map.grid.cellSize * 0.72,
+    particleCount: 46,
+    density: 0.78,
+    seed: sceneSeed
+  });
+  const staticBlockedCells = rasterizeNavBlockers(generatedSanctumSpec, map.grid, {
+    position: [landmarkWorld.x, landmarkGroundY, landmarkWorld.z]
+  });
+  staticSceneBlocked = new Set(staticBlockedCells.map((cell) => `${cell.col}:${cell.row}`));
+  buildSim(map, staticBlockedCells);
   const sim = simRef.value!;
 
-  catalog = await AssetCatalog.create(scene, {
+  const loadedCatalog = await AssetCatalog.create(scene, {
     // RTS использует только процедурные воксель-риги/билдеры (UNIT_RIGS,
     // RIGGED_DEFS, VOXEL_BUILDERS). glTF здесь не нужен — обход убирает
     // «мусорные» подсетки glTF в origin, merge-предупреждения и ускоряет init.
     skipGltf: true
   });
+  if (disposed) {
+    loadedCatalog.dispose();
+    return;
+  }
+  catalog = loadedCatalog;
 
   // town-hall игрока — база для командира и как точка фокуса камеры.
   const pTownHall = sim.getPlayerTownHall();
@@ -722,7 +761,7 @@ async function init(): Promise<void> {
   rtsCam = attachRtsCamera(scene, camera, engine, {
     target: { x: frameTargetX, y: frameTargetY, z: frameTargetZ },
     bounds: { minX: -mapHalfW, maxX: mapHalfW, minZ: -mapHalfH, maxZ: mapHalfH },
-    pitch: Math.PI / 6,            // ~30° (диметрия)
+    pitch: Math.PI / 5,            // 36°: ритуал и terrain читаются сверху
     initialYaw: -Math.PI / 4,      // 45° iso
     // Видимая высота — чуть больше базы + её окрестностей (workers/resources).
     // Раньше 28 — слишком далеко для cellSize 1.5. ~16 даёт читаемый кадр базы.
@@ -743,11 +782,32 @@ async function init(): Promise<void> {
     board: { width: map.grid.cols * map.grid.cellSize, height: map.grid.rows * map.grid.cellSize },
     bossTypeIds,
     fogDensity: 0.0025,
-    exposure: 1.6,
-    vignetteWeight: 0.7,
-    ambientIntensity: 1.25,
-    sunIntensity: 1.4
+    exposure: 1.45,
+    vignetteWeight: 0.85,
+    ambientIntensity: 1.05,
+    sunIntensity: 1.2,
+    pixelArt: true
   });
+
+  // First canonical hybrid-scene slice: polygonal landmark structure + voxel-scale
+  // emissive particles. The serializable contract lives outside the client; this
+  // component only selects placement and connects renderer-owned shadow families.
+  ritualSanctum = buildSceneKit(
+    scene,
+    generatedSanctumSpec,
+    {
+      position: [focusWorld.x, focusGroundY, focusWorld.z],
+      terrainHeightAt: (worldX, worldZ) => {
+        const halfW = map.grid.cols * map.grid.cellSize * 0.5;
+        const halfH = map.grid.rows * map.grid.cellSize * 0.5;
+        const col = (worldX + halfW) / map.grid.cellSize - 0.5;
+        const row = (worldZ + halfH) / map.grid.cellSize - 0.5;
+        return sampleHeight(map.heightmap, map.grid, col, row, true);
+      }
+    }
+  );
+  for (const mesh of ritualSanctum.shadowCasters) atmosphere.addShadowCaster(mesh);
+  atmosphere.attachBaseMarker(ritualSanctum.root, map.grid.cellSize);
 
   overlay = new LevelOverlay(scene, map, catalog);
 
@@ -873,8 +933,12 @@ function cycleSpeed(): void {
   loop?.setSpeed(speed.value);
 }
 
-onMounted(() => { void init(); });
+onMounted(() => {
+  disposed = false;
+  void init();
+});
 onBeforeUnmount(() => {
+  disposed = true;
   window.removeEventListener('keydown', onKeyDown);
   loop?.stop();
   selectionObserver?.dispose();
@@ -890,6 +954,9 @@ onBeforeUnmount(() => {
   unitRenderer?.dispose();
   resourceRendererRef.value?.dispose();
   rtsCam?.dispose();
+  ritualSanctum?.dispose();
+  ritualSanctum = null;
+  staticSceneBlocked.clear();
   atmosphere?.dispose();
   catalog?.dispose();
   engineRef.value?.dispose();
@@ -1044,6 +1111,7 @@ defineExpose({ sim: simRef });
   height: 100%;
   outline: none;
   touch-action: none;
+  image-rendering: pixelated;
 }
 .game-alert {
   position: absolute;

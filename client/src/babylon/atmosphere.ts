@@ -12,25 +12,25 @@
  *
  * ADR: тени рендерятся между акторами и воксельным полом (receiveShadows=true на ground).
  */
-import {
-  Color3,
-  Color4,
-  Constants,
-  DefaultRenderingPipeline,
-  DirectionalLight,
-  HemisphericLight,
-  ImageProcessingConfiguration,
-  Mesh,
-  ParticleSystem,
-  PointLight,
-  RawTexture,
-  Scene,
-  SSAO2RenderingPipeline,
-  ShadowGenerator,
-  Texture,
-  Vector3,
-  type Camera
-} from 'babylonjs';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { DefaultRenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline.js';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight.js';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
+import { ImageProcessingConfiguration } from '@babylonjs/core/Materials/imageProcessingConfiguration.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem.js';
+import { PointLight } from '@babylonjs/core/Lights/pointLight.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { SSAO2RenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssao2RenderingPipeline.js';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator.js';
+import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent.js';
+import '@babylonjs/core/Rendering/prePassRendererSceneComponent.js';
+import '@babylonjs/core/Rendering/geometryBufferRendererSceneComponent.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
 import type { Enemy, GameSnapshot, Weather } from '@tower/shared';
 
 // ── палитра «яркий день» (TD: смены дня/ночи нет) ────────────────────────────
@@ -67,6 +67,8 @@ export interface AtmosphereOptions {
   ambientIntensity?: number;
   /** Интенсивность направленного sun (TD default 0.9). RTS → ~1.15. */
   sunIntensity?: number;
+  /** Keep geometry edges on the low-resolution pixel grid instead of smoothing them with AA. */
+  pixelArt?: boolean;
 }
 
 export class AtmosphereRenderer {
@@ -130,21 +132,22 @@ export class AtmosphereRenderer {
     this.hemispheric.intensity = options.ambientIntensity ?? 0.7;
     this.hemispheric.diffuse = DAY_SKY_COLOR.clone();
     this.hemispheric.groundColor = DAY_GROUND_COLOR.clone();
+    scene.ambientColor = new Color3(0.32, 0.28, 0.24);
 
     // ── SSAO2 (создаём ПЕРВЫМ, чтобы AO композился до tonemap в DefaultRenderingPipeline) ──
     // crevice-затенение как на воксель-референсе. Консервативные значения: видимый,
     // но не давящий AO. При артефактах — изолированно отключается одним полем.
     this.ssao = new SSAO2RenderingPipeline('ssao2', scene, { ssaoRatio: 0.5, blurRatio: 0.5 }, [camera]);
-    this.ssao.totalStrength = 1.3;
-    this.ssao.radius = 1.2;
-    this.ssao.samples = 12;
+    this.ssao.totalStrength = 1.8;
+    this.ssao.radius = 0.85;
+    this.ssao.samples = 16;
     this.ssao.expensiveBlur = true;
     this.ssao.bilateralSamples = 8;
 
     // ── Пост-процесс ──
     this.pipeline = new DefaultRenderingPipeline('atmosphere-pipeline', true, scene, [camera]);
-    this.pipeline.samples = 2; // MSAA
-    this.pipeline.fxaaEnabled = true;
+    this.pipeline.samples = options.pixelArt ? 1 : 2;
+    this.pipeline.fxaaEnabled = !options.pixelArt;
 
     this.pipeline.bloomEnabled = true;
     // TD-104: bloom чуть агрессивнее на ярких акцентах (факелы/руны/кристаллы),
@@ -171,8 +174,8 @@ export class AtmosphereRenderer {
     this.pipeline.grain.animated = true;
 
     this.pipeline.chromaticAberrationEnabled = true;
-    this.pipeline.chromaticAberration.aberrationAmount = 14; // «пиксели» экрана
-    this.pipeline.chromaticAberration.radialIntensity = 0.6;
+    this.pipeline.chromaticAberration.aberrationAmount = 5;
+    this.pipeline.chromaticAberration.radialIntensity = 0.35;
 
     // ── Ястрый светлый fog + clearColor (фиксированный «день») ──
     scene.fogMode = Scene.FOGMODE_EXP2;
@@ -262,6 +265,17 @@ export class AtmosphereRenderer {
     this.baseLight.position.y += cellSize * 0.6;
     this.baseLight.intensity = 1.4;
     this.baseAttached = true;
+    // RTS bases are far from world origin. Keep the broad warm fill over the
+    // actual gameplay focal point instead of the geometric center of the map.
+    this.focalLight.position.copyFrom(baseMarker.position);
+    // Initial RTS camera sits on the +X/-Z diagonal. Offset the key fill toward
+    // that view so vertical facades keep readable mid-tones instead of only
+    // receiving an overhead highlight on their roofs.
+    this.focalLight.position.x += cellSize * 3;
+    this.focalLight.position.y += cellSize * 3.2;
+    this.focalLight.position.z -= cellSize * 3;
+    this.focalLight.intensity = 1.05;
+    this.focalLight.range = cellSize * 14;
   }
 
   /** Синхронизация атмосферы с состоянием сима каждый кадр.

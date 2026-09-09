@@ -1,8 +1,13 @@
+import { applyGreedyGeometry } from '@tower/voxel-babylon';
 /**
  * Model Viewer — browse all VOXEL_BUILDERS models
  * Rebuilds on model switch; shows tri/voxel counts.
  */
-import { Color3, Mesh, MeshBuilder, StandardMaterial, VertexData, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import {
   computeGreedyGeometry,
   VOXEL_BUILDERS,
@@ -36,15 +41,11 @@ export async function createModelViewerScene(
     const geo = computeGreedyGeometry(voxels, false);
     const mesh = new Mesh('model', scene);
     if (geo.positions.length === 0) {
+      mesh.dispose();
       const box = MeshBuilder.CreateBox('empty', { size: 0.2 }, scene);
       return box;
     }
-    const vd = new VertexData();
-    vd.positions = geo.positions;
-    vd.indices = geo.indices;
-    vd.colors = geo.colors;
-    vd.normals = geo.normals;
-    vd.applyToMesh(mesh, false);
+    applyGreedyGeometry(mesh, geo);
     mesh.useVertexColors = true;
     mesh.hasVertexAlpha = false;
 
@@ -67,7 +68,7 @@ export async function createModelViewerScene(
   }
 
   function rebuild() {
-    meshes.forEach(m => m.dispose());
+    meshes.forEach(m => m.dispose(false, true));
     meshes.length = 0;
 
     const builder = VOXEL_BUILDERS[currentModel];
@@ -103,6 +104,6 @@ export async function createModelViewerScene(
   rebuild();
 
   return {
-    dispose() { meshes.forEach(m => m.dispose()); }
+    dispose() { meshes.forEach(m => m.dispose(false, true)); }
   };
 }

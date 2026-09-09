@@ -10,7 +10,10 @@
  * для анимируемых врагов нужен clone-на-спавн + per-frame rotation суставов.
  * Сим НЕ знает о риге (инвариант §2.1): вся анимация рендер-only.
  */
-import { Mesh, TransformNode, Vector3, type Scene } from 'babylonjs';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { EnemyType, GameSnapshot } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 import {

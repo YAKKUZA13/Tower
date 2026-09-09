@@ -1,17 +1,14 @@
-import 'babylonjs-loaders';
-import {
-  ArcRotateCamera,
-  Color3,
-  Engine,
-  HemisphericLight,
-  Mesh,
-  MeshBuilder,
-  Scene,
-  StandardMaterial,
-  TransformNode,
-  VertexBuffer,
-  Vector3
-} from 'babylonjs';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Engine } from '@babylonjs/core/Engines/engine.js';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import type { GridData, TileType } from '../domain/map';
 import { gridToWorld, worldToGrid, sampleHeight } from './terrain/terrain-math';
 import { createVoxelBoard } from './voxel/voxel-floor';

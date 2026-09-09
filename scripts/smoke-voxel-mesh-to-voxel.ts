@@ -10,7 +10,7 @@
  *
  * Run: npx tsx scripts/smoke-voxel-mesh-to-voxel.ts
  */
-import { solidVoxelize } from '../client/src/babylon/voxel/voxel-solid-voxelization';
+import { solidVoxelize, triangleIntersectsAabb } from '../packages/voxel-core/src/index';
 
 let failures = 0;
 function check(name: string, cond: boolean, details = ''): void {
@@ -90,6 +90,39 @@ console.log('5. Resolution (voxelSize scales voxel count):');
   const coarse = solidVoxelize(mesh.positions, mesh.indices, { voxelSize: 2 });
   const fine = solidVoxelize(mesh.positions, mesh.indices, { voxelSize: 1 });
   check('finer voxelSize → more voxels', fine.length >= coarse.length, `(coarse ${coarse.length} fine ${fine.length})`);
+}
+
+console.log('6. Sub-unit grid coordinates do not collapse:');
+{
+  const mesh = cubeMesh(0, 0, 0, 1, 1, 1);
+  const voxels = solidVoxelize(mesh.positions, mesh.indices, { voxelSize: 0.25 });
+  const keys = new Set(voxels.map((voxel) => `${voxel.x},${voxel.y},${voxel.z}`));
+  check('all emitted grid cells are unique', keys.size === voxels.length, `(unique ${keys.size} total ${voxels.length})`);
+  check('sub-unit sampling expands into integer grid space', voxels.some((voxel) => voxel.x >= 3));
+}
+
+console.log('7. Full triangle-AABB SAT:');
+{
+  const triangle: [[number, number, number], [number, number, number], [number, number, number]] = [
+    [0, 0, 0], [1, 0, 0], [0, 1, 0]
+  ];
+  check('detects an intersecting interior box',
+    triangleIntersectsAabb(...triangle, [0.2, 0.2, -0.1], [0.3, 0.3, 0.1]));
+  check('edge-cross axes reject a box beyond the diagonal',
+    !triangleIntersectsAabb(...triangle, [0.8, 0.8, -0.1], [0.9, 0.9, 0.1]));
+}
+
+console.log('8. Invalid grids fail before expensive iteration:');
+{
+  let rejectedSize = false;
+  let rejectedBudget = false;
+  try { solidVoxelize([0, 0, 0], [0, 0, 0], { voxelSize: 0 }); } catch { rejectedSize = true; }
+  try {
+    const mesh = cubeMesh(0, 0, 0, 10, 10, 10);
+    solidVoxelize(mesh.positions, mesh.indices, { voxelSize: 0.1, maxCandidateCells: 1_000 });
+  } catch { rejectedBudget = true; }
+  check('non-positive voxelSize is rejected', rejectedSize);
+  check('candidate-cell budget is enforced', rejectedBudget);
 }
 
 console.log('===');

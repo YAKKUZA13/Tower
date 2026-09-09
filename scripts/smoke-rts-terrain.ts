@@ -12,7 +12,10 @@
  *
  * Запуск: npx tsx scripts/smoke-rts-terrain.ts
  */
-import { NullEngine, Scene, VertexBuffer, Mesh } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { createRtsGround } from '../client/src/babylon/terrain/rts-terrain';
 import { createRtsScene } from '../client/src/babylon/createScene';
 import { VOXEL_BUILDERS, builderEmissive } from '../client/src/babylon/voxel/voxel-builder';

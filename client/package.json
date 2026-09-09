@@ -10,11 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tower/engine-scene": "*",
+    "@tower/scene-babylon": "*",
+    "@tower/voxel-babylon": "*",
     "@tower/shared": "*",
     "@tower/voxel-core": "*",
     "@tower/engine-terrain": "*",
-    "babylonjs": "^7.48.4",
-    "babylonjs-loaders": "7.54.3",
+    "@babylonjs/core": "7.54.3",
+    "@babylonjs/loaders": "7.54.3",
     "pinia": "^3.0.4",
     "vue": "^3.5.12"
   },

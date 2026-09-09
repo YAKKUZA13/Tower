@@ -82,6 +82,12 @@ export interface Enemy {
   hp: number;
   maxHp: number;
   pathProgress: number;      // 0..pathLength
+  /**
+   * Optional deterministic lateral lane offset from the path centerline.
+   * Used by the temporary RTS-solo wave adapter to prevent identical units
+   * from collapsing into the same world position.
+   */
+  pathLateralOffset?: number;
   position: { x: number; y: number; z: number };
   alive: boolean;
   slowUntilTick?: number;

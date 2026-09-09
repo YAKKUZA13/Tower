@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:,">
   <title>Voxel Lab — Pure Engine Playground</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', system-ui, sans-serif; }
-    #canvas { width: 100vw; height: 100vh; display: block; }
+    #canvas { width: calc(100vw - 380px); height: 100vh; display: block; }
     #panel {
       position: fixed; top: 12px; right: 12px; z-index: 10;
       background: rgba(10,10,20,0.92); color: #ccc; border: 1px solid #333;
-      border-radius: 8px; padding: 16px 20px; min-width: 260px;
+      border-radius: 8px; padding: 16px 20px; min-width: 260px; width: 352px; max-height: calc(100vh - 24px); overflow: auto;
       font-size: 13px; line-height: 1.6;
       backdrop-filter: blur(8px);
     }
@@ -21,18 +22,20 @@
     #panel input[type=range] { accent-color: #c08040; }
     #stats { margin-top: 10px; padding-top: 8px; border-top: 1px solid #333; color: #8a8; font-size: 12px; }
     #stats span { color: #ad0; font-weight: bold; }
-    #tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    #tabs { flex-wrap: wrap; display: flex; gap: 4px; margin-bottom: 12px; }
     #tabs button {
       flex: 1; padding: 5px 8px; border: 1px solid #444; background: #1a1a2e;
       color: #888; border-radius: 4px; cursor: pointer; font-size: 11px;
     }
     #tabs button.active { background: #2a2a3e; color: #e0c080; border-color: #c08040; }
+    @media (max-width: 760px) { #canvas { width: 100vw; } #panel { width: 260px; max-height: 45vh; } }
   </style>
 </head>
 <body>
   <canvas id="canvas"></canvas>
   <div id="panel">
     <div id="tabs">
+      <button id="tab-material">Materials</button>
       <button id="tab-greedy" class="active">Greedy</button>
       <button id="tab-models">Models</button>
       <button id="tab-kit">Kit</button>

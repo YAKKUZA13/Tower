@@ -1,3 +1,4 @@
+import { applyGreedyGeometry } from '@tower/voxel-babylon';
 /**
  * Воксельное поле боя — destructible field + heightmap→voxel (M5, research §13/§15.2D).
  *
@@ -13,7 +14,10 @@
  * water-level. Интеграция 3D-террейна в плоский sim (sampleHeight=0) — отдельная задача
  * (требует sim-правок размещения); здесь — prototype + foundation.
  */
-import { Mesh, StandardMaterial, VertexData, Color3, type Scene } from 'babylonjs';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import { computeGreedyGeometry, cube, type Voxel } from './voxel-builder';
 import { PALETTE, ACCENT, shade, type RGB } from './dark-palette';
 import type { TileType } from '@tower/shared';
@@ -226,12 +230,7 @@ export class VoxelField {
     const old = this.mesh;
     const mesh = new Mesh('voxel-field', this.scene);
     if (geo.positions.length > 0) {
-      const vd = new VertexData();
-      vd.positions = geo.positions;
-      vd.indices = geo.indices;
-      vd.colors = geo.colors;
-      vd.normals = geo.normals;
-      vd.applyToMesh(mesh, false);
+      applyGreedyGeometry(mesh, geo);
     }
     // НЕ normalizeMesh: поле в реальных воксель-координатах; масштабируем cellSize,
     // центрируем по XZ, верхний слой (y=layers-1) → на y=0 (стык ground).

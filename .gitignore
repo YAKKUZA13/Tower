@@ -4,7 +4,8 @@ dist
 .cursor
 TD-MVP-PLAN.md
 redy.md
-docs
+docs/*
+!docs/sciens/
 .env
 .env.*
 !.env.example

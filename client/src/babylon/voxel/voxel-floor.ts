@@ -10,7 +10,12 @@
  *   - принимает тени (receiveShadows=true) — акторы больше не «парят».
  */
 
-import { Color3, Mesh, MeshBuilder, StandardMaterial, VertexBuffer, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import { PALETTE, ACCENT, desaturate, shade, type RGB } from './dark-palette';
 
 export interface VoxelBoardOptions {

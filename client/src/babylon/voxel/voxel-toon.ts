@@ -12,7 +12,14 @@
  * ACES/bloom (atmosphere DefaultRenderingPipeline) совместимы — toon-цвет
  * пост-обрабатывается тем же pipeline.
  */
-import { Color3, Effect, Mesh, PostProcess, ShaderMaterial, Vector3, type Camera, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { PostProcess } from '@babylonjs/core/PostProcesses/postProcess.js';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 
 // ── Toon shaders (GLSL, research §15.2E / forge toon.wgsl порт) ──────────────
 

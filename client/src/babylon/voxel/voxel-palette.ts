@@ -1,6 +1,9 @@
 export * from '@tower/voxel-core';
 
-import { Constants, RawTexture, Texture, type Scene } from 'babylonjs';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import { INDEXED_PALETTE, PALETTE_MAX } from '@tower/voxel-core';
 
 export function buildPaletteTexture(scene: Scene): RawTexture {

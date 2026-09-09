@@ -1,3 +1,4 @@
+import { applyGreedyGeometry } from '@tower/voxel-babylon';
 /**
  * M8.1 — Chunked VoxelField rendering для большой RTS-карты (≥64×64).
  *
@@ -12,7 +13,13 @@
  *
  * Деструктивность (M5): при изменении конкретной клетки — rebuild только её чанка.
  */
-import { Mesh, StandardMaterial, VertexData, Color3, Frustum, Matrix, type Camera, type FloatArray, type Scene } from 'babylonjs';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Frustum } from '@babylonjs/core/Maths/math.frustum.js';
+import { Matrix } from '@babylonjs/core/Maths/math.vector.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import { computeGreedyGeometry, cube, type Voxel } from '../voxel/voxel-builder';
 import { PALETTE, shade, type RGB } from '../voxel/dark-palette';
 import { tileToFieldMaterial, fieldMaterialColor, FIELD_EMPTY, type FieldMaterial } from '../voxel/voxel-field';
@@ -125,13 +132,7 @@ export class ChunkedVoxelField {
     const geo = computeGreedyGeometry(voxels, true);
     const meshName = `chunk-${key}`;
     const mesh = new Mesh(meshName, this.scene);
-    const vd = new VertexData();
-    vd.positions = geo.positions as unknown as FloatArray;
-    vd.indices = geo.indices;
-    vd.colors = geo.colors as unknown as FloatArray;
-    // GreedyGeometry уже возвращает normals (face-normal per vertex); используем их.
-    vd.normals = geo.normals as unknown as FloatArray;
-    vd.applyToMesh(mesh, false);
+    applyGreedyGeometry(mesh, geo);
     mesh.material = this.material;
     mesh.receiveShadows = true;
     mesh.isPickable = true;

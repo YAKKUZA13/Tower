@@ -24,6 +24,8 @@ export interface PlacementContext {
    * в валидации маршрута (нельзя запереть базу с учётом тайлов).
    */
   tiles?: TileType[][];
+  /** Static world geometry rasterized from renderer-independent scene colliders. */
+  staticBlocked?: ReadonlySet<string>;
 }
 
 export function cellKey(col: number, row: number): string {
@@ -39,6 +41,7 @@ function cellOccupied(ctx: PlacementContext, col: number, row: number): boolean 
   const { spawn, base, walls, towers, relics } = ctx;
   if (col === spawn.col && row === spawn.row) return true;
   if (col === base.col && row === base.row) return true;
+  if (ctx.staticBlocked?.has(cellKey(col, row))) return true;
   for (const w of walls) if (w.col === col && w.row === row) return true;
   for (const t of towers) if (t.col === col && t.row === row) return true;
   if (relics) for (const r of relics) if (r.col === col && r.row === row) return true;
@@ -61,7 +64,7 @@ export function canPlaceWall(ctx: PlacementContext, col: number, row: number): b
   for (const w of walls) blockedSet.add(cellKey(w.col, w.row));
   blockedSet.add(cellKey(col, row));
   const isBlocked = (c: number, r: number) =>
-    blockedSet.has(cellKey(c, r)) || isTileBlocking(tiles, grid, c, r);
+    blockedSet.has(cellKey(c, r)) || !!ctx.staticBlocked?.has(cellKey(c, r)) || isTileBlocking(tiles, grid, c, r);
   return hasValidRoute(ctx.spawn, ctx.base, grid, isBlocked);
 }
 
@@ -120,6 +123,7 @@ export function canTrainUnit(ctx: RtsPlacementContext, col: number, row: number)
   const { spawn, base, walls, towers, productionBuildings, tiles, grid } = ctx;
   if (col === spawn.col && row === spawn.row) return false;
   if (col === base.col && row === base.row) return false;
+  if (ctx.staticBlocked?.has(cellKey(col, row))) return false;
   for (const w of walls) if (w.col === col && w.row === row) return false;
   for (const t of towers) if (t.col === col && t.row === row) return false;
   if (productionBuildings) for (const b of productionBuildings) if (b.col === col && b.row === row) return false;

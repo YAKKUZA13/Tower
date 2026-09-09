@@ -11,7 +11,9 @@
  *
  * Run: npx tsx scripts/smoke-voxel-debris.ts
  */
-import { NullEngine, Scene, Vector3 } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import {
   INDEXED_PALETTE,
   PALETTE_MAX,

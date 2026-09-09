@@ -13,22 +13,19 @@
  * Реализация: ShaderMaterial на plane-меше; MirrorTexture для reflection,
  * wave-noise для анимации, refractionTexture (экранная копия) опц.
  */
-import {
-  Color3,
-  Constants,
-  DynamicTexture,
-  Effect,
-  MeshBuilder,
-  MirrorTexture,
-  Plane,
-  RefractionTexture,
-  ShaderMaterial,
-  Texture,
-  Vector3,
-  Vector4,
-  type Mesh,
-  type Scene
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { MirrorTexture } from '@babylonjs/core/Materials/Textures/mirrorTexture.js';
+import { Plane } from '@babylonjs/core/Maths/math.plane.js';
+import { RefractionTexture } from '@babylonjs/core/Materials/Textures/refractionTexture.js';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { Vector3, Vector4 } from '@babylonjs/core/Maths/math.vector.js';
+import { type Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 
 const WATER_VERTEX = `
 attribute vec3 position;

@@ -8,7 +8,12 @@
  * depletion (amount → 0) мутирует map прямо в game-sim (pruneDepletedNodes),
  * поэтому RtsGame.vue после каждого кадра передаёт сюда актуальный массив.
  */
-import { Color3, InstancedMesh, Mesh, MeshBuilder, StandardMaterial, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GridData, ResourceKind, ResourceNode } from '@tower/shared';
 import { sampleHeight } from '../terrain/terrain-math';
 

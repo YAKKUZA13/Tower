@@ -7,7 +7,12 @@
  *
  * Run: npx tsx scripts/smoke-voxel-toon.ts
  */
-import { NullEngine, Scene, ArcRotateCamera, Vector3, MeshBuilder, Mesh } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { createToonMaterial, updateToonMaterial, createOutlinePostProcess, registerToonShaders, applyToonToScene } from '../client/src/babylon/voxel/voxel-toon';
 
 let failures = 0;

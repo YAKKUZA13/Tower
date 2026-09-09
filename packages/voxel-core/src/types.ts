@@ -9,6 +9,8 @@ export interface Voxel {
 export interface VoxelMeshOptions {
   /** Name of the mesh. */
   name: string;
+  /** Preserve grid coordinates when false; defaults to the legacy height-1 normalization. */
+  normalize?: boolean;
   /** Emissive accent for the material (eyes/fire/magic). */
   emissive?: RGB;
   /** Emissive multiplier (0 = no glow, 0.25 = visible). */

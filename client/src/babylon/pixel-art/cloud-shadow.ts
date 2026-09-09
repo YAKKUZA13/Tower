@@ -14,7 +14,12 @@
  *  - Помощник для передачи uniform в toon-материал (см. toon-pixel-art.ts).
  *  - Helper для terrain/water (uses StandardMaterial / onBind Observable).
  */
-import { Constants, DynamicTexture, RawTexture, Scene, Texture, Vector2 } from 'babylonjs';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { Vector2 } from '@babylonjs/core/Maths/math.vector.js';
 
 let _tileableNoise: DynamicTexture | null = null;
 

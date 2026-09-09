@@ -11,8 +11,10 @@
  * рабочий «тёмный» воксельный вид без сетевых зависимостей. Когда в public/catalog/
  * кладутся реальные GLB и прописываются в manifest.json — они подхватываются автоматически.
  */
-import 'babylonjs-loaders';
-import { Mesh, MeshBuilder, SceneLoader, type Scene } from 'babylonjs';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { SceneLoader } from '@babylonjs/core/Loading/sceneLoader.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { CatalogEntry, CatalogManifest } from '@tower/shared';
 import { compile, loadRecipe } from '@tower/shared';
 import {
@@ -193,6 +195,9 @@ export class AssetCatalog {
 
   private async loadGlbTemplate(catalogId: string, entry: CatalogEntry): Promise<void> {
     try {
+      // Register the loader only for the GLB path. RTS passes skipGltf=true and
+      // therefore does not download/execute babylonjs-loaders at startup.
+      await import('@babylonjs/loaders/glTF');
       const result = await SceneLoader.ImportMeshAsync('', this.glbBase, entry.glbPath, this.scene);
       const meshes = result.meshes.filter((m) => m instanceof Mesh) as Mesh[];
       if (meshes.length === 0) return;
@@ -358,6 +363,7 @@ export class AssetCatalog {
     // 1b. .glTF из manifest (G2, M6 solid voxelization): импорт → CharacterDef с walk-cycle.
     if (entry?.glbPath) {
       try {
+        await import('@babylonjs/loaders/glTF');
         const def = await importGltfParts(`${this.glbBase}${entry.glbPath}`, this.scene);
         if (def && countPartVoxels(def) > 0) {
           def.animKind = detectAnimKind(def);

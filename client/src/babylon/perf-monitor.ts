@@ -11,7 +11,8 @@
  * Включение: `const hud = new PerfMonitor(engine, scene); hud.setEnabled(true)`.
  * В production отключён (no-op overhead, если setEnabled(false)).
  */
-import type { Engine, Scene } from 'babylonjs';
+import { type Engine } from '@babylonjs/core/Engines/engine.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 
 export interface PerfSample {
   fps: number;

@@ -17,22 +17,17 @@
  *  - **HP bar** для boss/tank-категорий: DynamicTexture+Plane (billboardMode=ALL),
  *    пул переиспользуемых баров; для normal/fast — не показываем (как в Bloons).
  */
-import {
-  Color3,
-  Color4,
-  Constants,
-  DynamicTexture,
-  Matrix,
-  Mesh,
-  MeshBuilder,
-  ParticleSystem,
-  Quaternion,
-  RawTexture,
-  StandardMaterial,
-  Texture,
-  Vector3,
-  type Scene
-} from 'babylonjs';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
+import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { EnemyType, Enemy, GameSnapshot } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 import { VoxelDebrisPool } from '../voxel/voxel-debris';

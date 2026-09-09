@@ -40,7 +40,13 @@ if (typeof globalThis.ImageData === 'undefined') {
   globalThis.ImageData = class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} };
 }
 
-import { NullEngine, Scene, ArcRotateCamera, Vector3, MeshBuilder, Mesh, Color3 } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { createLowresPipeline, computeInternalSize, type LowresHandle } from '../client/src/babylon/pixel-art/lowres';
 import {
   applyOrthoDimetric, computePixelSnap, attachDimetricPixelSnap, updateOrthoFrustum
@@ -96,7 +102,7 @@ console.log('1. R1 Lowres RTT 640×360 + NEAREST blit:');
   check('lowres pipeline constructs', !threw && h !== null);
   if (h) {
     check('rtt is in scene.customRenderTargets', scene.customRenderTargets.indexOf(h.rtt) >= 0);
-    check('blit postprocess on camera', camera.attachPostProcess(h.blit) === undefined || true);
+    check('blit postprocess created', h.blit.name === 'pixel-art-blit');
     check('setSubpixelOffset no throw', (() => { h!.setSubpixelOffset(0.1, -0.2); return true; })());
     h.dispose();
     check('rtt removed after dispose', scene.customRenderTargets.length === 0);

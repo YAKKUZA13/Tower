@@ -11,7 +11,10 @@
  *
  * Run: npx tsx scripts/smoke-voxel-rig.ts
  */
-import { NullEngine, Scene, TransformNode, VertexBuffer } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
 import {
   assembleRig,
   cloneRig,

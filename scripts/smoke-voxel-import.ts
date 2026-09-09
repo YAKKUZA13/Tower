@@ -9,7 +9,12 @@
  *
  * Run: npx tsx scripts/smoke-voxel-import.ts
  */
-import { NullEngine, Scene, MeshBuilder, Mesh, TransformNode, VertexData } from 'babylonjs';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
 import { importVox } from '../client/src/babylon/voxel/importers/vox-importer';
 import { buildDefFromNodes } from '../client/src/babylon/voxel/importers/gltf-parts';
 import { assembleRig, collectRigMeshes, listPartNames } from '../client/src/babylon/voxel/voxel-parts';

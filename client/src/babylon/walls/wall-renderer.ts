@@ -9,18 +9,14 @@
  *
  * Пикинг: стены НЕ пикингуются напрямую; ремонт идёт по клетке (pickGrid → стена в клетке).
  */
-import {
-  Color4,
-  Constants,
-  Matrix,
-  Mesh,
-  ParticleSystem,
-  Quaternion,
-  RawTexture,
-  Texture,
-  Vector3,
-  type Scene
-} from 'babylonjs';
+import { Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GameSnapshot, GridData, Wall, WallMaterialDef } from '@tower/shared';
 import type { AssetCatalog } from '../asset-catalog';
 import { sampleHeight } from '../terrain/terrain-math';

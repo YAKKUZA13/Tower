@@ -9,16 +9,12 @@
  * альфы после TTL, despawn по TTL. CPU-апдейт матриц; ring-buffer reuse без GC churn.
  * Thin instances идеально подходят для не-анимируемого дебриса (ADR-4).
  */
-import {
-  Color3,
-  Matrix,
-  Mesh,
-  MeshBuilder,
-  Quaternion,
-  StandardMaterial,
-  Vector3,
-  type Scene
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import { paletteIndexToRGB, snapToPalette } from './voxel-palette';
 import type { Voxel } from './voxel-builder';
 

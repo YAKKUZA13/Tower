@@ -8,7 +8,11 @@
  * (Kingdom Rush/Bloons — дорога интегрирована в террейн). updateRoute()
  * сохранён как no-op для back-compat (Game.vue + game-loop onRouteChange).
  */
-import { Color3, Mesh, MeshBuilder, StandardMaterial, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import type { GridData, MapDocument } from '@tower/shared';
 import { sampleHeight } from './terrain/terrain-math';
 import { BASE_COLOR, SPAWN_COLOR } from './colors';

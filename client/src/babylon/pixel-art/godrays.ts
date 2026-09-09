@@ -10,7 +10,15 @@
  * Uniforms: sun dir, slab spacing, march steps, max distance.
  * Cost ~1.7ms на GTX1060 (источник).
  */
-import { Color3, Constants, Effect, Matrix, PostProcess, Texture, Vector3, type Camera, type Scene } from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Constants } from '@babylonjs/core/Engines/constants.js';
+import { Effect } from '@babylonjs/core/Materials/effect.js';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { PostProcess } from '@babylonjs/core/PostProcesses/postProcess.js';
+import '@babylonjs/core/Rendering/depthRendererSceneComponent.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { type Camera } from '@babylonjs/core/Cameras/camera.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 
 const GODRAYS_FRAGMENT = `
 precision highp float;

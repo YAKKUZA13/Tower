@@ -25,8 +25,8 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         // Babylon.js (~3MB) в отдельный чанк, чтобы login/lobby грузились быстро.
-        manualChunks: {
-          babylon: ['babylonjs', 'babylonjs-loaders']
+        manualChunks(id) {
+          if (id.includes('/@babylonjs/core/')) return 'babylon-core';
         }
       }
     }

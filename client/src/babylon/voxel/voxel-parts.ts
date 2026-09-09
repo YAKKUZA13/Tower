@@ -1,13 +1,11 @@
+import { applyGreedyGeometry } from '@tower/voxel-babylon';
 export * from '@tower/voxel-core';
 
-import {
-  Color3,
-  Mesh,
-  StandardMaterial,
-  TransformNode,
-  VertexData,
-  type Scene
-} from 'babylonjs';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
+import { type Scene } from '@babylonjs/core/scene.js';
 import {
   computeGreedyGeometry,
   type Voxel,
@@ -100,12 +98,7 @@ function buildPartMesh(
     const geo = computeGreedyGeometry(voxels, false);
     const mesh = new Mesh(`${name}-part`, scene);
     if (geo.positions.length > 0) {
-      const vd = new VertexData();
-      vd.positions = geo.positions;
-      vd.indices = geo.indices;
-      vd.colors = geo.colors;
-      vd.normals = geo.normals;
-      vd.applyToMesh(mesh, false);
+      applyGreedyGeometry(mesh, geo);
       mesh.useVertexColors = true;
       mesh.hasVertexAlpha = false;
     }
