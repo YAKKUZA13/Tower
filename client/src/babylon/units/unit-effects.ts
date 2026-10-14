@@ -8,11 +8,11 @@
  *
  * Оба — render-only (инвариант ADR-2: сим не трогаем).
  */
-import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
-import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem.js';
+import { AreaEffectRenderer } from '@tower/scene-babylon';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { type Scene } from '@babylonjs/core/scene.js';
@@ -26,137 +26,54 @@ import { sampleHeight } from '../terrain/terrain-math';
  */
 export interface UnitSceneRenderer {
   sync(state: GameSnapshot, dt: number): void;
-  pickUnitId(mesh: { name: string } | null | undefined): string | null;
+  pickUnitId(mesh: { name: string; metadata?: unknown } | null | undefined): string | null;
   getShadowCasterMeshes(): Mesh[];
   dispose(): void;
 }
 
-const SPELL_PARTICLE_POOL = 8;
-
-/** Менеджер эффектов заклинаний (particles + ring-индикаторы). */
+/** Adapts authoritative spell events to reusable shader effects. */
 export class SpellEffectManager {
-  private readonly particles: ParticleSystem[] = [];
-  private readonly activeSpellSeen = new Set<string>();
-  private readonly scene: Scene;
-  private readonly grid: GridData;
-  private readonly heightmap: number[][];
-  private readonly halfW: number;
-  private readonly halfH: number;
-
-  constructor(scene: Scene, grid: GridData, heightmap: number[][]) {
-    this.scene = scene;
-    this.grid = grid;
-    this.heightmap = heightmap;
-    this.halfW = (grid.cols * grid.cellSize) / 2;
-    this.halfH = (grid.rows * grid.cellSize) / 2;
-    for (let i = 0; i < SPELL_PARTICLE_POOL; i++) {
-      const ps = new ParticleSystem(`unit-spell-ps-${i}`, 80, scene);
-      ps.emitter = new Vector3(0, 0, 0);
-      ps.minEmitBox = new Vector3(-0.3, 0, -0.3);
-      ps.maxEmitBox = new Vector3(0.3, 0.6, 0.3);
-      ps.color1 = new Color4(1, 0.5, 0.1, 1);
-      ps.color2 = new Color4(1, 0.85, 0.4, 1);
-      ps.colorDead = new Color4(0, 0, 0, 0);
-      ps.minSize = 0.08;
-      ps.maxSize = 0.18;
-      ps.minLifeTime = 0.4;
-      ps.maxLifeTime = 0.9;
-      ps.emitRate = 0;
-      ps.direction1 = new Vector3(-1, 2, -1);
-      ps.direction2 = new Vector3(1, 4, 1);
-      ps.minEmitPower = 1;
-      ps.maxEmitPower = 3;
-      ps.gravity = new Vector3(0, -3, 0);
-      this.particles.push(ps);
-    }
+  private readonly effects: AreaEffectRenderer;
+  private readonly seen = new Set<string>();
+  private readonly castSeen = new Set<string>();
+  private lastTick: number | null = null;
+  constructor(private scene: Scene, private grid: GridData, private heightmap: number[][]) {
+    this.effects = new AreaEffectRenderer(scene, {cellSize:grid.cellSize,
+      heightAt:(x,z)=>sampleHeight(heightmap,grid,x/grid.cellSize+grid.cols/2-.5,z/grid.cellSize+grid.rows/2-.5)});
   }
-
-  /** Обработка новых/истёкших активных заклинаний — вызывать каждый кадр. */
-  sync(state: { activeSpells?: ActiveSpell[] }): void {
+  sync(state: { activeSpells?: ActiveSpell[]; tick?: number }): void {
+    const dt = state.tick === undefined ? this.scene.getEngine().getDeltaTime()/1000
+      : this.lastTick === null ? 0 : Math.max(0,state.tick-this.lastTick)/30;
+    this.lastTick = state.tick ?? null;
+    this.effects.update(dt);
     for (const active of state.activeSpells ?? []) {
-      if (this.activeSpellSeen.has(active.id)) continue;
-      this.activeSpellSeen.add(active.id);
-      this.spawnSpellEffect(active);
+      if (this.seen.has(active.id)) continue;
+      this.seen.add(active.id);
+      this.effects.spawn({
+        id: active.id, kind: (active.effect ?? active.spellId) === 'freeze' ? 'freeze'
+          : (active.effect ?? active.spellId) === 'meteor' ? 'meteor' : 'gold',
+        center: {
+          x: (active.col+.5-this.grid.cols/2)*this.grid.cellSize,
+          y: sampleHeight(this.heightmap,this.grid,active.col,active.row,true),
+          z: (active.row+.5-this.grid.rows/2)*this.grid.cellSize
+        },
+        radius: (active.radius ?? 1)*this.grid.cellSize,
+        duration: Math.max(1.8,active.remainingTicks/30)
+      });
     }
-    const currentIds = new Set((state.activeSpells ?? []).map((a) => a.id));
-    for (const id of Array.from(this.activeSpellSeen)) {
-      if (!currentIds.has(id)) this.activeSpellSeen.delete(id);
-    }
+    const current = new Set((state.activeSpells ?? []).map(a=>a.id));
+    for(const id of this.seen) if(!current.has(id)) this.seen.delete(id);
+    for(const id of this.castSeen) if(!current.has(id)) this.castSeen.delete(id);
   }
-
-  /** Возвращает true если есть НОВОЕ заклинание в этом кадре (для каст-анимации командира). */
   consumeNewSpell(state: { activeSpells?: ActiveSpell[] }): ActiveSpell | null {
-    for (const active of state.activeSpells ?? []) {
-      if (!this.activeSpellSeen.has(active.id) || this.justSaw(active.id)) {
-        return active;
-      }
+    for(const active of state.activeSpells ?? []) {
+      if(this.castSeen.has(active.id)) continue;
+      this.castSeen.add(active.id);
+      return active;
     }
     return null;
   }
-
-  private readonly justSeen = new Set<string>();
-  private justSaw(id: string): boolean {
-    return this.justSeen.has(id);
-  }
-
-  private spawnSpellEffect(active: ActiveSpell): void {
-    this.justSeen.add(active.id);
-    const cellSize = this.grid.cellSize;
-    const x = (active.col + 0.5) * cellSize - this.halfW;
-    const z = (active.row + 0.5) * cellSize - this.halfH;
-    const groundY = sampleHeight(this.heightmap, this.grid, active.col, active.row, true);
-
-    const ps = this.particles.find((p) => p.emitRate === 0) ?? this.particles[0];
-    if (ps) {
-      ps.emitter = new Vector3(x, groundY + 0.3, z);
-      ps.targetStopDuration = 0.6;
-      ps.minEmitPower = 2;
-      ps.maxEmitPower = 5;
-      if (active.spellId === 'meteor') {
-        ps.color1 = new Color4(1, 0.4, 0.1, 1); ps.color2 = new Color4(1, 0.85, 0.3, 1);
-        ps.minSize = 0.12; ps.maxSize = 0.26; ps.emitRate = 220;
-      } else if (active.spellId === 'gold-rush') {
-        ps.color1 = new Color4(0.9, 0.75, 0.25, 1); ps.color2 = new Color4(1, 0.95, 0.5, 1);
-        ps.minSize = 0.06; ps.maxSize = 0.14; ps.emitRate = 160;
-      } else {
-        ps.color1 = new Color4(0.55, 0.8, 1, 1); ps.color2 = new Color4(0.75, 0.95, 1, 1);
-        ps.minSize = 0.08; ps.maxSize = 0.16; ps.emitRate = 120;
-      }
-      ps.start(0.6);
-    }
-
-    if (active.spellId === 'freeze' || active.spellId === 'meteor') {
-      const ring = MeshBuilder.CreateTorus(`spell-ring-${active.id}`, {
-        diameter: cellSize * 4, thickness: 0.18, tessellation: 24
-      }, this.scene);
-      const mat = new StandardMaterial(`spell-ring-mat-${active.id}`, this.scene);
-      mat.emissiveColor = active.spellId === 'freeze' ? new Color3(0.5, 0.85, 1) : new Color3(1, 0.4, 0.1);
-      mat.disableLighting = true;
-      mat.alpha = 0.6;
-      ring.material = mat;
-      ring.isPickable = false;
-      ring.position.set(x, groundY + 0.1, z);
-      const duration = Math.max(0.5, active.remainingTicks / 30);
-      const startTime = performance.now();
-      const observer = this.scene.onBeforeRenderObservable.add(() => {
-        const elapsed = (performance.now() - startTime) / 1000;
-        const t = Math.min(1, elapsed / duration);
-        ring.scaling.set(1 + t * 0.3, 1, 1 + t * 0.3);
-        mat.alpha = 0.6 * (1 - t);
-        if (t >= 1) {
-          this.scene.onBeforeRenderObservable.remove(observer);
-          ring.dispose();
-        }
-      });
-    }
-  }
-
-  dispose(): void {
-    for (const ps of this.particles) ps.dispose();
-    this.particles.length = 0;
-    this.activeSpellSeen.clear();
-    this.justSeen.clear();
-  }
+  dispose(): void { this.effects.dispose(); this.seen.clear(); this.castSeen.clear(); }
 }
 
 interface HpBar {

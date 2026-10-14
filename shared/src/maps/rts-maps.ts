@@ -13,10 +13,50 @@
 import type { MapDocument, TileType, PlayerStart, ResourceNode } from '../types/map.js';
 import { flatHeightmap, fillTiles, paintTileRect } from './index.js';
 
+function paintOrganicPatch(
+  tiles: TileType[][],
+  centerCol: number,
+  centerRow: number,
+  radius: number,
+  tile: TileType
+): void {
+  for (let row = centerRow - radius; row <= centerRow + radius; row++) {
+    for (let col = centerCol - radius; col <= centerCol + radius; col++) {
+      const target = tiles[row]?.[col];
+      if (target === undefined || target === 'water' || target === 'rock') continue;
+      const wobble = Math.sin(col * 1.71 + row * 0.83) * 0.65 + Math.cos(col * 0.43 - row * 1.19) * 0.35;
+      if (Math.hypot(col - centerCol, row - centerRow) <= radius + wobble) tiles[row]![col] = tile;
+    }
+  }
+}
+
+function terrace(value: number): number {
+  return Math.max(0, Math.round(value * 5) / 5);
+}
+
+function raiseHill(heightmap: number[][], centerCol: number, centerRow: number, radius: number, height: number): void {
+  for (let row = Math.max(0, centerRow - radius); row <= Math.min(heightmap.length - 1, centerRow + radius); row++) {
+    const width = heightmap[row]?.length ?? 0;
+    for (let col = Math.max(0, centerCol - radius); col <= Math.min(width - 1, centerCol + radius); col++) {
+      const distance = Math.hypot(col - centerCol, row - centerRow);
+      if (distance > radius) continue;
+      const falloff = 1 - distance / radius;
+      heightmap[row]![col] = terrace((heightmap[row]![col] ?? 0) + falloff * falloff * height);
+    }
+  }
+}
+
 // ── Map 1: rts-2p-crossroads (64×64, 2P) ─────────────────────────────────
 
 function buildRts2pTiles(): TileType[][] {
   const tiles = fillTiles(64, 64, 'grass');
+  paintOrganicPatch(tiles, 8, 8, 8, 'dirt');
+  paintOrganicPatch(tiles, 56, 56, 8, 'dirt');
+  paintOrganicPatch(tiles, 20, 38, 6, 'sand');
+  paintOrganicPatch(tiles, 43, 23, 7, 'sand');
+  paintOrganicPatch(tiles, 19, 17, 4, 'rock');
+  paintOrganicPatch(tiles, 47, 46, 4, 'rock');
+  paintOrganicPatch(tiles, 31, 32, 10, 'road');
   // центральный road-patch (для визуальной читаемости neutral area)
   paintTileRect(tiles, 64, 64, 28, 35, 28, 35, 'dirt');
   // реки (water) по диагоналям — декор + лёгкое препятствие (M8.1: water НЕ проходим)
@@ -37,9 +77,11 @@ function buildRts2pHeightmap(): number[][] {
     for (let c = 0; c < 64; c++) {
       // low-amplitude noise (1.0 .. 2.0)
       const v = 1.0 + 0.5 * Math.sin(c * 0.18) * Math.cos(r * 0.21) + 0.3 * Math.sin((c + r) * 0.07);
-      hm[r]![c] = Math.max(0, v);
+      hm[r]![c] = terrace(v);
     }
   }
+  raiseHill(hm, 19, 17, 7, 2.8);
+  raiseHill(hm, 47, 46, 7, 2.6);
   return hm;
 }
 
@@ -87,6 +129,13 @@ const RTS_2P_CROSSROADS: MapDocument = {
 
 function buildRts3pTiles(): TileType[][] {
   const tiles = fillTiles(72, 72, 'grass');
+  paintOrganicPatch(tiles, 8, 64, 8, 'dirt');
+  paintOrganicPatch(tiles, 64, 64, 8, 'dirt');
+  paintOrganicPatch(tiles, 36, 8, 8, 'dirt');
+  paintOrganicPatch(tiles, 20, 34, 7, 'sand');
+  paintOrganicPatch(tiles, 53, 38, 7, 'sand');
+  paintOrganicPatch(tiles, 18, 18, 4, 'rock');
+  paintOrganicPatch(tiles, 55, 20, 4, 'rock');
   // центральный contested triangle
   paintTileRect(tiles, 72, 72, 33, 38, 33, 38, 'dirt');
   // реки от центра к 3-м сторонам
@@ -103,9 +152,11 @@ function buildRts3pHeightmap(): number[][] {
   for (let r = 0; r < 72; r++) {
     for (let c = 0; c < 72; c++) {
       const v = 1.0 + 0.5 * Math.sin(c * 0.16) * Math.cos(r * 0.18) + 0.25 * Math.cos((c + r) * 0.06);
-      hm[r]![c] = Math.max(0, v);
+      hm[r]![c] = terrace(v);
     }
   }
+  raiseHill(hm, 18, 18, 7, 2.5);
+  raiseHill(hm, 55, 20, 7, 2.7);
   return hm;
 }
 
@@ -148,6 +199,14 @@ const RTS_3P_TRIDENT: MapDocument = {
 
 function buildRts4pTiles(): TileType[][] {
   const tiles = fillTiles(80, 80, 'grass');
+  paintOrganicPatch(tiles, 10, 10, 8, 'dirt');
+  paintOrganicPatch(tiles, 70, 10, 8, 'dirt');
+  paintOrganicPatch(tiles, 10, 70, 8, 'dirt');
+  paintOrganicPatch(tiles, 70, 70, 8, 'dirt');
+  paintOrganicPatch(tiles, 24, 25, 8, 'sand');
+  paintOrganicPatch(tiles, 56, 55, 8, 'sand');
+  paintOrganicPatch(tiles, 22, 20, 4, 'rock');
+  paintOrganicPatch(tiles, 58, 60, 4, 'rock');
   // central contested square
   paintTileRect(tiles, 80, 80, 36, 43, 36, 43, 'dirt');
   // rivers forming quadrant boundaries
@@ -168,9 +227,11 @@ function buildRts4pHeightmap(): number[][] {
   for (let r = 0; r < 80; r++) {
     for (let c = 0; c < 80; c++) {
       const v = 1.0 + 0.5 * Math.sin(c * 0.15) * Math.cos(r * 0.17) + 0.25 * Math.sin((c - r) * 0.08);
-      hm[r]![c] = Math.max(0, v);
+      hm[r]![c] = terrace(v);
     }
   }
+  raiseHill(hm, 22, 20, 8, 2.8);
+  raiseHill(hm, 58, 60, 8, 2.8);
   return hm;
 }
 

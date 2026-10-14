@@ -6,8 +6,10 @@ TD-MVP-PLAN.md
 redy.md
 docs/*
 !docs/sciens/
+!docs/media/rts-crossroads.png
 .env
 .env.*
 !.env.example
 
 .playwright-mcp
+artifacts/*

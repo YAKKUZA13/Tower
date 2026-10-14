@@ -20,6 +20,8 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
   const indices: number[] = [];
   const colors: number[] = [];
   const normals: number[] = [];
+  const materialIds: number[] | undefined = voxels.some(v => v.material !== undefined) ? [] : undefined;
+  const cellMaterials = new Map<string, number>();
 
   const cells = new Map<string, RGB>();
   for (const v of voxels) {
@@ -30,9 +32,14 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
         `size (${v.sx},${v.sy},${v.sz}). Use the naive builder for non-unit voxels.`
       );
     }
-    cells.set(`${Math.round(v.x)},${Math.round(v.y)},${Math.round(v.z)}`, v.color);
+    if (!Number.isInteger(v.material ?? 0) || (v.material ?? 0) < 0 || (v.material ?? 0) > 65535) {
+      throw new Error('voxel material id must be an integer in [0, 65535]');
+    }
+    const key = `${Math.round(v.x)},${Math.round(v.y)},${Math.round(v.z)}`;
+    cells.set(key, v.color);
+    if (materialIds) cellMaterials.set(key, v.material ?? 0);
   }
-  if (cells.size === 0) return { positions, indices, colors, normals };
+  if (cells.size === 0) return { positions, indices, colors, normals, ...(materialIds ? { materialIds } : {}) };
 
   const colAt = (x: number, y: number, z: number): RGB | undefined => cells.get(`${x},${y},${z}`);
 
@@ -56,6 +63,8 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
     const uLen = maxU - minU + 1;
     const vLen = maxV - minV + 1;
     const mask = new Int32Array(uLen * vLen);
+    const mergeable = new Uint8Array(uLen * vLen);
+    const faceIds = new Map<string, number>();
 
     for (let d = boundsMin[axis]!; d <= boundsMax[axis]! + 1; d++) {
       for (let iu = 0; iu < uLen; iu++) {
@@ -69,8 +78,21 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
           const loC = colAt(lo[0], lo[1], lo[2]);
           const hiC = colAt(hi[0], hi[1], hi[2]);
           let key = 0;
-          if (loC && !hiC) key = colorKeyOf(loC) * 2 + 1;
-          else if (!loC && hiC) key = colorKeyOf(hiC) * 2 + 2;
+          if (!!loC !== !!hiC) {
+            const sign = loC ? 1 : -1;
+            const own = loC ? lo : hi;
+            const color = (loC ?? hiC)!;
+            const levels = faceAO(cells, own, axis, u, v, sign, flat || isAccentColor(color));
+            const uniform = levels.every(level => level === levels[0]);
+            const material = cellMaterials.get(`${own[0]},${own[1]},${own[2]}`) ?? 0;
+            // Only constant-AO unit faces are merged. Nonconstant faces retain all
+            // four samples, so no contact shadow can disappear inside a large quad.
+            const signature = `${colorKeyOf(color)}:${material}:${levels[0]}`;
+            let id = faceIds.get(signature);
+            if (id === undefined) { id = faceIds.size + 1; faceIds.set(signature, id); }
+            key = id * 2 + (sign > 0 ? 1 : 0);
+            mergeable[iu * vLen + iv] = Number(uniform);
+          }
           mask[iu * vLen + iv] = key;
         }
       }
@@ -81,14 +103,19 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
         const iu0 = Math.floor(n / vLen);
         const iv0 = n % vLen;
         let w = 1;
-        while (iv0 + w < vLen && mask[iu0 * vLen + iv0 + w] === key) w++;
+        while (mergeable[n] && iv0 + w < vLen && mergeable[iu0 * vLen + iv0 + w] && mask[iu0 * vLen + iv0 + w] === key) w++;
         let h = 1;
-        let canGrow = true;
+        let canGrow = Boolean(mergeable[n]);
         while (iu0 + h < uLen && canGrow) {
           for (let k = 0; k < w; k++) {
-            if (mask[(iu0 + h) * vLen + iv0 + k] !== key) { canGrow = false; break; }
+            if (!mergeable[(iu0 + h) * vLen + iv0 + k] || mask[(iu0 + h) * vLen + iv0 + k] !== key) { canGrow = false; break; }
           }
           if (canGrow) h++;
+        }
+        if (materialIds) {
+          const own = [0, 0, 0];
+          own[axis] = sign > 0 ? d - 1 : d; own[u] = minU + iu0; own[v] = minV + iv0;
+          materialIds.push(cellMaterials.get(`${own[0]},${own[1]},${own[2]}`) ?? 0);
         }
         emitGreedyQuad(
           axis, u, v, d, minU, minV, iu0, iv0, w, h, sign,
@@ -100,7 +127,7 @@ export function computeGreedyGeometry(voxels: Voxel[], flat: boolean): GreedyGeo
       }
     }
   }
-  return { positions, indices, colors, normals };
+  return { positions, indices, colors, normals, ...(materialIds ? { materialIds } : {}) };
 }
 
 function emitGreedyQuad(
@@ -128,6 +155,7 @@ function emitGreedyQuad(
   const accent = isAccentColor(color);
 
   const baseIdx = positions.length / 3;
+  const brightness: number[] = [];
   for (let c = 0; c < 4; c++) {
     const pu = cu[c]!;
     const pv = cv[c]!;
@@ -151,11 +179,27 @@ function emitGreedyQuad(
       ao = AO_FACTORS[level]!;
     }
     const b = t * ao;
+    brightness.push(b);
     colors.push(color[0] * b, color[1] * b, color[2] * b, 1);
   }
-  if (sign > 0) {
-    indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
-  } else {
-    indices.push(baseIdx, baseIdx + 3, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 1);
+  // Choose the diagonal from the actual interpolated brightness, not the
+  // integer AO levels (the level-to-brightness curve is nonlinear).
+  const corners = brightness[0]! + brightness[2]! > brightness[1]! + brightness[3]!
+    ? [0, 1, 3, 1, 2, 3] : [0, 1, 2, 0, 2, 3];
+  for (let triangle = 0; triangle < 6; triangle += 3) {
+    const a = baseIdx + corners[triangle]!;
+    const b = baseIdx + corners[triangle + 1]!;
+    const c = baseIdx + corners[triangle + 2]!;
+    indices.push(a, sign > 0 ? b : c, sign > 0 ? c : b);
   }
+}
+
+function faceAO(cells: Map<string, RGB>, own: number[], axis: number, u: number, v: number,
+  sign: number, flat: boolean): number[] {
+  if (flat) return [3, 3, 3, 3];
+  const normal = [0, 0, 0]; normal[axis] = sign;
+  return [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([du, dv]) => {
+    const p = [...own]; p[axis] += sign * 0.5; p[u] += du!; p[v] += dv!;
+    return vertexAO(cells, own[0]!, own[1]!, own[2]!, normal[0]!, normal[1]!, normal[2]!, p[0]!, p[1]!, p[2]!);
+  });
 }

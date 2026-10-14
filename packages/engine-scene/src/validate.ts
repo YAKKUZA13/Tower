@@ -22,6 +22,7 @@ function estimateTriangles(primitive: ScenePrimitiveSpec): number {
     case 'box': return 12;
     case 'plane': return 2;
     case 'cylinder': return Math.max(3, primitive.tessellation ?? 12) * 4;
+    case 'cone': return Math.max(3, primitive.tessellation ?? 12) * 2;
     case 'torus': {
       const tessellation = Math.max(3, primitive.tessellation ?? 24);
       return tessellation * Math.max(6, Math.round(tessellation / 3)) * 2;
@@ -83,6 +84,13 @@ export function validateSceneKit(spec: SceneKitSpec): SceneKitValidationResult {
     if (material.emissiveStrength !== undefined && (!Number.isFinite(material.emissiveStrength) || material.emissiveStrength < 0)) {
       add(`${path}.emissiveStrength`, 'must be a non-negative finite number');
     }
+    if (material.surfaceNoise) {
+      if (!positive(material.surfaceNoise.scale)) add(`${path}.surfaceNoise.scale`, 'must be positive');
+      if (!positive(material.surfaceNoise.strength)) add(`${path}.surfaceNoise.strength`, 'must be positive');
+      if (material.surfaceNoise.seed !== undefined && !Number.isSafeInteger(material.surfaceNoise.seed)) {
+        add(`${path}.surfaceNoise.seed`, 'must be a safe integer');
+      }
+    }
     if (material.emissiveColor && (!finiteTuple(material.emissiveColor) || material.emissiveColor.some((channel) => channel < 0 || channel > 1))) {
       add(`${path}.emissiveColor`, 'channels must be finite and in [0,1]');
     }
@@ -134,6 +142,16 @@ export function validateSceneKit(spec: SceneKitSpec): SceneKitValidationResult {
         }
       });
       if (!Number.isFinite(emitter.angularSpeed)) add(`${path}.angularSpeed`, 'must be finite');
+      if (emitter.emissiveStrength !== undefined && (!Number.isFinite(emitter.emissiveStrength) || emitter.emissiveStrength < 0)) {
+        add(`${path}.emissiveStrength`, 'must be a non-negative finite number');
+      }
+      if (emitter.shape === 'vortex') {
+        if (!positive(emitter.height ?? 0)) add(`${path}.height`, 'vortex height must be positive');
+      }
+      if ((emitter.shape === 'vortex' || emitter.shape === 'orb')
+        && (!Number.isFinite(emitter.innerRadius ?? Number.NaN) || (emitter.innerRadius ?? -1) < 0)) {
+        add(`${path}.innerRadius`, `${emitter.shape} innerRadius must be non-negative`);
+      }
     } else {
       if (!positive(emitter.intensity) || !positive(emitter.range)) add(path, 'intensity and range must be positive');
       if (!finiteTuple(emitter.color) || emitter.color.some((channel) => channel < 0 || channel > 1)) {
@@ -171,6 +189,9 @@ function validatePrimitive(
   }
   if (primitive.kind === 'cylinder' && (!positive(primitive.diameter) || !positive(primitive.height))) {
     add(`${path}.primitive`, 'cylinder diameter/height must be positive');
+  }
+  if (primitive.kind === 'cone' && (!positive(primitive.diameter) || !positive(primitive.height))) {
+    add(`${path}.primitive`, 'cone diameter/height must be positive');
   }
   if (primitive.kind === 'torus' && (!positive(primitive.diameter) || !positive(primitive.thickness) || primitive.thickness >= primitive.diameter)) {
     add(`${path}.primitive`, 'torus dimensions must be positive and thickness < diameter');

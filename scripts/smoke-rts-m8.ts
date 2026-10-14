@@ -12,6 +12,7 @@ import {
 } from '../client/src/sim/visibility';
 import { tickGathering, pruneDepletedNodes } from '../client/src/sim/systems/gathering';
 import { ClientPredictor } from '../client/src/sim/prediction';
+import { rtsCameraBasis } from '../client/src/babylon/rtscam';
 
 let failures = 0;
 function check(name: string, cond: boolean, details = ''): void {
@@ -152,13 +153,18 @@ console.log('3. Gathering (worker FSM):');
   check('bag has wood eventually', bag.wood > 0, `(wood=${bag.wood})`);
   check('node amount decreases', node.amount < 100, `(amount=${node.amount})`);
 
-  // depletion: position worker AT town-hall world coords, simulate drop-off that empties node
+  // Depletion happens at pickup, not delivery; the final cargo survives node removal.
   node.amount = 1;
-  worker.carry = 5;
-  worker.gatherState = 'to-base';
+  worker.carry = 0;
+  worker.gatherNodeId = 'n1';
+  worker.gatherState = 'gathering';
+  worker.gatherTimer = 0;
+  const depleted = tickGathering({units:[worker],unitTypes,nodes:[node],buildings:[townHall],bag,grid,dt:1});
   const thPos = wToWorld(4, 4);
   worker.position = { x: thPos.x, y: 0, z: thPos.z };
-  const depleted = tickGathering({ units: [worker], unitTypes, nodes: [node], buildings: [townHall], bag, grid, dt: 1 });
+  const beforeDelivery=bag.wood;
+  tickGathering({units:[worker],unitTypes,nodes:[],buildings:[townHall],bag,grid,dt:1});
+  check('last cargo is delivered after node removal',bag.wood===beforeDelivery+1);
   check('depleted node detected', depleted.depletedNodeIds.indexOf('n1') >= 0, `(depleted: ${JSON.stringify(depleted.depletedNodeIds)})`);
   check('pruneDepletedNodes removes', pruneDepletedNodes([node], ['n1']).length === 0);
 }
@@ -209,6 +215,21 @@ console.log('4. Client prediction + rollback:');
   check('replayed frames > 0', r2.replayedFrames > 0);
   check('predicted counter = 1 after replay (server 0 + 1 replayed input)',
     predictor2.getPredictedState().counter === 1, `(got ${predictor2.getPredictedState().counter})`);
+}
+
+console.log('===');
+console.log('5. RTS camera basis:');
+{
+  const zero = rtsCameraBasis(0);
+  check('yaw 0 faces map north', zero.forwardX === 0 && zero.forwardZ === 1);
+  check('yaw 0 right axis is east', zero.rightX === 1 && Object.is(zero.rightZ, -0));
+
+  const iso = rtsCameraBasis(-Math.PI / 4);
+  const forwardLength = Math.hypot(iso.forwardX, iso.forwardZ);
+  const rightLength = Math.hypot(iso.rightX, iso.rightZ);
+  const dot = iso.forwardX * iso.rightX + iso.forwardZ * iso.rightZ;
+  check('isometric movement axes stay normalized', Math.abs(forwardLength - 1) < 1e-10 && Math.abs(rightLength - 1) < 1e-10);
+  check('isometric movement axes stay orthogonal', Math.abs(dot) < 1e-10);
 }
 
 console.log('===');

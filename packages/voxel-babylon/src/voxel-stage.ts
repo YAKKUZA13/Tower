@@ -3,6 +3,7 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight.js';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
+import { GlowLayer } from '@babylonjs/core/Layers/glowLayer.js';
 import { PointLight } from '@babylonjs/core/Lights/pointLight.js';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator.js';
 import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent.js';
@@ -19,6 +20,8 @@ export interface VoxelStageOptions {
   /** Scene render height before nearest upscale; 0 uses native resolution. */
   pixelHeight?: number;
   shadowMapSize?: number;
+  /** Optional emission bloom. 0 disables the extra glow render targets/passes. */
+  glowIntensity?: number;
   keyIntensity?: number;
   fillIntensity?: number;
 }
@@ -40,6 +43,8 @@ export function createVoxelStage(scene: Scene, camera: Camera, options: VoxelSta
   let viewHeight = options.viewHeight ?? 12;
   let pixelHeight = options.pixelHeight ?? 360;
   const shadowSize = options.shadowMapSize ?? 1024;
+  const glowIntensity = options.glowIntensity ?? 0;
+  if (!Number.isFinite(glowIntensity) || glowIntensity < 0 || glowIntensity > 4) throw new Error('glowIntensity must be in [0, 4]');
   positive(viewHeight, 'viewHeight');
   const validatePixelHeight = (value: number) => {
     if (!Number.isInteger(value) || value < 0 || value > 4096) throw new Error('pixelHeight must be an integer in [0, 4096]');
@@ -66,6 +71,8 @@ export function createVoxelStage(scene: Scene, camera: Camera, options: VoxelSta
   shadows.usePoissonSampling = true;
   shadows.bias = 0.0005;
   shadows.normalBias = 0.015;
+  const glow = glowIntensity > 0 ? new GlowLayer('voxel-stage:glow', scene, { mainTextureRatio: 0.5, blurKernelSize: 16 }) : undefined;
+  if (glow) glow.intensity = glowIntensity;
   const receivers = new Map<AbstractMesh, { receive: boolean; observer: Observer<import('@babylonjs/core/node.js').Node> }>();
   const points: PointLight[] = [];
   let pass: PassPostProcess | undefined;
@@ -77,6 +84,7 @@ export function createVoxelStage(scene: Scene, camera: Camera, options: VoxelSta
     if (!previous) return;
     mesh.onDisposeObservable.remove(previous.observer);
     shadows.removeShadowCaster(mesh, false);
+    glow?.removeIncludedOnlyMesh(mesh as import('@babylonjs/core/Meshes/mesh.js').Mesh);
     if (!mesh.isDisposed()) mesh.receiveShadows = previous.receive;
     receivers.delete(mesh);
   }
@@ -98,7 +106,7 @@ export function createVoxelStage(scene: Scene, camera: Camera, options: VoxelSta
   const resizeObserver = scene.getEngine().onResizeObservable.add(resize);
   resize();
   return {
-    key, fill, shadows,
+    key, fill, shadows, glow,
     addMesh(mesh: AbstractMesh, castShadow = true) {
       if (disposed) throw new Error('voxel stage is disposed');
       if (mesh.isDisposed() || mesh.getScene() !== scene) throw new Error('mesh must be live and belong to this scene');
@@ -108,6 +116,7 @@ export function createVoxelStage(scene: Scene, camera: Camera, options: VoxelSta
         receivers.set(mesh, { receive, observer });
       }
       mesh.receiveShadows = true;
+      glow?.addIncludedOnlyMesh(mesh as import('@babylonjs/core/Meshes/mesh.js').Mesh);
       if (castShadow) shadows.addShadowCaster(mesh, false);
     },
     removeMesh,
@@ -134,6 +143,7 @@ export function createVoxelStage(scene: Scene, camera: Camera, options: VoxelSta
       pass?.dispose(camera);
       for (const mesh of receivers.keys()) removeMesh(mesh);
       shadows.dispose();
+      glow?.dispose();
       points.forEach(light => light.dispose());
       key.dispose();
       fill.dispose();

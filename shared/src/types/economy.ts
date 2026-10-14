@@ -120,6 +120,7 @@ export interface DefenderUnit {
   gatherState?: 'idle' | 'to-node' | 'gathering' | 'to-base';
   /** Таймер копания (0..gatherTime). */
   gatherTimer?: number;
+  navigationStatus?: 'moving' | 'arrived' | 'blocked';
 }
 
 // ── M8.3: Tech tree / upgrades ────────────────────────────────────────

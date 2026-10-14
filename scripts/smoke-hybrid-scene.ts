@@ -5,6 +5,7 @@ import { Scene } from '@babylonjs/core/scene.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import {
   createSceneRandom,
+  createRitualCasterFragment,
   createRitualSanctumKit,
   generateProceduralSanctum,
   instantiateSceneFragment,
@@ -28,8 +29,23 @@ check('fixture satisfies its quality/budget contract', validation.ok,
   validation.ok ? '' : validation.errors.map((error) => `${error.path}: ${error.message}`).join(', '));
 if (validation.ok) {
   check('triangle budget retains headroom', validation.metrics.estimatedTriangles < first.budget.maxEstimatedTriangles * 0.5);
-  check('particle budget is explicit', validation.metrics.animatedInstances === 64);
+  const declaredAnimatedInstances = first.emitters.reduce(
+    (total, emitter) => total + (emitter.kind === 'orbital-cubes' ? emitter.count : 0), 0
+  );
+  check('particle budget is explicit',
+    validation.metrics.animatedInstances === declaredAnimatedInstances &&
+    declaredAnimatedInstances <= first.budget.maxAnimatedInstances,
+    `(declared=${declaredAnimatedInstances}, measured=${validation.metrics.animatedInstances})`);
 }
+const casterFragment = createRitualCasterFragment({ scale: 1.1 });
+check('caster fragment exposes mask, staff, lantern and casting-hand identity parts',
+  ['mask', 'beak', 'staff-shaft', 'lantern-core', 'casting-palm'].every((id) => casterFragment.nodes.some((node) => node.id === id)));
+check('caster fragment keeps interaction sockets and detachable groups',
+  casterFragment.nodes.some((node) => node.socketId === 'magic-origin') &&
+  casterFragment.nodes.some((node) => node.destructionGroup === 'caster-lantern'));
+check('sanctum composes the caster through namespaced reusable parts',
+  first.nodes.some((node) => node.id === 'ritual-caster/beak' && node.primitive?.kind === 'cone') &&
+  first.nodes.some((node) => node.socketId === 'ritual-caster/magic-origin'));
 
 const invalid = structuredClone(first);
 invalid.nodes[0]!.parent = invalid.nodes[0]!.id;

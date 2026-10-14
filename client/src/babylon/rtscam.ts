@@ -1,112 +1,133 @@
 /**
- * M8.1 — RTS camera controls (pan WASD/edge, zoom scroll, rotate Q/E).
- * Источник: AoE/Warcraft/StarCraft RTS-camera conventions.
+ * Purpose-built RTS camera controller.
  *
- * Поведение:
- *  - Pan: WASD + edge-scroll (мышь у границы канваса).
- *  - Zoom: колесо мыши → ortho half-extents (zoom in/out).
- *  - Rotate: Q/E → yaw по 45° шагам (или плавно).
- *  - Camera mode: ORTHOGRAPHIC_CAMERA (из cam-snap.ts applyOrthoDimetric).
- *
- * Реализация: отдельный от ArcRotate-camera input-controller — думает в world-space
- * target + radius + yaw (а не в spherical). attachControl на canvas.
- *
- * Совместим с pixel-snap (cam-snap.ts): после движения, target снапается к
- * view-aligned texel-grid в onBeforeRender.
+ * Keyboard, edge, drag, minimap and zoom input all update one desired state.
+ * Babylon's camera eases towards it, so inputs never fight over `target`.
  */
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
-import { EventConstants } from '@babylonjs/core/Events/deviceInputEvents.js';
 import { KeyboardEventTypes, type KeyboardInfo } from '@babylonjs/core/Events/keyboardEvents.js';
-import { PointerEventTypes, type PointerInfo } from '@babylonjs/core/Events/pointerEvents.js';
 import { type Engine } from '@babylonjs/core/Engines/engine.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { type Observer } from '@babylonjs/core/Misc/observable.js';
 import { type Scene } from '@babylonjs/core/scene.js';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+
+export interface RtsCameraBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
 
 export interface RtsCameraOptions {
-  /** Начальный target (центр карты). */
   target?: { x: number; y: number; z: number };
-  /** Скорость панорамирования (world-units/sec) при WASD/edge. */
   panSpeed?: number;
-  /** Скорость зума (half-height delta per wheel-tick). */
   zoomSpeed?: number;
-  /** Min/max ortho half-height (zoom clamp). */
   minVisibleH?: number;
   maxVisibleH?: number;
-  /** Шаг yaw (радиан) при Q/E. По умолчанию π/4 (45°). */
   rotationStep?: number;
-  /** Активировать edge-scroll (мышь у границы). */
   enableEdgeScroll?: boolean;
-  /** Толщина edge-зоны в пикселях (от края canvas). */
   edgeScrollMargin?: number;
-  /** Ограничения pan по world-границам (карта). */
-  bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
-  /** Pitch (beta) в радианах. Канон iso ~30° = π/6. */
+  bounds?: RtsCameraBounds;
   pitch?: number;
-  /** Начальный yaw (alpha). По умолчанию -π/4 (45° iso). */
   initialYaw?: number;
-  /** Начальная видимая высота (ortho half-height * 2). */
   initialVisibleH?: number;
+  /** Higher values settle faster. */
+  motionSharpness?: number;
 }
 
 export interface RtsCameraHandle {
   camera: ArcRotateCamera;
-  /** Включить/выключить ввод (например, при модальном UI). */
   setEnabled(enabled: boolean): void;
-  /** Сфокусировать камеру на world-точке (миникарта-click). */
   focusOn(x: number, z: number): void;
-  /** Получить текущую видимую высоту (для ortho frustum). */
   getVisibleH(): number;
-  /** Установить видимую высоту (zoom). */
   setVisibleH(h: number): void;
-  /** Обновить bounds (если карта сменилась). */
-  setBounds(b: { minX: number; maxX: number; minZ: number; maxZ: number }): void;
+  setBounds(bounds: RtsCameraBounds): void;
+  reset(): void;
   dispose(): void;
 }
 
-/**
- * Создаёт RTS-camera controller, оверлей над ArcRotateCamera.
- * Подменяет стандартный attachControl на свой, который:
- *  - WASD pan в view-aligned (зависит от yaw)
- *  - mouse-wheel zoom (ortho half-height)
- *  - Q/E rotate (yaw step)
- *  - edge-scroll
- *
- * Pitch (beta) фиксирован (диметрический iso) — игрок не может наклонять камеру.
- */
+interface PlanarBasis {
+  forwardX: number;
+  forwardZ: number;
+  rightX: number;
+  rightZ: number;
+}
+
+export function rtsCameraBasis(yaw: number): PlanarBasis {
+  return {
+    forwardX: Math.sin(yaw),
+    forwardZ: Math.cos(yaw),
+    rightX: Math.cos(yaw),
+    rightZ: -Math.sin(yaw)
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function damp(current: number, target: number, sharpness: number, dt: number): number {
+  return current + (target - current) * (1 - Math.exp(-sharpness * dt));
+}
+
+function shortestAngle(from: number, to: number): number {
+  let delta = (to - from) % (Math.PI * 2);
+  if (delta > Math.PI) delta -= Math.PI * 2;
+  if (delta < -Math.PI) delta += Math.PI * 2;
+  return delta;
+}
+
 export function attachRtsCamera(
   scene: Scene,
   camera: ArcRotateCamera,
   engine: Engine,
   options: RtsCameraOptions = {}
 ): RtsCameraHandle {
-  const panSpeed = options.panSpeed ?? 18;
-  const zoomSpeed = options.zoomSpeed ?? 1.5;
-  const minVisibleH = options.minVisibleH ?? 6;
-  const maxVisibleH = options.maxVisibleH ?? 36;
+  const canvas = engine.getRenderingCanvas() as HTMLCanvasElement | null;
+  const panSpeed = options.panSpeed ?? 20;
+  const zoomSpeed = options.zoomSpeed ?? 0.12;
+  const minVisibleH = options.minVisibleH ?? 8;
+  const maxVisibleH = options.maxVisibleH ?? 72;
   const rotationStep = options.rotationStep ?? Math.PI / 4;
-  const enableEdgeScroll = options.enableEdgeScroll ?? true;
-  const edgeScrollMargin = options.edgeScrollMargin ?? 16;
+  const edgeScroll = options.enableEdgeScroll ?? true;
+  const edgeMargin = options.edgeScrollMargin ?? 28;
+  const sharpness = options.motionSharpness ?? 13;
+  const pitch = options.pitch ?? Math.PI / 4.4;
+  let bounds: RtsCameraBounds = { ...(options.bounds ?? { minX: -50, maxX: 50, minZ: -50, maxZ: 50 }) };
+  let enabled = true;
+  let pointerInside = false;
+  let pointerX = 0;
+  let pointerY = 0;
+  let dragging = false;
+  let dragPointerId = -1;
+  let dragLastX = 0;
+  let dragLastY = 0;
 
-  const pitch = options.pitch ?? Math.PI / 6;
-  const initialYaw = options.initialYaw ?? -Math.PI / 4;
-  let visibleH = options.initialVisibleH ?? 16;
+  const initial = options.target ?? { x: 0, y: 0, z: 0 };
+  const initialTarget = new Vector3(initial.x, initial.y, initial.z);
+  const desiredTarget = new Vector3(initial.x, initial.y, initial.z);
+  let desiredVisibleH = clamp(options.initialVisibleH ?? 20, minVisibleH, maxVisibleH);
+  let visibleH = desiredVisibleH;
+  let desiredYaw = options.initialYaw ?? -Math.PI / 4;
 
-  const bounds = options.bounds ?? { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
-
-  // Canvas для pointer-tracking. Edge-scroll должен работать ТОЛЬКО когда курсор
-  // реально над канвасом (иначе scene.pointerX/Y хранят последнее положение у
-  // края → камера бесконечно «уплывает» в угол, когда мышь покинула окно).
-  const canvasEl = engine.getRenderingCanvas() as HTMLCanvasElement | null;
-
-  // переводим camera в ortho
   camera.mode = ArcRotateCamera.ORTHOGRAPHIC_CAMERA;
-  camera.alpha = initialYaw;
+  camera.alpha = desiredYaw;
   camera.beta = pitch;
-  // ortho half-extents
+  camera.target.copyFrom(desiredTarget);
+  camera.inertia = 0;
+  try { camera.inputs.clear(); } catch { /* custom listeners below own all input */ }
+
+  const keys = new Set<string>();
+  const disposers: Array<() => void> = [];
+
+  const clampTarget = (): void => {
+    desiredTarget.x = clamp(desiredTarget.x, bounds.minX, bounds.maxX);
+    desiredTarget.z = clamp(desiredTarget.z, bounds.minZ, bounds.maxZ);
+  };
+
   const updateOrtho = (): void => {
     const aspect = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
-    const halfH = visibleH / 2;
+    const halfH = visibleH * 0.5;
     const halfW = halfH * aspect;
     camera.orthoLeft = -halfW;
     camera.orthoRight = halfW;
@@ -115,157 +136,184 @@ export function attachRtsCamera(
   };
   updateOrtho();
 
-  // clamp target в bounds (вызывается каждый кадр).
-  const clampTarget = (t: Vector3): Vector3 => new Vector3(
-    Math.max(bounds.minX, Math.min(bounds.maxX, t.x)),
-    t.y,
-    Math.max(bounds.minZ, Math.min(bounds.maxZ, t.z))
-  );
-
-  if (options.target) {
-    camera.target = clampTarget(new Vector3(options.target.x, options.target.y, options.target.z));
-  }
-  // disable default arc rotate input — RTS controls ниже (Q/E rotate, WASD pan, wheel zoom)
-  // `clear()` снимает все встроенные input-plugins; attachControl не вызываем.
-  try { (camera.inputs as { clear?: () => void; removeByType?: (t: string) => void }).clear?.(); }
-  catch { /* ok — fallback: ниже всё равно свой handler */ }
-
-  // ── keyboard state ──
-  const keysDown = new Set<string>();
-  let enabled = true;
-  // колбэки очистки (canvas-listeners и т.п.)
-  const disposables: Array<() => void> = [];
-
-  const onKey = (info: KeyboardInfo): void => {
+  const onKeyboard = (info: KeyboardInfo): void => {
+    const event = info.event as KeyboardEvent;
     if (!enabled) return;
-    const ev = info.event as KeyboardEvent;
-    const code = ev.code;
     if (info.type === KeyboardEventTypes.KEYDOWN) {
-      keysDown.add(code);
-      if (code === 'KeyQ') camera.alpha -= rotationStep;
-      else if (code === 'KeyE') camera.alpha += rotationStep;
-    } else if (info.type === KeyboardEventTypes.KEYUP) {
-      keysDown.delete(code);
-    }
-  };
-  const keyObs = scene.onKeyboardObservable.add(onKey) as Observer<KeyboardInfo>;
-
-  // ── pointer for wheel-zoom ──
-  const onPointer = (pi: PointerInfo): void => {
-    if (!enabled) return;
-    if (pi.type === PointerEventTypes.POINTERWHEEL) {
-      const ev = (pi as unknown as { event: WheelEvent }).event;
-      const dir = ev && typeof ev.deltaY === 'number' ? Math.sign(ev.deltaY) : 0;
-      if (dir !== 0) {
-        visibleH = Math.max(minVisibleH, Math.min(maxVisibleH, visibleH + dir * zoomSpeed));
-        updateOrtho();
+      keys.add(event.code);
+      if (!event.repeat && event.code === 'KeyQ') desiredYaw -= rotationStep;
+      if (!event.repeat && event.code === 'KeyE') desiredYaw += rotationStep;
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) {
+        event.preventDefault();
       }
+    } else if (info.type === KeyboardEventTypes.KEYUP) {
+      keys.delete(event.code);
     }
   };
-  const ptrObs = scene.onPointerObservable.add(onPointer) as Observer<PointerInfo>;
+  const keyboardObserver = scene.onKeyboardObservable.add(onKeyboard) as Observer<KeyboardInfo>;
 
-  // ── per-frame: WASD pan + edge-scroll ──
-  const dt0 = (): number => Math.min(0.05, engine.getDeltaTime() / 1000);
-
-  // pointer-over-canvas tracking (гасит edge-scroll, когда мышь вне канваса).
-  let pointerInside = false;
-  let pointerClientX = 0;
-  let pointerClientY = 0;
-  if (canvasEl) {
-    const onMove = (ev: MouseEvent): void => {
-      pointerInside = true;
-      pointerClientX = ev.clientX;
-      pointerClientY = ev.clientY;
+  const cursorNdc = (): { x: number; y: number } => {
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: clamp(((pointerX - rect.left) / Math.max(1, rect.width)) * 2 - 1, -1, 1),
+      y: clamp(((pointerY - rect.top) / Math.max(1, rect.height)) * 2 - 1, -1, 1)
     };
+  };
+
+  const zoomAtPointer = (event: WheelEvent): void => {
+    if (!enabled) return;
+    event.preventDefault();
+    const oldH = desiredVisibleH;
+    desiredVisibleH = clamp(oldH * Math.exp(event.deltaY * zoomSpeed * 0.01), minVisibleH, maxVisibleH);
+    if (!pointerInside || oldH === desiredVisibleH) return;
+
+    const ndc = cursorNdc();
+    const basis = rtsCameraBasis(desiredYaw);
+    const aspect = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
+    const scaleDelta = (oldH - desiredVisibleH) * 0.5;
+    const verticalCompensation = 1 / Math.max(0.55, Math.sin(pitch));
+    desiredTarget.x += basis.rightX * ndc.x * scaleDelta * aspect + basis.forwardX * -ndc.y * scaleDelta * verticalCompensation;
+    desiredTarget.z += basis.rightZ * ndc.x * scaleDelta * aspect + basis.forwardZ * -ndc.y * scaleDelta * verticalCompensation;
+    clampTarget();
+  };
+
+  const onPointerMove = (event: PointerEvent): void => {
+    pointerInside = true;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    if (!enabled || !dragging || event.pointerId !== dragPointerId || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dx = event.clientX - dragLastX;
+    const dy = event.clientY - dragLastY;
+    dragLastX = event.clientX;
+    dragLastY = event.clientY;
+    const basis = rtsCameraBasis(desiredYaw);
+    const worldPerPixel = desiredVisibleH / Math.max(1, rect.height);
+    const verticalCompensation = 1 / Math.max(0.55, Math.sin(pitch));
+    desiredTarget.x -= basis.rightX * dx * worldPerPixel;
+    desiredTarget.z -= basis.rightZ * dx * worldPerPixel;
+    desiredTarget.x += basis.forwardX * dy * worldPerPixel * verticalCompensation;
+    desiredTarget.z += basis.forwardZ * dy * worldPerPixel * verticalCompensation;
+    clampTarget();
+    event.preventDefault();
+  };
+
+  const stopDrag = (event?: PointerEvent): void => {
+    if (event && dragPointerId >= 0 && event.pointerId !== dragPointerId) return;
+    if (canvas && dragPointerId >= 0 && canvas.hasPointerCapture(dragPointerId)) canvas.releasePointerCapture(dragPointerId);
+    dragging = false;
+    dragPointerId = -1;
+  };
+
+  if (canvas) {
     const onEnter = (): void => { pointerInside = true; };
-    const onLeave = (): void => { pointerInside = false; };
-    canvasEl.addEventListener('pointermove', onMove as EventListener);
-    canvasEl.addEventListener('pointerenter', onEnter);
-    canvasEl.addEventListener('pointerleave', onLeave);
-    // при dispose снимаем (замыкание на эти 3 listener'а)
-    disposables.push(() => {
-      canvasEl.removeEventListener('pointermove', onMove as EventListener);
-      canvasEl.removeEventListener('pointerenter', onEnter);
-      canvasEl.removeEventListener('pointerleave', onLeave);
+    const onLeave = (): void => { pointerInside = false; stopDrag(); };
+    const onDown = (event: PointerEvent): void => {
+      if (!enabled || (event.button !== 1 && !(event.button === 0 && event.altKey))) return;
+      dragging = true;
+      dragPointerId = event.pointerId;
+      dragLastX = event.clientX;
+      dragLastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    const onUp = (event: PointerEvent): void => stopDrag(event);
+    const onWindowBlur = (): void => { keys.clear(); stopDrag(); };
+    canvas.addEventListener('pointerenter', onEnter);
+    canvas.addEventListener('pointerleave', onLeave);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('wheel', zoomAtPointer, { passive: false });
+    window.addEventListener('blur', onWindowBlur);
+    disposers.push(() => {
+      canvas.removeEventListener('pointerenter', onEnter);
+      canvas.removeEventListener('pointerleave', onLeave);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onUp);
+      canvas.removeEventListener('wheel', zoomAtPointer);
+      window.removeEventListener('blur', onWindowBlur);
     });
   }
 
-  // view-aligned forward/right (зависит от yaw)
-  const viewAlignedVectors = (yaw: number): { fwdX: number; fwdZ: number; rgtX: number; rgtZ: number } => {
-    // forward (camera looks down -Z when yaw=0 in iso)
-    return {
-      fwdX: Math.sin(yaw),
-      fwdZ: Math.cos(yaw),
-      rgtX: Math.cos(yaw),
-      rgtZ: -Math.sin(yaw)
-    };
-  };
+  const beforeRenderObserver = scene.onBeforeRenderObservable.add(() => {
+    const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
+    if (enabled) {
+      const basis = rtsCameraBasis(desiredYaw);
+      let right = 0;
+      let forward = 0;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) forward -= 1;
+      if (keys.has('KeyD') || keys.has('ArrowRight')) right += 1;
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) right -= 1;
 
-  const onBeforeRender = scene.onBeforeRenderObservable.add((): void => {
-    if (!enabled) return;
-    const dt = dt0();
-    const v = viewAlignedVectors(camera.alpha);
-    let dx = 0;
-    let dz = 0;
+      if (edgeScroll && pointerInside && canvas && !dragging) {
+        const rect = canvas.getBoundingClientRect();
+        const x = pointerX - rect.left;
+        const y = pointerY - rect.top;
+        if (x >= 0 && y >= 0 && x <= rect.width && y <= rect.height) {
+          if (x < edgeMargin) right -= 1 - x / edgeMargin;
+          if (x > rect.width - edgeMargin) right += 1 - (rect.width - x) / edgeMargin;
+          if (y < edgeMargin) forward += 1 - y / edgeMargin;
+          if (y > rect.height - edgeMargin) forward -= 1 - (rect.height - y) / edgeMargin;
+        }
+      }
 
-    // keyboard WASD
-    if (keysDown.has('KeyW') || keysDown.has('ArrowUp')) { dx += v.fwdX; dz += v.fwdZ; }
-    if (keysDown.has('KeyS') || keysDown.has('ArrowDown')) { dx -= v.fwdX; dz -= v.fwdZ; }
-    if (keysDown.has('KeyA') || keysDown.has('ArrowLeft')) { dx -= v.rgtX; dz -= v.rgtZ; }
-    if (keysDown.has('KeyD') || keysDown.has('ArrowRight')) { dx += v.rgtX; dz += v.rgtZ; }
-
-    // edge scroll — только когда курсор реально над канвасом.
-    if (enableEdgeScroll && pointerInside && canvasEl) {
-      const rect = canvasEl.getBoundingClientRect();
-      const localX = pointerClientX - rect.left;
-      const localY = pointerClientY - rect.top;
-      const W = rect.width;
-      const H = rect.height;
-      if (localX >= 0 && localX <= W && localY >= 0 && localY <= H) {
-        if (localX < edgeScrollMargin) { dx -= v.rgtX; dz -= v.rgtZ; }
-        else if (localX > W - edgeScrollMargin) { dx += v.rgtX; dz += v.rgtZ; }
-        if (localY < edgeScrollMargin) { dx += v.fwdX; dz += v.fwdZ; }
-        else if (localY > H - edgeScrollMargin) { dx -= v.fwdX; dz -= v.fwdZ; }
+      const length = Math.hypot(right, forward);
+      if (length > 0) {
+        const zoomFactor = clamp(desiredVisibleH / 20, 0.65, 2.4);
+        const distance = panSpeed * zoomFactor * dt / Math.max(1, length);
+        desiredTarget.x += (basis.rightX * right + basis.forwardX * forward) * distance;
+        desiredTarget.z += (basis.rightZ * right + basis.forwardZ * forward) * distance;
+        clampTarget();
       }
     }
 
-    if (dx !== 0 || dz !== 0) {
-      // normalize для diagonal не быстрее straight
-      const len = Math.sqrt(dx * dx + dz * dz);
-      const nx = dx / len, nz = dz / len;
-      const tgt = camera.target;
-      const newX = Math.max(bounds.minX, Math.min(bounds.maxX, tgt.x + nx * panSpeed * dt));
-      const newZ = Math.max(bounds.minZ, Math.min(bounds.maxZ, tgt.z + nz * panSpeed * dt));
-      camera.target = new Vector3(newX, tgt.y, newZ);
-    }
-    // Всегда держим target внутри bounds (внешние установки/фокусинг тоже clamp'ятся).
-    const t = camera.target;
-    if (t.x < bounds.minX || t.x > bounds.maxX || t.z < bounds.minZ || t.z > bounds.maxZ) {
-      camera.target = clampTarget(t);
-    }
+    visibleH = damp(visibleH, desiredVisibleH, sharpness, dt);
+    camera.alpha += shortestAngle(camera.alpha, desiredYaw) * (1 - Math.exp(-sharpness * dt));
+    camera.beta = pitch;
+    camera.target.set(
+      damp(camera.target.x, desiredTarget.x, sharpness, dt),
+      damp(camera.target.y, desiredTarget.y, sharpness, dt),
+      damp(camera.target.z, desiredTarget.z, sharpness, dt)
+    );
+    updateOrtho();
   });
 
-  // ── engine resize → ortho recompute ──
-  const onResize = engine.onResizeObservable.add((): void => updateOrtho());
+  const resizeObserver = engine.onResizeObservable.add(updateOrtho);
 
   return {
     camera,
-    setEnabled(e: boolean) { enabled = e; if (!e) keysDown.clear(); },
-    focusOn(x: number, z: number) {
-      const tgt = camera.target;
-      camera.target = clampTarget(new Vector3(x, tgt.y, z));
+    setEnabled(next: boolean) {
+      enabled = next;
+      if (!next) { keys.clear(); stopDrag(); }
     },
-    getVisibleH() { return visibleH; },
-    setVisibleH(h: number) { visibleH = Math.max(minVisibleH, Math.min(maxVisibleH, h)); updateOrtho(); },
-    setBounds(b) { bounds.minX = b.minX; bounds.maxX = b.maxX; bounds.minZ = b.minZ; bounds.maxZ = b.maxZ; },
+    focusOn(x: number, z: number) {
+      desiredTarget.x = x;
+      desiredTarget.z = z;
+      clampTarget();
+    },
+    getVisibleH: () => desiredVisibleH,
+    setVisibleH(h: number) { desiredVisibleH = clamp(h, minVisibleH, maxVisibleH); },
+    setBounds(next: RtsCameraBounds) { bounds = { ...next }; clampTarget(); },
+    reset() {
+      desiredTarget.copyFrom(initialTarget);
+      desiredVisibleH = clamp(options.initialVisibleH ?? 20, minVisibleH, maxVisibleH);
+      desiredYaw = options.initialYaw ?? -Math.PI / 4;
+      clampTarget();
+    },
     dispose() {
-      scene.onKeyboardObservable.remove(keyObs);
-      scene.onPointerObservable.remove(ptrObs);
-      scene.onBeforeRenderObservable.remove(onBeforeRender);
-      engine.onResizeObservable.remove(onResize);
-      while (disposables.length) disposables.pop()!();
+      scene.onKeyboardObservable.remove(keyboardObserver);
+      scene.onBeforeRenderObservable.remove(beforeRenderObserver);
+      engine.onResizeObservable.remove(resizeObserver);
+      for (const dispose of disposers.splice(0)) dispose();
+      keys.clear();
     }
   };
 }
 
-export { ArcRotateCamera, EventConstants };
+export { ArcRotateCamera };

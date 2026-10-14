@@ -153,11 +153,14 @@ console.log('\n7. Заклинания командира:');
     maxHp: 1000,
     pathProgress: 0,
     position: { x: cx, y: 0, z: cz },
-    alive: true
+    alive: true,
+    stationary: true
   });
   sim.applyInput({ tick: 0, userId: 't', action: { kind: 'cast-spell', spellId: 'meteor', col: 11, row: 5 } });
   const enemy = sim.state.enemies[0];
-  check('Meteor нанёс урон врагу', enemy.hp === 1000 - 80, `got ${enemy.hp}`);
+  check('Meteor ждёт падения перед уроном', enemy.hp === 1000, `got ${enemy.hp}`);
+  for(let i=0;i<22;i++) sim.step(1/30);
+  check('Meteor нанёс урон после падения', enemy.hp === 1000 - 80, `got ${enemy.hp}`);
   check('Кулдаун meteor выставлен', (sim.state.commanderCooldowns?.meteor ?? 0) > 0);
   // повторный каст в кулдауне
   const hpBefore = enemy.hp;

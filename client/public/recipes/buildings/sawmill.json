@@ -5,25 +5,32 @@
   "seed": 51,
   "units": [
     {
-      "type": "Volume", "id": "shed", "footprint": [4.0, 3.2], "height": 2.4,
-      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation_y": 0.0,
-      "walls": { "material": "oak", "thickness": 0.3, "quoins": null, "plinth": "stone_warm" },
-      "roof": { "kind": "Wedge", "height": 1.0, "overhang": 0.3, "material": "oak_dark", "low_side": "East" },
-      "openings": [
-        { "face": "South", "kind": { "kind": "Door", "w": 1.4, "h": 1.8 }, "off": 0.0, "trim": "oak_dark" }
+      "type": "Group", "id": "workshop",
+      "at": { "type": "Origin", "offset": [0, 0, 0] }, "rotation_y": 0,
+      "parts": [
+        { "id": "foundation", "asset": "box", "params": { "w": { "Float": 11 }, "h": { "Float": 1 }, "d": { "Float": 9 } }, "offset": [0, 0, 0], "label": "stone" },
+        { "id": "deck", "asset": "box", "params": { "w": { "Float": 9 }, "h": { "Float": 1 }, "d": { "Float": 7 } }, "offset": [0, 1, 0], "label": "oak" },
+        { "id": "post_nw", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 6 }, "d": { "Float": 1 } }, "offset": [-4, 2, -3], "label": "oak_dark" },
+        { "id": "post_ne", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 6 }, "d": { "Float": 1 } }, "offset": [4, 2, -3], "label": "oak_dark" },
+        { "id": "post_sw", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 6 }, "d": { "Float": 1 } }, "offset": [-4, 2, 3], "label": "oak_dark" },
+        { "id": "post_se", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 6 }, "d": { "Float": 1 } }, "offset": [4, 2, 3], "label": "oak_dark" },
+        { "id": "canopy", "asset": "wedge_roof", "params": { "w": { "Float": 9 }, "h": { "Float": 2 }, "d": { "Float": 7 } }, "offset": [0, 8, -1], "label": "oak_light" },
+        { "id": "roof_ridge", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 1 }, "d": { "Float": 8 } }, "offset": [0, 10, -1], "label": "oak_dark" },
+        { "id": "bench", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 2 }, "d": { "Float": 2 } }, "offset": [0, 2, 3], "label": "oak_light" },
+        { "id": "blade_mid", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 3 }, "d": { "Float": 1 } }, "offset": [0, 4, 5], "label": "metal_light" },
+        { "id": "blade_tall", "asset": "box", "params": { "w": { "Float": 3 }, "h": { "Float": 7 }, "d": { "Float": 1 } }, "offset": [0, 2, 5], "label": "metal_light" },
+        { "id": "blade_hub", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 1 }, "d": { "Float": 2 } }, "offset": [0, 5, 5], "label": "gold" },
+        { "id": "side_blade_mid", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 3 }, "d": { "Float": 5 } }, "offset": [-5, 4, 0], "label": "metal_light" },
+        { "id": "side_blade_tall", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 5 }, "d": { "Float": 3 } }, "offset": [-5, 3, 0], "label": "metal_light" },
+        { "id": "side_blade_hub", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 1 }, "d": { "Float": 1 } }, "offset": [-5, 5, 0], "label": "gold" },
+        { "id": "log_a", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 5 } }, "offset": [4, 2, -2], "label": "oak" },
+        { "id": "log_a_end", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [4, 2, 1], "label": "oak_light" },
+        { "id": "log_b", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 5 } }, "offset": [6, 2, -2], "label": "oak" },
+        { "id": "log_b_end", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [6, 2, 1], "label": "oak_light" },
+        { "id": "log_c", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 5 } }, "offset": [5, 4, -2], "label": "oak" },
+        { "id": "log_c_end", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [5, 4, 1], "label": "oak_light" },
+        { "id": "lantern", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [4, 3, 3], "label": "fire_core" }
       ]
-    },
-    {
-      "type": "Part", "id": "blade", "asset": "cylinder",
-      "params": { "r": { "Float": 0.9 }, "h": { "Float": 0.25 }, "segments": { "Uint": 12 } },
-      "at": { "type": "Origin", "offset": [0.0, 1.6, 1.8] },
-      "rotation": [1.5708, 0.0, 0.0], "label": "metal"
-    },
-    {
-      "type": "Part", "id": "logpile", "asset": "cylinder",
-      "params": { "r": { "Float": 0.35 }, "h": { "Float": 1.2 }, "segments": { "Uint": 8 } },
-      "at": { "type": "Beside", "target": "shed", "face": "West", "gap": 0.2, "align": "Start", "offset": [0.0, 0.0] },
-      "rotation": [0.0, 0.0, 1.5708], "label": "oak"
     }
   ]
 }

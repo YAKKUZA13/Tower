@@ -63,11 +63,14 @@ import {
   castSpell,
   isSpellReady,
   tickActiveSpells,
+  tickSpellImpacts,
   tickCommanderCooldowns,
   tickUnits
 } from './systems/rts';
 import { computeFormation } from './systems/formations';
 import { tickGathering, pruneDepletedNodes } from './systems/gathering';
+import { GridNavigator, findNavigationPath, sampleHeight, separateNavigationAgents } from '@tower/engine-terrain';
+import { makeWorldSite, tickWorldSites, tickRtsOpponents } from './systems/rts-world';
 
 export interface GameSimConfig {
   map: MapDocument;
@@ -137,12 +140,14 @@ export class GameSim {
   private aiAttackTimer = 0;
   /** Какой набор юнитов спавнить следующей волной (растёт со временем). */
   private aiWaveIndex = 0;
+  private readonly navigator: GridNavigator;
 
   constructor(config: GameSimConfig) {
     this.map = config.map;
     this.catalog = config.catalog;
     this.rng = mulberry32(config.seed ?? DEFAULT_SEED);
     this.staticBlockedCells = new Set((config.staticBlockedCells ?? []).map((cell) => `${cell.col}:${cell.row}`));
+    this.navigator = new GridNavigator(this.map.grid, (col, row) => this.isNavigationBlocked(col, row));
 
     this.waves = this.resolveWaves(config.map, config.catalog);
     this.enemyTypes = new Map(config.catalog.enemies.map((e) => [e.id, e]));
@@ -203,6 +208,7 @@ export class GameSim {
 
     // начальный маршрут врагов — A* от spawn до base (стен ещё нет)
     this.recomputeRoute(false);
+    if (this.rtsSolo) this.initWorldActivities();
   }
 
   /** Детерминированный выбор командира: map.rts.commanderTypeId → каталог → дефолт. */
@@ -431,6 +437,7 @@ export class GameSim {
    */
   reconcile(snapshot: GameSnapshot): void {
     this._state = structuredClone(snapshot);
+    this.navigator.clear();
     // пересчитать маршрут от текущих стен (renderer overlay читает getRouteWaypoints)
     this.recomputeRoute(false);
     // установить кеш реликвий БЕЗ rescale стен (снапшот хоста уже содержит
@@ -531,6 +538,78 @@ export class GameSim {
   isStaticBlockedCell(col: number, row: number): boolean {
     return this.staticBlockedCells.has(`${col}:${row}`);
   }
+
+  private isNavigationBlocked(col: number, row: number): boolean {
+    return this.isStaticBlockedCell(col, row) || isTileBlocking(this.map.tiles, this.map.grid, col, row)
+      || this.state.walls.some(b => b.col === col && b.row === row)
+      || this.state.towers.some(b => b.col === col && b.row === row)
+      || (this.state.productionBuildings ?? []).some(b => Math.abs(b.col - col) <= 1 && Math.abs(b.row - row) <= 1)
+      || this.state.enemies.some(e=>e.alive && e.stationary && Math.abs(e.position.x/this.map.grid.cellSize+this.map.grid.cols/2-.5-col)<=1 && Math.abs(e.position.z/this.map.grid.cellSize+this.map.grid.rows/2-.5-row)<=1)
+      || (this.map.resourceNodes ?? []).some(n => n.amount > 0 && n.col === col && n.row === row);
+  }
+
+  private initWorldActivities(): void {
+    const start = this.map.playerStarts![0]!.workers?.[0] ?? this.map.playerStarts![0]!.townHall;
+    const { cols, rows } = this.map.grid;
+    const safeSite = (col:number,row:number):boolean => {
+      if((this.map.resourceNodes ?? []).some(node=>Math.hypot(node.col-col,node.row-row)<4)) return false;
+      if((this.map.playerStarts ?? []).some(player=>Math.hypot(player.townHall.col-col,player.townHall.row-row)<7)) return false;
+      for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++) if(!this.inBounds(col+dc,row+dr) || this.isNavigationBlocked(col+dc,row+dr)) return false;
+      return true;
+    };
+    // Open 3x3 footprints, clear of resource silhouettes and connected to the start.
+    const candidates = [[.32,.25],[.45,.4]].map(([x,z])=>{
+      const path=findNavigationPath(this.map.grid,start,{col:Math.floor(cols*x!),row:Math.floor(rows*z!)},
+        (col,row)=>this.isNavigationBlocked(col,row),7,safeSite);
+      return path?.[path.length-1];
+    });
+    this.state.worldSites = [];
+    for(let i=0;i<candidates.length;i++) {
+      const cell = candidates[i];
+      if(!cell || (this.state.worldSites.some(s=>Math.hypot(s.col-cell.col,s.row-cell.row)<5))) continue;
+      const site = makeWorldSite(`site-${i}`,i===0?'supplies':'beacon',cell.col,cell.row);
+      this.state.worldSites.push(site);
+      for(let n=0;n<2;n++) {
+        const route = findNavigationPath(this.map.grid,cell,{col:cell.col+2+n,row:cell.row+1},(c,r)=>this.isNavigationBlocked(c,r),1);
+        const point = route?.[route.length-1];
+        if(!point) continue;
+        const type = this.enemyTypes.get('skeleton') ?? this.enemyTypes.values().next().value;
+        if(!type) continue;
+        const position = gridToWorldData(this.map.grid,point.col,point.row);
+        const enemy: Enemy = {id:this.nextId('site-guard'),typeId:type.id,hp:type.baseHp,maxHp:type.baseHp,
+          pathProgress:0,position,alive:true,rtsRole:'guard',homeCol:point.col,homeRow:point.row};
+        site.guardIds.push(enemy.id);this.state.enemies.push(enemy);
+      }
+    }
+    for(const hall of this.state.enemies.filter(e=>e.stationary)) {
+      const col = Math.floor(hall.position.x/this.map.grid.cellSize+cols/2);
+      const row = Math.floor(hall.position.z/this.map.grid.cellSize+rows/2);
+      const type = this.enemyTypes.get('skeleton');
+      if(!type) continue;
+      for(let i=0;i<2;i++) {
+        const cell = this.nearestOpenCell(col-3-i,row-2);
+        if(cell) this.state.enemies.push({id:this.nextId('ai-patrol'),typeId:type.id,hp:type.baseHp,maxHp:type.baseHp,
+          pathProgress:0,position:gridToWorldData(this.map.grid,cell.col,cell.row),alive:true,rtsRole:'patrol',homeCol:cell.col,homeRow:cell.row});
+      }
+    }
+  }
+
+  private nearestOpenCell(col:number,row:number): {col:number;row:number} | null {
+    for(let radius=0;radius<8;radius++) for(let dr=-radius;dr<=radius;dr++) for(let dc=-radius;dc<=radius;dc++) {
+      const c=col+dc,r=row+dr;
+      if(this.inBounds(c,r) && !this.isNavigationBlocked(c,r)) return {col:c,row:r};
+    }
+    return null;
+  }
+
+  private moveUnit = (unit: DefenderUnit, col: number, row: number, distance: number, radius: number): boolean => {
+    const result = this.navigator.move(unit.id, unit.position, { col, row }, distance,
+      radius || (this.isNavigationBlocked(col, row) ? 1.5 : 0));
+    unit.navigationStatus = result;
+    unit.col = Math.floor(unit.position.x / this.map.grid.cellSize + this.map.grid.cols / 2);
+    unit.row = Math.floor(unit.position.z / this.map.grid.cellSize + this.map.grid.rows / 2);
+    return result === 'arrived';
+  };
 
   /** Текущий маршрут врагов (клетки) — для рендера tube. */
   getRouteWaypoints(): Waypoint[] {
@@ -775,6 +854,10 @@ export class GameSim {
   private applyMoveOrder(unitId: string, col: number, row: number): void {
     const unit = this.state.defenderUnits?.find((u) => u.id === unitId);
     if (!unit) return;
+    unit.gatherNodeId = null; unit.gatherState = 'idle';
+    unit.targetEnemyId = null;
+    unit.navigationStatus = undefined;
+    this.navigator.forget(unit.id);
     unit.moveOrderCol = col;
     unit.moveOrderRow = row;
     unit.attackOrderEnemyId = null;
@@ -790,6 +873,8 @@ export class GameSim {
     for (const id of unitIds) {
       const unit = this.state.defenderUnits?.find((u) => u.id === id);
       if (!unit) continue;
+      unit.gatherNodeId = null; unit.gatherState = 'idle';
+      this.navigator.forget(unit.id);
       unit.attackOrderEnemyId = enemyId;
       unit.moveOrderCol = undefined;
       unit.moveOrderRow = undefined;
@@ -801,6 +886,9 @@ export class GameSim {
     for (const id of unitIds) {
       const unit = this.state.defenderUnits?.find((u) => u.id === id);
       if (!unit) continue;
+      unit.gatherNodeId = null; unit.gatherState = 'idle';
+      this.navigator.forget(unit.id);
+      unit.navigationStatus = undefined;
       unit.moveOrderCol = undefined;
       unit.moveOrderRow = undefined;
       unit.attackOrderEnemyId = null;
@@ -879,8 +967,12 @@ export class GameSim {
       const type = this.unitTypes.get(unit.typeId);
       if (!type?.worker) continue; // gather могут только workers
       unit.gatherNodeId = nodeId;
-      unit.gatherState = 'to-node';
+      unit.gatherState = (unit.carry ?? 0) > 0 ? 'to-base' : 'to-node';
       unit.gatherTimer = 0;
+      unit.navigationStatus = undefined;
+      unit.moveOrderCol = undefined; unit.moveOrderRow = undefined;
+      unit.waypoints = undefined; unit.patrolLoop = false;
+      this.navigator.forget(unit.id);
       // снимаем бой/движение
       unit.attackOrderEnemyId = null;
       unit.targetEnemyId = null;
@@ -982,7 +1074,8 @@ export class GameSim {
   private tickRtsAi(dt: number): void {
     this.aiAttackTimer -= dt;
     if (this.aiAttackTimer > 0) return;
-    this.aiAttackTimer = RTS_AI_WAVE_INTERVAL;
+    this.aiAttackTimer = (this.state.worldSites ?? []).some(site=>site.kind==='beacon' && site.secured)
+      ? RTS_AI_WAVE_INTERVAL * 1.5 : RTS_AI_WAVE_INTERVAL;
     this.aiWaveIndex += 1;
 
     const state = this.state;
@@ -1019,7 +1112,13 @@ export class GameSim {
         const row = Math.floor(formationIndex / laneCount);
         const pathProgress = Math.min(row * forwardSpacing, Math.max(0, this.routePath.totalLength - 0.01));
         const pathLateralOffset = (lane - (laneCount - 1) * 0.5) * lateralSpacing;
-        const position = positionAtProgressWithOffset(this.routePath, pathProgress, pathLateralOffset);
+        const town = aiTowns[Math.floor(formationIndex/6)%aiTowns.length]!;
+        const col = Math.floor(town.position.x/this.map.grid.cellSize+this.map.grid.cols/2);
+        const townRow = Math.floor(town.position.z/this.map.grid.cellSize+this.map.grid.rows/2);
+        const spawn = this.nearestOpenCell(col-3-row,townRow-2+lane);
+        if(!spawn) continue;
+        const position = gridToWorldData(this.map.grid,spawn.col,spawn.row);
+        position.y = sampleHeight(this.map.heightmap,this.map.grid,spawn.col,spawn.row,true);
         state.enemies.push({
           id: this.nextId('ai-u'),
           typeId: g.typeId,
@@ -1028,7 +1127,10 @@ export class GameSim {
           pathProgress,
           pathLateralOffset,
           position,
-          alive: true
+          alive: true,
+          rtsRole: 'raider',
+          homeCol: this.aiWaveIndex % 2 ? undefined : this.tdSpawn.col,
+          homeRow: this.aiWaveIndex % 2 ? undefined : this.tdSpawn.row
         });
         formationIndex += 1;
       }
@@ -1102,7 +1204,11 @@ export class GameSim {
     // 4. movement
     let reached = 0;
     let damageToBase = 0;
-    if (state.enemies.length > 0) {
+    if (state.enemies.length > 0 && this.rtsSolo) {
+      damageToBase = tickRtsOpponents({state,types:this.enemyTypes,grid:this.map.grid,navigator:this.navigator,
+        base:this.tdBase,dt,heightAt:(col,row)=>sampleHeight(this.map.heightmap,this.map.grid,col,row,true)});
+      tickWorldSites(state,this.map.grid,dt);
+    } else if (state.enemies.length > 0) {
       const out = tickMovement({
         enemies: state.enemies,
         enemyTypes: this.enemyTypes,
@@ -1125,12 +1231,14 @@ export class GameSim {
           enemies: state.enemies,
           grid: this.map.grid,
           dt,
-          tick: state.tick
+          tick: state.tick,
+          move: this.moveUnit
         });
         killed += out.killed;
         // удаляем павших юнитов (задел — пока враги не атакуют юнитов напрямую)
         if (out.deadUnits.length > 0 && state.defenderUnits.length > 0) {
           const dead = new Set(out.deadUnits);
+          for(const id of dead) this.navigator.forget(id);
           state.defenderUnits = state.defenderUnits.filter((u) => !dead.has(u.id));
         }
       }
@@ -1150,12 +1258,13 @@ export class GameSim {
         tickCommanderCooldowns(state.commanderCooldowns, dt);
       }
       if (state.activeSpells && state.activeSpells.length > 0) {
+        killed += tickSpellImpacts(state.activeSpells,state.enemies,this.map.grid);
         state.activeSpells = tickActiveSpells(state.activeSpells);
       }
       // M8.3: workers gathering (worker FSM + resource depletion)
-      if (state.defenderUnits && state.defenderUnits.some((u) => u.gatherNodeId)) {
+      if (state.defenderUnits && state.defenderUnits.some((u) => u.gatherNodeId || ((u.carry ?? 0) > 0 && u.gatherState === 'to-base'))) {
         const nodes = this.map.resourceNodes ?? [];
-        if (nodes.length > 0 && state.resources && state.productionBuildings) {
+        if (state.resources && state.productionBuildings) {
           const out = tickGathering({
             units: state.defenderUnits,
             unitTypes: this.unitTypes,
@@ -1163,8 +1272,9 @@ export class GameSim {
             buildings: state.productionBuildings,
             bag: state.resources,
             grid: this.map.grid,
-            dt
+            dt, move: this.moveUnit
           });
+          state.gold += out.gathered.gold ?? 0;
           // sync depletion обратно в map (если узлы закончились)
           if (out.depletedNodeIds.length > 0 && this.map.resourceNodes) {
             this.map.resourceNodes = pruneDepletedNodes(this.map.resourceNodes, out.depletedNodeIds);
@@ -1189,6 +1299,12 @@ export class GameSim {
       // к player town-hall. Сложность растёт по aiWaveIndex (больше/тяжелее юнитов).
       if (this.rtsSolo && this.aiTownHallId) {
         this.tickRtsAi(dt);
+        separateNavigationAgents(this.map.grid,[...(state.defenderUnits ?? []),...state.enemies.filter(e=>e.alive && !e.stationary)],
+          (col,row)=>this.isNavigationBlocked(col,row));
+        for(const unit of state.defenderUnits ?? []) {
+          unit.col=Math.floor(unit.position.x/this.map.grid.cellSize+this.map.grid.cols/2);
+          unit.row=Math.floor(unit.position.z/this.map.grid.cellSize+this.map.grid.rows/2);
+        }
       }
     }
 
@@ -1231,6 +1347,7 @@ export class GameSim {
 
     // 6. cleanup
     if (state.enemies.length > 0) {
+      for(const enemy of state.enemies) if(!enemy.alive) this.navigator.forget(enemy.id);
       state.enemies = state.enemies.filter((e) => e.alive);
     }
     if (state.projectiles.length > 0) {
@@ -1313,7 +1430,8 @@ export class GameSim {
     this.routeCells = rasterizeRoute(wps, grid);
     this.state.pathLength = this.routePath.totalLength;
     this.state.routeVersion += 1;
-    if (remap) this.remapEnemiesToRoute();
+    if (remap && !this.rtsSolo) this.remapEnemiesToRoute();
+    if (this.rtsSolo) this.navigator.clear();
   }
 
   /** Переносит врагов на ближайшие точки текущего маршрута (сохраняет физическую позицию). */
@@ -1321,7 +1439,7 @@ export class GameSim {
     const path = this.routePath;
     if (path.segments.length === 0) return;
     for (const e of this.state.enemies) {
-      if (!e.alive) continue;
+      if (!e.alive || e.stationary) continue;
       e.pathProgress = nearestProgressOnPath(path, e.position);
       e.position = positionAtProgressWithOffset(path, e.pathProgress, e.pathLateralOffset);
     }

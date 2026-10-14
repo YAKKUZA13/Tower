@@ -39,6 +39,7 @@ interface GameState {
   defenderUnits: DefenderUnit[];
   /** Кулдауны заклинаний командира: spellId → сек до готовности. */
   commanderCooldowns: CommanderCooldowns;
+  worldSites: NonNullable<GameSnapshot['worldSites']>;
 }
 
 const EMPTY_RESOURCES: Record<ResourceId, number> = { wood: 0, stone: 0, ore: 0, gold: 0 };
@@ -63,7 +64,8 @@ export const useGameStore = defineStore('game', {
     resources: { ...EMPTY_RESOURCES },
     productionBuildings: [],
     defenderUnits: [],
-    commanderCooldowns: {}
+    commanderCooldowns: {},
+    worldSites: []
   }),
   getters: {
     waveLabel: (s): string => {
@@ -127,6 +129,7 @@ export const useGameStore = defineStore('game', {
       this.productionBuildings = snap.productionBuildings ?? [];
       this.defenderUnits = snap.defenderUnits ?? [];
       this.commanderCooldowns = { ...(snap.commanderCooldowns ?? {}) };
+      this.worldSites = (snap.worldSites ?? []).map(site => ({ ...site }));
     },
     setMaxLives(n: number): void {
       this.maxLives = n;

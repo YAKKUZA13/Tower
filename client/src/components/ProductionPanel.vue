@@ -1,20 +1,17 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { CommanderType, DefenderUnitType, ProductionBuildingType, ResourceBag, ResourceId, Spell } from '@tower/shared';
 import { RESOURCE_ORDER } from '@tower/shared';
+import RtsIcon from './RtsIcon.vue';
 
 const props = defineProps<{
   buildings: ProductionBuildingType[];
   units: DefenderUnitType[];
   commander: CommanderType | null;
-  /** Текущий выбор режима: 'idle' | 'build' | 'train' | 'cast'. */
   activeMode: 'idle' | 'build' | 'train' | 'cast';
-  /** TypeId выбранного здания/юнита для строительства/обучения, либо spellId. */
   selectedId: string | null;
-  /** Текущий запас ресурсов (wood/stone/ore; gold — в props.gold). */
   resources: Record<ResourceId, number>;
-  /** Текущее золото. */
   gold: number;
-  /** Кулдауны заклинаний: spellId → сек до готовности. */
   cooldowns: Record<string, number>;
 }>();
 
@@ -25,215 +22,155 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
 }>();
 
-function costLabel(cost: ResourceBag): string {
-  const parts: string[] = [];
-  for (const key of RESOURCE_ORDER) {
-    const val = cost[key];
-    if (val) {
-      const icon = key === 'wood' ? '🪵' : key === 'stone' ? '🪨' : key === 'ore' ? '⛏' : '💰';
-      parts.push(`${icon}${val}`);
-    }
-  }
-  return parts.join('  ') || '—';
-}
+const tab = ref<'build' | 'units' | 'rites'>('build');
 
 function canAfford(cost: ResourceBag): boolean {
   for (const key of RESOURCE_ORDER) {
-    const val = cost[key] ?? 0;
-    if (key === 'gold') {
-      if (props.gold < val) return false;
-    } else {
-      if ((props.resources[key] ?? 0) < val) return false;
-    }
+    const value = cost[key] ?? 0;
+    if (key === 'gold' ? props.gold < value : (props.resources[key] ?? 0) < value) return false;
   }
   return true;
+}
+
+function costEntries(cost: ResourceBag): Array<{ kind: ResourceId; value: number }> {
+  return RESOURCE_ORDER.flatMap((kind) => cost[kind] ? [{ kind, value: cost[kind] ?? 0 }] : []);
+}
+
+function buildingIcon(id: string): string {
+  if (id.includes('mine')) return 'mine';
+  if (id.includes('barracks')) return 'barracks';
+  if (id.includes('tower')) return 'tower';
+  if (id.includes('town-hall')) return 'home';
+  return 'building';
+}
+
+function unitIcon(id: string): string {
+  return id.includes('worker') ? 'worker' : id.includes('archer') ? 'archer' : id.includes('mage') ? 'mage' : 'knight';
 }
 
 function spellReady(spell: Spell): boolean {
   return (props.cooldowns[spell.id] ?? 0) <= 0;
 }
-
-function spellCooldownLabel(spell: Spell): string {
-  const cd = props.cooldowns[spell.id] ?? 0;
-  return cd > 0 ? `${Math.ceil(cd)}с` : 'Готово';
-}
-
-function selectBuilding(typeId: string): void {
-  emit('select-building', typeId);
-}
-function selectUnit(typeId: string): void {
-  emit('select-unit', typeId);
-}
-function selectSpell(spellId: string): void {
-  emit('select-spell', spellId);
-}
 </script>
 
 <template>
-  <div class="rts-panel">
-    <div class="info-title">Тёмная крепость</div>
+  <section class="command-book" aria-label="Командная книга">
+    <header class="book-head">
+      <div class="sigil"><RtsIcon name="home" :size="24" /></div>
+      <div>
+        <div class="eyebrow">Полевой приказ</div>
+        <h2>Тёмная крепость</h2>
+      </div>
+    </header>
 
-    <!-- Ресурсы -->
-    <div class="res-bar">
-      <span class="res" title="Дерево">🪵 {{ Math.floor(resources.wood) }}</span>
-      <span class="res" title="Камень">🪨 {{ Math.floor(resources.stone) }}</span>
-      <span class="res" title="Руда">⛏ {{ Math.floor(resources.ore) }}</span>
-      <span class="res gold" title="Золото">💰 {{ gold }}</span>
-    </div>
+    <nav class="book-tabs" aria-label="Разделы команд">
+      <button :class="{ active: tab === 'build' }" @click="tab = 'build'">Строить</button>
+      <button :class="{ active: tab === 'units' }" @click="tab = 'units'">Отряд</button>
+      <button :class="{ active: tab === 'rites' }" @click="tab = 'rites'">Ритуалы</button>
+    </nav>
 
-    <!-- Производственные здания -->
-    <div class="section-title">Здания</div>
-    <div class="grid">
+    <div v-if="tab === 'build'" class="command-grid">
       <button
-        v-for="b in buildings"
-        :key="b.id"
-        class="card"
-        :class="{ active: activeMode === 'build' && selectedId === b.id, disabled: !canAfford(b.cost) }"
-        :disabled="!canAfford(b.cost)"
-        @click="selectBuilding(b.id)"
+        v-for="building in buildings"
+        :key="building.id"
+        class="command"
+        :class="{ active: activeMode === 'build' && selectedId === building.id }"
+        :disabled="!canAfford(building.cost)"
+        @click="emit('select-building', building.id)"
       >
-        <div class="card-name">{{ b.name }}</div>
-        <div class="card-cost">{{ costLabel(b.cost) }}</div>
-        <div class="card-meta">
-          <template v-if="b.output.length">
-            <span v-for="o in b.output" :key="o.resource" class="out">
-              +{{ o.perSec.toFixed(1) }}/с {{ o.resource === 'wood' ? '🪵' : o.resource === 'stone' ? '🪨' : o.resource === 'ore' ? '⛏' : '💰' }}
+        <span class="command-icon"><RtsIcon :name="buildingIcon(building.id)" :size="25" /></span>
+        <span class="command-copy">
+          <strong>{{ building.name }}</strong>
+          <span class="costs">
+            <span v-for="entry in costEntries(building.cost)" :key="entry.kind">
+              <RtsIcon :name="entry.kind" :size="11" />{{ entry.value }}
             </span>
-          </template>
-          <template v-else-if="b.input && b.input.length">
-            <span class="in">переработка</span>
-          </template>
-          <template v-else>
-            <span class="in">функциональное</span>
-          </template>
-        </div>
+          </span>
+          <small>{{ building.output.length ? 'производство ресурсов' : building.input?.length ? 'переработка сырья' : 'опорное строение' }}</small>
+        </span>
       </button>
     </div>
 
-    <!-- Защитные юниты -->
-    <div class="section-title">Юниты</div>
-    <div class="grid">
+    <div v-else-if="tab === 'units'" class="command-grid">
       <button
-        v-for="u in units"
-        :key="u.id"
-        class="card"
-        :class="{ active: activeMode === 'train' && selectedId === u.id, disabled: !canAfford(u.cost) }"
-        :disabled="!canAfford(u.cost)"
-        @click="selectUnit(u.id)"
+        v-for="unit in units"
+        :key="unit.id"
+        class="command"
+        :class="{ active: activeMode === 'train' && selectedId === unit.id }"
+        :disabled="!canAfford(unit.cost)"
+        @click="emit('select-unit', unit.id)"
       >
-        <div class="card-name">{{ u.name }}</div>
-        <div class="card-cost">{{ costLabel(u.cost) }}</div>
-        <div class="card-meta">HP {{ u.hp }} · урон {{ u.damage }} · радиус {{ u.range.toFixed(1) }}</div>
+        <span class="command-icon"><RtsIcon :name="unitIcon(unit.id)" :size="25" /></span>
+        <span class="command-copy">
+          <strong>{{ unit.name }}</strong>
+          <span class="costs">
+            <span v-for="entry in costEntries(unit.cost)" :key="entry.kind"><RtsIcon :name="entry.kind" :size="11" />{{ entry.value }}</span>
+          </span>
+          <small>{{ unit.worker ? 'добыча и строительство' : `урон ${unit.damage} · дальность ${unit.range.toFixed(1)}` }}</small>
+        </span>
       </button>
     </div>
 
-    <!-- Заклинания командира -->
-    <div v-if="commander" class="section-title">Заклинания: {{ commander.name }}</div>
-    <div v-if="commander" class="grid spells">
+    <div v-else class="command-grid rites">
       <button
-        v-for="s in commander.spells"
-        :key="s.id"
-        class="card spell"
-        :class="{ active: activeMode === 'cast' && selectedId === s.id, disabled: !spellReady(s) }"
-        :disabled="!spellReady(s)"
-        @click="selectSpell(s.id)"
+        v-for="spell in commander?.spells ?? []"
+        :key="spell.id"
+        class="command ritual"
+        :class="{ active: activeMode === 'cast' && selectedId === spell.id }"
+        :disabled="!spellReady(spell)"
+        @click="emit('select-spell', spell.id)"
       >
-        <div class="card-name">{{ s.name }}</div>
-        <div class="card-cost" :class="{ ready: spellReady(s) }">{{ spellCooldownLabel(s) }}</div>
-        <div class="card-meta" :title="s.description">{{ s.description }}</div>
+        <span class="command-icon"><RtsIcon name="spell" :size="25" /></span>
+        <span class="command-copy">
+          <strong>{{ spell.name }}</strong>
+          <span class="ready">{{ spellReady(spell) ? 'ГОТОВО' : `${Math.ceil(cooldowns[spell.id] ?? 0)} С` }}</span>
+          <small>{{ spell.description }}</small>
+        </span>
       </button>
     </div>
 
-    <button v-if="activeMode !== 'idle'" class="btn ghost cancel" @click="emit('cancel')">Отмена</button>
-  </div>
+    <button v-if="activeMode !== 'idle'" class="cancel" @click="emit('cancel')">Сбросить приказ · Esc</button>
+  </section>
 </template>
 
 <style scoped>
-.rts-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+.command-book {
+  --paper: #c9b69b;
+  --paper-dim: #8e7b68;
+  --frame: #6f594f;
+  --frame-hi: #a98a73;
+  --coal: #111217;
+  --panel: #18191e;
+  --ember: #c95842;
+  --soul: #80c9a1;
+  padding: 13px 12px 15px;
+  color: var(--paper);
+  font-family: Georgia, 'Times New Roman', serif;
 }
-.info-title {
-  font-weight: 800;
-  color: #f8fafc;
-}
-.res-bar {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px;
-  font-size: 12px;
-}
-.res { color: #cbd5e1; font-weight: 700; }
-.res.gold { color: #fbbf24; }
-.section-title {
-  font-size: 11px;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-top: 4px;
-}
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-.grid.spells {
-  grid-template-columns: 1fr;
-}
-.card {
-  text-align: left;
-  border: 1px solid rgba(168, 85, 247, 0.25);
-  border-radius: 10px;
-  background: rgba(168, 85, 247, 0.08);
-  color: #e5e7eb;
-  padding: 8px;
-  cursor: pointer;
-}
-.card.active {
-  border-color: #a855f7;
-  background: rgba(168, 85, 247, 0.25);
-}
-.card.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.card.spell {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: rgba(245, 158, 11, 0.08);
-}
-.card.spell.active {
-  border-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.22);
-}
-.card-name { font-weight: 800; font-size: 13px; }
-.card-cost {
-  margin-top: 2px;
-  color: #fbbf24;
-  font-weight: 700;
-  font-size: 11px;
-}
-.card-cost.ready { color: #22c55e; }
-.card-meta {
-  margin-top: 4px;
-  color: #94a3b8;
-  font-size: 11px;
-  line-height: 1.35;
-}
-.out { color: #86efac; margin-right: 6px; }
-.in { color: #fbbf24; }
-.btn.ghost.cancel {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.06);
-  color: #cbd5e1;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 8px 12px;
-  margin-top: 4px;
-}
+.book-head { display: flex; align-items: center; gap: 10px; padding: 3px 2px 12px; border-bottom: 1px solid #4a3e39; }
+.sigil { width: 38px; height: 38px; display: grid; place-items: center; color: var(--paper); border: 1px solid var(--frame); box-shadow: inset 0 0 0 2px #0b0c10; }
+.eyebrow { color: var(--paper-dim); font: 10px/1.2 'Lucida Console', monospace; letter-spacing: .14em; text-transform: uppercase; }
+h2 { margin: 2px 0 0; color: #dfceb5; font: 700 20px/1 Georgia, serif; letter-spacing: .035em; text-shadow: 2px 2px 0 #090a0d; }
+.book-tabs { display: grid; grid-template-columns: repeat(3, 1fr); margin: 9px 0 10px; border: 1px solid #493c37; }
+.book-tabs button { height: 36px; border: 0; border-right: 1px solid #493c37; background: #111217; color: #74665b; font: 10px 'Lucida Console', monospace; text-transform: uppercase; cursor: pointer; }
+.book-tabs button:last-child { border-right: 0; }
+.book-tabs button.active { color: #e0cdb2; background: #292326; box-shadow: inset 0 -2px var(--ember); }
+.command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.command-grid.rites { grid-template-columns: 1fr; }
+.command { min-height: 82px; display: grid; grid-template-columns: 39px 1fr; gap: 9px; align-items: start; padding: 9px; text-align: left; color: var(--paper); background: #17181d; border: 1px solid #4e403a; box-shadow: inset 1px 1px #2a2729, inset -1px -1px #090a0d; cursor: pointer; }
+.command:hover:not(:disabled) { color: #f0dcc0; border-color: var(--frame-hi); background: #201d20; }
+.command.active { border-color: var(--soul); box-shadow: inset 0 0 0 1px #243f35, 0 0 10px rgba(128, 201, 161, .12); }
+.command:disabled { opacity: .32; cursor: not-allowed; filter: grayscale(.65); }
+.command-icon { width: 37px; height: 37px; display: grid; place-items: center; color: #b99d80; background: #0d0e12; border: 1px solid #5b4940; box-shadow: inset 0 0 0 2px #18171a; }
+.command.active .command-icon { color: var(--soul); }
+.command-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.command strong { color: inherit; font: 700 12px/1.2 'Lucida Console', monospace; }
+.command small { color: #95877a; font: 11px/1.32 Georgia, serif; }
+.costs { display: flex; flex-wrap: wrap; gap: 4px 6px; color: #c69a62; font: 10px 'Lucida Console', monospace; }
+.costs span { display: inline-flex; gap: 2px; align-items: center; }
+.ready { color: var(--soul); font: 10px 'Lucida Console', monospace; }
+.ritual { min-height: 68px; }
+.cancel { width: 100%; margin-top: 8px; height: 36px; border: 1px solid #704a43; color: #c98c7e; background: #1d1517; font: 10px 'Lucida Console', monospace; text-transform: uppercase; cursor: pointer; }
+.cancel:hover { border-color: var(--ember); color: #efb2a4; }
+@media (max-width: 1100px) { .command-grid { grid-template-columns: 1fr; } }
 </style>

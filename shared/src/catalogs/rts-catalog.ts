@@ -34,7 +34,7 @@ import type { GameCatalog } from '../types/sim.js';
 
 export const RTS_TOWN_HALL_L1: ProductionBuildingType = {
   id: 'town-hall',
-  name: 'Town Hall',
+  name: 'Ратуша',
   // output — это drop-off accumulator: worker приносит → +1 в bag игрока.
   // (production не auto; workers приносят.) → output = [] (no passive production).
   output: [],
@@ -45,7 +45,7 @@ export const RTS_TOWN_HALL_L1: ProductionBuildingType = {
 
 export const RTS_TOWN_HALL_L2: ProductionBuildingType = {
   id: 'town-hall-l2',
-  name: 'Town Hall (L2)',
+  name: 'Ратуша II',
   output: [],
   cost: { wood: 400, stone: 200, ore: 50 },
   modelRef: { catalogId: 'building:town-hall-l2', scale: 1.1 },
@@ -54,7 +54,7 @@ export const RTS_TOWN_HALL_L2: ProductionBuildingType = {
 
 export const RTS_BARRACKS: ProductionBuildingType = {
   id: 'rts-barracks',
-  name: 'Barracks',
+  name: 'Военные казармы',
   output: [],
   cost: { wood: 120, stone: 60 },
   modelRef: { catalogId: 'building:barracks', scale: 1 },
@@ -63,7 +63,7 @@ export const RTS_BARRACKS: ProductionBuildingType = {
 
 export const RTS_WATCH_TOWER: ProductionBuildingType = {
   id: 'rts-watch-tower',
-  name: 'Watch Tower',
+  name: 'Сторожевая башня',
   output: [],
   cost: { wood: 60, stone: 80 },
   modelRef: { catalogId: 'building:watch-tower', scale: 1 },
@@ -74,7 +74,7 @@ export const RTS_WATCH_TOWER: ProductionBuildingType = {
 
 export const RTS_WORKER: DefenderUnitType = {
   id: 'worker',
-  name: 'Worker',
+  name: 'Рабочий',
   cost: { wood: 10, gold: 5 },
   hp: 30,
   damage: 2,                // слабая атака (только для самообороны)

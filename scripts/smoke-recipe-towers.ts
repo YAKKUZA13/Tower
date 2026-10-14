@@ -87,7 +87,21 @@ console.log('3. Recipe determinism (two compiles byte-identical):');
   }
 }
 
-console.log('4. buildMaster recipe integration contract (compile → assemble → greedy-compatible):');
+console.log('4. RTS production buildings expose readable functional silhouettes:');
+{
+  const sawmill = compiled['building:sawmill'];
+  const mine = compiled['building:mine'];
+  check('sawmill exposes blade, bench and log stack', Boolean(sawmill?.ok &&
+    sawmill.recipe.parts.some((p) => p.id.includes('blade')) &&
+    sawmill.recipe.parts.some((p) => p.id.includes('bench')) &&
+    sawmill.recipe.parts.filter((p) => p.id.includes('log_')).length >= 3));
+  check('mine exposes portal, rails and loaded cart', Boolean(mine?.ok &&
+    mine.recipe.parts.some((p) => p.id.includes('portal')) &&
+    mine.recipe.parts.filter((p) => p.id.includes('rail_')).length === 2 &&
+    mine.recipe.parts.some((p) => p.id.includes('cart_ore'))));
+}
+
+console.log('5. buildMaster recipe integration contract (compile → assemble → greedy-compatible):');
 {
   // симулируем что делает AssetCatalog.buildMaster: compile+assemble → voxels готовы для buildVoxelMeshGreedy.
   const arrow = compiled['tower:arrow'];

@@ -51,6 +51,7 @@ export interface Projectile {
  * Legacy TD-поля (`enemies`, `gold`, `lives`, ...) оставлены для TD sandbox.
  */
 export interface GameSnapshot {
+  worldSites?: RtsWorldSite[];
   tick: number;
   status: SimStatus;
   /** Индекс текущей/следующей волны. -1 до первой волны. @deprecated M8 (TD-only). */
@@ -140,6 +141,11 @@ export interface PlayerInput {
 
 /** Активное заклинание в обработке (Phase 6). Хранится в snapshot для интерполяции рендера. */
 export interface ActiveSpell {
+  radius?: number;
+  effect?: import('./economy.js').SpellEffectKind;
+  /** Meteor damage resolves after the visible warning/fall, in authoritative ticks. */
+  impactAfterTicks?: number;
+  power?: number;
   id: string;
   spellId: string;
   /** Центр применения в клетках. */
@@ -147,6 +153,19 @@ export interface ActiveSpell {
   row: number;
   /** Сколько тиков эффект ещё активен (для freeze/ring-визуала). */
   remainingTicks: number;
+}
+
+/** Optional single-player world activity, serializable in the authoritative snapshot. */
+export interface RtsWorldSite {
+  id: string;
+  kind: 'supplies' | 'beacon';
+  name: string;
+  col: number;
+  row: number;
+  guardIds: string[];
+  progress: number;
+  secured: boolean;
+  reward: { wood?: number; stone?: number; gold?: number };
 }
 
 /**

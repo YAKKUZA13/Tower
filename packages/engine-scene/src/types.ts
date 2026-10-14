@@ -16,6 +16,7 @@ export interface TerrainAnchorSpec {
 export type ScenePrimitiveSpec =
   | { kind: 'box'; size: Vec3Tuple }
   | { kind: 'cylinder'; diameter: number; height: number; tessellation?: number }
+  | { kind: 'cone'; diameter: number; height: number; tessellation?: number }
   | { kind: 'torus'; diameter: number; thickness: number; tessellation?: number }
   | { kind: 'icosphere'; diameter: number; subdivisions?: number }
   | { kind: 'plane'; size: [number, number] };
@@ -29,6 +30,12 @@ export interface SceneMaterialSpec {
   emissiveColor?: RgbTuple;
   emissiveStrength?: number;
   alpha?: number;
+  /** Deterministic multi-frequency height texture used as a bump channel. */
+  surfaceNoise?: {
+    scale: number;
+    strength: number;
+    seed?: number;
+  };
 }
 
 export type SceneColliderSpec =
@@ -61,6 +68,11 @@ export interface OrbitalCubesEmitterSpec {
   cubeSize: number;
   angularSpeed: number;
   seed: number;
+  emissiveStrength?: number;
+  /** Optional spell volume; orbital remains the default. */
+  shape?: 'orbital' | 'vortex' | 'orb';
+  height?: number;
+  innerRadius?: number;
 }
 
 export interface PointGlowEmitterSpec {

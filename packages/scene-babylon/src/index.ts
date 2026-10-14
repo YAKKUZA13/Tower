@@ -1,3 +1,4 @@
+export * from './area-effects.js';
 import type {
   RgbTuple,
   SceneColliderSpec,
@@ -22,6 +23,8 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
 import { PointLight } from '@babylonjs/core/Lights/pointLight.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial.js';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import type { Nullable } from '@babylonjs/core/types.js';
 import type { Observer } from '@babylonjs/core/Misc/observable.js';
@@ -70,6 +73,7 @@ function materialKey(primitive: ScenePrimitiveSpec, materialId: string): string 
     case 'box': return `box:${materialId}`;
     case 'plane': return `plane:${materialId}`;
     case 'cylinder': return `cylinder:${primitive.tessellation ?? 12}:${materialId}`;
+    case 'cone': return `cone:${primitive.tessellation ?? 12}:${materialId}`;
     case 'icosphere': return `icosphere:${primitive.subdivisions ?? 1}:${materialId}`;
     case 'torus': return `torus:${primitive.tessellation ?? 24}:${(primitive.thickness / primitive.diameter).toFixed(5)}:${materialId}`;
   }
@@ -82,6 +86,14 @@ function createMaster(key: string, primitive: ScenePrimitiveSpec, material: Mate
     case 'plane': mesh = MeshBuilder.CreatePlane(`scene-master:${key}`, { size: 1 }, scene); break;
     case 'cylinder':
       mesh = MeshBuilder.CreateCylinder(`scene-master:${key}`, { diameter: 1, height: 1, tessellation: primitive.tessellation ?? 12 }, scene);
+      break;
+    case 'cone':
+      mesh = MeshBuilder.CreateCylinder(`scene-master:${key}`, {
+        diameterTop: 0,
+        diameterBottom: 1,
+        height: 1,
+        tessellation: primitive.tessellation ?? 12
+      }, scene);
       break;
     case 'icosphere':
       mesh = MeshBuilder.CreateIcoSphere(`scene-master:${key}`, { radius: 0.5, subdivisions: primitive.subdivisions ?? 1 }, scene);
@@ -105,6 +117,7 @@ function scaleInstance(mesh: InstancedMesh, primitive: ScenePrimitiveSpec): void
     case 'box': mesh.scaling.set(...primitive.size); break;
     case 'plane': mesh.scaling.set(primitive.size[0], primitive.size[1], 1); break;
     case 'cylinder': mesh.scaling.set(primitive.diameter, primitive.height, primitive.diameter); break;
+    case 'cone': mesh.scaling.set(primitive.diameter, primitive.height, primitive.diameter); break;
     case 'icosphere': mesh.scaling.setAll(primitive.diameter); break;
     case 'torus': mesh.scaling.setAll(primitive.diameter); break;
   }
@@ -118,6 +131,22 @@ function hash01(seed: number): number {
   value = Math.imul(value, 0x846ca68b);
   value ^= value >>> 16;
   return (value >>> 0) / 0x1_0000_0000;
+}
+
+function makeSurfaceNoise(size: number, seed: number): Uint8Array {
+  const data = new Uint8Array(size * size);
+  const sample = (x: number, y: number, salt: number): number => hash01(
+    seed ^ salt ^ Math.imul(x, 73856093) ^ Math.imul(y, 19349663)
+  );
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const macro = sample(Math.floor(x / 8), Math.floor(y / 8), 0x68bc21eb);
+      const meso = sample(Math.floor(x / 3), Math.floor(y / 3), 0x02e5be93);
+      const micro = sample(x, y, 0x7f4a7c15);
+      data[y * size + x] = Math.round(56 + (macro * 0.5 + meso * 0.34 + micro * 0.16) * 184);
+    }
+  }
+  return data;
 }
 
 function parentsFirst(spec: SceneKitSpec): SceneKitSpec['nodes'] {
@@ -150,6 +179,7 @@ export function buildSceneKit(scene: Scene, spec: SceneKitSpec, options: BuildSc
   const destructionGroups = new Map<string, TransformNode[]>();
   const masters = new Map<string, Mesh>();
   const materials = new Map<string, Material>();
+  const surfaceTextures: RawTexture[] = [];
   const shadowCasters = new Set<Mesh>();
   const lights: PointLight[] = [];
   const orbitMeshes: Mesh[] = [];
@@ -167,6 +197,18 @@ export function buildSceneKit(scene: Scene, spec: SceneKitSpec, options: BuildSc
     if (definition.emissiveColor) {
       instance.emissiveColor = color(definition.emissiveColor);
       instance.emissiveIntensity = definition.emissiveStrength ?? 1;
+    }
+    if (definition.surfaceNoise) {
+      const texture = RawTexture.CreateLuminanceTexture(
+        makeSurfaceNoise(64, definition.surfaceNoise.seed ?? 0x51a7c7),
+        64, 64, scene, true, false, Texture.TRILINEAR_SAMPLINGMODE
+      );
+      texture.name = `scene-surface-noise:${spec.name}:${definition.id}`;
+      texture.uScale = definition.surfaceNoise.scale;
+      texture.vScale = definition.surfaceNoise.scale;
+      texture.level = definition.surfaceNoise.strength;
+      instance.bumpTexture = texture;
+      surfaceTextures.push(texture);
     }
     materials.set(definition.id, instance);
   }
@@ -241,7 +283,7 @@ export function buildSceneKit(scene: Scene, spec: SceneKitSpec, options: BuildSc
       const definition: SceneMaterialSpec = {
         id: `${emitter.id}:${paletteIndex}`,
         baseColor: emitter.colors[paletteIndex]!, roughness: 0.25,
-        emissiveColor: emitter.colors[paletteIndex]!, emissiveStrength: 2.1
+        emissiveColor: emitter.colors[paletteIndex]!, emissiveStrength: emitter.emissiveStrength ?? 2.1
       };
       const orbitMaterial = new StandardMaterial(`scene-material:${spec.name}:${definition.id}`, scene);
       orbitMaterial.diffuseColor = color(definition.baseColor);
@@ -260,12 +302,28 @@ export function buildSceneKit(scene: Scene, spec: SceneKitSpec, options: BuildSc
         const time = nowSeconds() - startedAt;
         indices.forEach((particleIndex, localIndex) => {
           const phase = hash01(emitter.seed + particleIndex * 7919) * Math.PI * 2;
-          const band = hash01(emitter.seed ^ (particleIndex * 104729)) * 2 - 1;
+          const band01 = hash01(emitter.seed ^ (particleIndex * 104729));
+          const band = band01 * 2 - 1;
           const angular = phase + time * emitter.angularSpeed * (0.65 + hash01(particleIndex + emitter.seed) * 0.7);
-          const radius = emitter.radius * (0.35 + hash01(emitter.seed + particleIndex * 31) * 0.65);
-          const x = emitter.position[0] + Math.cos(angular) * radius;
-          const y = emitter.position[1] + Math.sin(phase * 1.7 + time * 0.7) * emitter.verticalRadius * (0.35 + Math.abs(band) * 0.65);
-          const z = emitter.position[2] + Math.sin(angular) * radius;
+          const isVortex = emitter.shape === 'vortex';
+          const isOrb = emitter.shape === 'orb';
+          const heightT = hash01(emitter.seed + particleIndex * 15485863);
+          const shellNoise = hash01(emitter.seed + particleIndex * 32452843);
+          const radius = isVortex
+            ? (emitter.innerRadius ?? emitter.radius * 0.12) + emitter.radius * (0.18 + heightT * 0.82) * (0.72 + hash01(emitter.seed + particleIndex * 31) * 0.28)
+            : isOrb
+              ? (emitter.innerRadius ?? emitter.radius * 0.7) + (emitter.radius - (emitter.innerRadius ?? emitter.radius * 0.7)) * shellNoise
+            : emitter.radius * (0.35 + hash01(emitter.seed + particleIndex * 31) * 0.65);
+          const vortexAngle = angular + (isVortex ? heightT * Math.PI * 3.4 : 0);
+          const sphereY = 1 - heightT * 2;
+          const spherePlanar = Math.sqrt(Math.max(0, 1 - sphereY * sphereY));
+          const x = emitter.position[0] + Math.cos(vortexAngle) * radius * (isOrb ? spherePlanar : 1);
+          const y = isVortex
+            ? emitter.position[1] + (heightT - 0.5) * (emitter.height ?? emitter.verticalRadius * 2) + Math.sin(phase + time) * emitter.verticalRadius * 0.08
+            : isOrb
+              ? emitter.position[1] + sphereY * emitter.verticalRadius * (0.88 + shellNoise * 0.12)
+            : emitter.position[1] + Math.sin(phase * 1.7 + time * 0.7) * emitter.verticalRadius * (0.35 + Math.abs(band) * 0.65);
+          const z = emitter.position[2] + Math.sin(vortexAngle) * radius * (isOrb ? spherePlanar : 1);
           const offset = localIndex * 16;
           matrices[offset + 12] = x;
           matrices[offset + 13] = y;
@@ -297,6 +355,7 @@ export function buildSceneKit(scene: Scene, spec: SceneKitSpec, options: BuildSc
       root.dispose(false, true);
       for (const master of masters.values()) master.dispose(false, false);
       for (const material of materials.values()) material.dispose();
+      for (const texture of surfaceTextures) texture.dispose();
     }
   };
 }

@@ -17,12 +17,15 @@
     "dev": "npm run build:pkgs && npm --workspace shared run build && npm run dev:db:up && concurrently -k -n server,client,db -c blue,magenta,yellow \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:db:logs\"",
     "dev:server": "npm --workspace server run dev",
     "dev:client": "npm --workspace client run dev",
+    "dev:rts": "npm run build:pkgs && npm --workspace shared run build && npm --workspace client run dev",
     "dev:db:up": "docker compose up -d --wait postgres redis && npm run migrate",
     "dev:db:logs": "docker compose logs -f postgres redis",
     "dev:down": "docker compose down",
     "build:pkgs": "npm --workspace @tower/engine-recipe run build && npm --workspace @tower/engine-terrain run build && npm --workspace @tower/engine-scene run build && npm --workspace @tower/scene-babylon run build && npm --workspace @tower/voxel-core run build && npm --workspace @tower/voxel-babylon run build",
     "build": "npm run build:pkgs && npm --workspace shared run build && npm --workspace server run build && npm --workspace client run build && npm run check:bundle",
     "check:bundle": "node scripts/check-client-bundle.mjs",
+    "capture:rts": "node scripts/shoot-rts.cjs",
+    "smoke:rts:browser": "node scripts/smoke-rts-browser.cjs",
     "typecheck": "npm --workspace @tower/engine-recipe run typecheck && npm --workspace @tower/engine-terrain run typecheck && npm --workspace @tower/engine-scene run typecheck && npm --workspace @tower/scene-babylon run typecheck && npm --workspace @tower/voxel-core run typecheck && npm --workspace @tower/voxel-babylon run typecheck && npm --workspace @tower/voxel-lab run typecheck && npm --workspace shared run typecheck && npm --workspace server run typecheck && npm --workspace client run typecheck",
     "start": "npm --workspace server run start",
     "db:up": "docker compose up -d --wait postgres redis",
@@ -39,5 +42,6 @@
   },
   "dependencies": {
     "@fastify/websocket": "^11.2.0"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

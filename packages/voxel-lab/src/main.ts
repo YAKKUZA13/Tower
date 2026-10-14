@@ -17,6 +17,7 @@ import { createKitScene } from './scenes/kit-lab';
 import { createTerrainScene } from './scenes/terrain-lab';
 import { createMaterialLab } from './scenes/material-lab';
 import { createRecipeScene } from './scenes/recipe-lab';
+import { createRitualLab } from './scenes/ritual-lab';
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
@@ -66,12 +67,17 @@ async function switchTab(tab: string) {
   const content = document.getElementById('tab-content')!;
   content.innerHTML = '';
 
-  const isMaterial = tab === 'material';
-  hemi.setEnabled(!isMaterial); sun.setEnabled(!isMaterial); grid.setEnabled(!isMaterial);
-  const tabs = ['material', 'greedy', 'models', 'kit', 'terrain', 'recipe'];
+  const ownsEnvironment = tab === 'material' || tab === 'ritual';
+  hemi.setEnabled(!ownsEnvironment); sun.setEnabled(!ownsEnvironment); grid.setEnabled(!ownsEnvironment);
+  const tabs = ['ritual', 'material', 'greedy', 'models', 'kit', 'terrain', 'recipe'];
   for (const t of tabs) document.getElementById(`tab-${t}`)!.className = '';
 
   switch (tab) {
+    case 'ritual': {
+      document.getElementById('tab-ritual')!.className = 'active';
+      current = createRitualLab(scene, camera, updateStats, content);
+      break;
+    }
     case 'material': {
       document.getElementById('tab-material')!.className = 'active';
       current = createMaterialLab(scene, camera, updateStats, content);
@@ -112,9 +118,10 @@ document.getElementById('tab-terrain')!.onclick = () => switchTab('terrain');
 document.getElementById('tab-recipe')!.onclick = () => switchTab('recipe');
 
 document.getElementById('tab-material')!.onclick = () => switchTab('material');
+document.getElementById('tab-ritual')!.onclick = () => switchTab('ritual');
 
 // Direct links make visual fixtures repeatable.
-switchTab(location.hash === '#material' ? 'material' : 'greedy');
+switchTab(location.hash === '#ritual' ? 'ritual' : location.hash === '#material' ? 'material' : 'greedy');
 
 engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());

@@ -39,8 +39,9 @@ function computeStyle(): Record<string, string> {
 .selection-box {
   position: absolute;
   pointer-events: none;
-  background: rgba(80, 180, 255, 0.12);
-  border: 1px solid rgba(120, 200, 255, 0.85);
+  background: rgba(128, 201, 161, 0.10);
+  border: 1px solid rgba(148, 218, 178, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(13, 28, 22, .72);
   z-index: 7;
 }
 </style>

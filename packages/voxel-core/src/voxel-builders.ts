@@ -489,40 +489,112 @@ export function relicBloodTotem(): Voxel[] {
 
 // ── RTS: production buildings ────────────────────────────────────────────────
 
-/** Sawmill — wooden canopy with log and saw. */
+/** Sawmill — open timber workshop with a visible blade, bench and log rack. */
 export function sawmillBuilding(): Voxel[] {
   const v: Voxel[] = [];
   const w = PALETTE.wood, wd = PALETTE.woodDark, wl = PALETTE.woodLight;
-  box3(v, -5, 5, 0, 2, -4, 4, PALETTE.earth);
-  box3(v, -5, -4, 3, 10, -4, -4, wd); box3(v, 4, 5, 3, 10, -4, -4, wd);
-  box3(v, -5, -4, 3, 10, 4, 4, wd);   box3(v, 4, 5, 3, 10, 4, 4, wd);
-  box3(v, -5, 5, 11, 12, -4, 4, shade(wd, 0.85));
-  box3(v, -4, 4, 13, 14, -4, 4, shade(wd, 0.8));
-  box3(v, -2, 2, 15, 15, -3, 3, shade(wd, 0.75));
-  box3(v, -2, 2, 3, 5, -2, 2, w);
-  box3(v, -1, 1, 6, 7, 3, 3, PALETTE.metalLight);
-  cube(v, 0, 6, 3, ACCENT.gold);
-  cube(v, -3, 2, 3, ACCENT.fire); cube(v, -4, 2, 3, ACCENT.fire);
-  void wl;
+  // Low stone footing and a warm timber deck. The sides stay open so this
+  // reads as a workplace instead of another sealed keep.
+  box3(v, -5, 5, 0, 0, -4, 4, PALETTE.stoneDark);
+  box3(v, -4, 4, 1, 1, -3, 3, w);
+  for (const x of [-4, 4]) for (const z of [-3, 3]) box3(v, x, x, 2, 7, z, z, wd);
+  // Pitched, asymmetric canopy.
+  box3(v, -4, 4, 8, 8, -4, 2, wl);
+  box3(v, -3, 3, 9, 9, -4, 2, shade(wl, 0.9));
+  box3(v, -1, 1, 10, 10, -4, 2, wd);
+  // Sawing bench and a large vertical toothed blade on the front elevation.
+  box3(v, -3, 3, 2, 3, 2, 3, wl);
+  box3(v, -1, 1, 2, 8, 5, 5, PALETTE.metalLight);
+  box3(v, -3, 3, 4, 6, 5, 5, PALETTE.metalLight);
+  cube(v, 0, 5, 6, ACCENT.gold);
+  box3(v, -5, -5, 3, 7, -1, 1, PALETTE.metalLight);
+  box3(v, -5, -5, 4, 6, -2, 2, PALETTE.metalLight);
+  cube(v, -6, 5, 0, ACCENT.gold);
+  // Three squared logs with pale cut ends make the resource function legible.
+  for (const [x, y] of [[4, 2], [6, 2], [5, 4]] as const) {
+    box3(v, x, x + 1, y, y + 1, -4, 0, w);
+    box3(v, x, x + 1, y, y + 1, 0, 0, wl);
+  }
+  cube(v, 4, 2, 3, ACCENT.fire); cube(v, 4, 3, 3, ACCENT.fireCore);
   return v;
 }
 
-/** Mine — shaft in mountain with wooden support. */
+/** Mine — broken rock face with a deep portal, rails and an ore cart. */
 export function mineBuilding(): Voxel[] {
   const v: Voxel[] = [];
-  const s = PALETTE.stone, sd = PALETTE.stoneDark, wd = PALETTE.woodDark;
-  box3(v, -5, 5, 0, 3, -4, 4, sd);
-  box3(v, -4, 4, 3, 6, -4, 4, s);
-  box3(v, -3, 3, 6, 8, -3, 3, shade(s, 0.92));
-  box3(v, -2, 2, 4, 8, -2, 2, PALETTE.metalDark);
-  box3(v, -3, -3, 3, 10, -3, -3, wd); box3(v, 3, 3, 3, 10, -3, -3, wd);
-  box3(v, -3, 3, 11, 11, -3, 3, wd);
-  cube(v, -3, 3, 3, ACCENT.gold); cube(v, 3, 4, 3, ACCENT.gold); cube(v, 0, 5, 3, ACCENT.gold);
-  cube(v, 0, 9, 3, ACCENT.fireCore);
+  const s = PALETTE.stone, sd = PALETTE.stoneDark, sl = PALETTE.stoneLight, wd = PALETTE.woodDark;
+  box3(v, -5, 5, 0, 0, -4, 4, sd);
+  // Irregular terraces deliberately leave the front-centre open.
+  box3(v, -5, -3, 1, 6, -3, 2, s);
+  box3(v, 3, 5, 1, 5, -3, 1, shade(s, 0.92));
+  box3(v, -3, 3, 1, 4, -4, -1, sd);
+  box3(v, -2, 2, 5, 7, -4, -2, sl);
+  cube(v, -5, 7, -2, sl); cube(v, 4, 6, -3, sd); cube(v, 2, 8, -3, s);
+  // Black shaft mouth with an oversized timber frame.
+  box3(v, -2, 2, 1, 6, 2, 3, shade(PALETTE.metalDark, 0.42));
+  box3(v, -3, -3, 1, 7, 4, 4, wd); box3(v, 3, 3, 1, 7, 4, 4, wd);
+  box3(v, -3, 3, 7, 8, 4, 4, wd);
+  // Rails lead from the darkness to a loaded cart.
+  box3(v, -2, -2, 1, 1, 2, 7, PALETTE.metalLight);
+  box3(v, 2, 2, 1, 1, 2, 7, PALETTE.metalLight);
+  for (const z of [3, 5, 7]) box3(v, -3, 3, 0, 0, z, z, wd);
+  box3(v, -2, 2, 2, 3, 6, 8, PALETTE.metal);
+  box3(v, -1, 1, 4, 4, 6, 7, ACCENT.gold);
+  cube(v, -1, 4, 7, sl); cube(v, 1, 4, 6, ACCENT.gold);
+  // Ore seams on both shoulders stop the mound reading as plain masonry.
+  cube(v, -4, 4, 2, ACCENT.gold); cube(v, 4, 3, 1, ACCENT.gold); cube(v, 1, 6, -2, ACCENT.gold);
+  cube(v, -3, 6, 3, ACCENT.fireCore);
   return v;
 }
 
 /** Smelter — stone furnace with fire maw. */
+/** Enemy town hall — a squat black-stone gatehouse with twin towers and a blood banner. */
+export function enemyTownHallBuilding(): Voxel[] {
+  const v: Voxel[] = [];
+  const black = shade(PALETTE.stoneDark, 0.55);
+  const stone = shade(PALETTE.stone, 0.68);
+  const rim = shade(PALETTE.stoneLight, 0.58);
+  const metal = shade(PALETTE.metalDark, 0.72);
+  const blood = ACCENT.blood;
+  const ember = ACCENT.eyeRed;
+
+  box3(v, -8, 8, 0, 1, -6, 6, black);
+  box3(v, -7, 7, 2, 3, -5, 5, stone);
+  box3(v, -4, 4, 4, 11, -4, 4, stone);
+  box3(v, -2, 2, 4, 9, -6, -5, black);
+  for (const x of [-2, 0, 2]) box3(v, x, x, 4, 9, -7, -7, metal);
+  box3(v, -3, 3, 10, 11, -7, -5, metal);
+  cube(v, -1, 8, -8, ember); cube(v, 1, 8, -8, ember);
+
+  for (const x of [-6, 6]) {
+    box3(v, x - 2, x + 2, 3, 14, -4, 3, black);
+    box3(v, x - 2, x + 2, 6, 7, -5, -5, rim);
+    box3(v, x - 3, x + 3, 14, 15, -5, 4, stone);
+    for (const dx of [-3, 0, 3]) {
+      cube(v, x + dx, 16, -5, black);
+      cube(v, x + dx, 16, 4, black);
+    }
+    cube(v, x - 3, 16, -1, black);
+    cube(v, x + 3, 16, 1, black);
+    box3(v, x - 1, x + 1, 9, 11, -6, -6, ember);
+  }
+
+  box3(v, -4, 4, 12, 13, -1, 2, black);
+  box3(v, -1, 1, 14, 20, 0, 0, metal);
+  box3(v, 2, 5, 17, 20, 0, 0, blood);
+  box3(v, 2, 4, 15, 16, 0, 0, shade(blood, 0.78));
+  box3(v, -5, -3, 17, 18, -1, 1, rim);
+  box3(v, 3, 5, 17, 18, -1, 1, rim);
+  cube(v, -6, 19, 0, rim); cube(v, 6, 19, 0, rim);
+
+  for (const x of [-5, 5]) {
+    box3(v, x, x, 4, 6, -7, -7, metal);
+    cube(v, x, 7, -7, blood);
+    cube(v, x, 8, -7, ember);
+  }
+  return v;
+}
+
 export function smelterBuilding(): Voxel[] {
   const v: Voxel[] = [];
   const s = PALETTE.stone, sd = PALETTE.stoneDark, md = PALETTE.metalDark;
@@ -870,6 +942,7 @@ export const VOXEL_BUILDERS: Record<string, () => Voxel[]> = {
   'relic:totem-blood': relicBloodTotem,
   'building:sawmill': sawmillBuilding,
   'building:mine': mineBuilding,
+  'building:enemy-town-hall': enemyTownHallBuilding,
   'building:smelter': smelterBuilding,
   'building:barracks': barracksBuilding,
   'building:town-hall': townHallBuilding,
@@ -912,6 +985,7 @@ export function builderEmissive(builderName: string): RGB | undefined {
     case 'relic:totem-blood': return ACCENT.blood;
     case 'building:sawmill': return ACCENT.fire;
     case 'building:mine': return ACCENT.gold;
+    case 'building:enemy-town-hall': return ACCENT.eyeRed;
     case 'building:smelter': return ACCENT.fireCore;
     case 'building:barracks': return ACCENT.blood;
     case 'building:town-hall': return ACCENT.gold;

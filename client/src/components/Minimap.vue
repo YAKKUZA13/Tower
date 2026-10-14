@@ -102,13 +102,18 @@ function draw(): void {
   // resource nodes
   if (map.resourceNodes) {
     for (const n of map.resourceNodes) {
-      const w = worldToMinimap(n.col * map.grid.cellSize, n.row * map.grid.cellSize, size, map);
+      const w = {x:(n.col+.5)/map.grid.cols*size,y:(n.row+.5)/map.grid.rows*size};
       ctx.fillStyle = n.kind === 'gold' ? '#F1C40F' : n.kind === 'ore' ? '#7F8C8D' : n.kind === 'stone' ? '#BDC3C7' : '#7D6608';
       ctx.fillRect(w.x - 1, w.y - 1, 3, 3);
     }
   }
 
   if (snap) {
+    for(const site of snap.worldSites ?? []) {
+      const x=(site.col+.5)/map.grid.cols*size, y=(site.row+.5)/map.grid.rows*size;
+      ctx.strokeStyle=site.secured?'#83b79a':'#d2ad73';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(x,y-4);ctx.lineTo(x+4,y);ctx.lineTo(x,y+4);ctx.lineTo(x-4,y);ctx.closePath();ctx.stroke();
+    }
     // players: units + buildings
     const players = snap.playersState ?? [];
     const drawPlayer = (p: PlayerState): void => {
@@ -117,7 +122,7 @@ function draw(): void {
       ctx.fillStyle = col;
       // buildings — squares
       for (const b of p.buildings) {
-        const w = worldToMinimap(b.col * map.grid.cellSize, b.row * map.grid.cellSize, size, map);
+        const w = {x:(b.col+.5)/map.grid.cols*size,y:(b.row+.5)/map.grid.rows*size};
         ctx.fillRect(w.x - 2, w.y - 2, 4, 4);
       }
       // units — small dots
@@ -132,7 +137,7 @@ function draw(): void {
       // legacy single-player — все defenders/buildings цветом 0
       ctx.fillStyle = COLORS[0];
       for (const b of snap.productionBuildings ?? []) {
-        const w = worldToMinimap(b.col * map.grid.cellSize, b.row * map.grid.cellSize, size, map);
+        const w = {x:(b.col+.5)/map.grid.cols*size,y:(b.row+.5)/map.grid.rows*size};
         ctx.fillRect(w.x - 2, w.y - 2, 4, 4);
       }
       for (const u of snap.defenderUnits ?? []) {
@@ -146,13 +151,13 @@ function draw(): void {
   if (props.camera) {
     const tl = worldToMinimap(props.camera.x - props.camera.halfW, props.camera.z - props.camera.halfH, size, map);
     const br = worldToMinimap(props.camera.x + props.camera.halfW, props.camera.z + props.camera.halfH, size, map);
-    ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+    ctx.strokeStyle = 'rgba(214,192,161,0.8)';
     ctx.lineWidth = 1;
     ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
   }
 
   // border
-  ctx.strokeStyle = 'rgba(120,140,170,0.4)';
+  ctx.strokeStyle = 'rgba(126,100,86,0.8)';
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
 }
@@ -196,9 +201,11 @@ watch(() => [props.snapshot, props.camera], () => { /* redraw via raf */ }, { de
   bottom: 12px;
   width: 160px;
   height: 160px;
-  border-radius: 4px;
-  border: 1px solid rgba(120, 140, 170, 0.6);
-  background: #0b0e14;
+  border-radius: 0;
+  border: 1px solid #806757;
+  outline: 3px solid rgba(10, 10, 14, .82);
+  background: #0b0d12;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(0, 0, 0, 0.9);
   cursor: crosshair;
   z-index: 8;
   pointer-events: auto;

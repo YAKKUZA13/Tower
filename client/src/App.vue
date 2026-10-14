@@ -66,6 +66,12 @@ watch(coopPhase, (p) => {
 
 onMounted(async () => {
   await authStore.restoreSession();
+  const demo = new URLSearchParams(window.location.search).get('demo');
+  if (demo === 'rts') {
+    if (!authStore.isAuthed) authStore.loginAsGuest('Demo commander');
+    rtsMapId.value = new URLSearchParams(window.location.search).get('map') || 'rts-2p-crossroads';
+    view.value = 'rts-game';
+  }
 });
 onBeforeUnmount(() => {
   coopStore.disconnect();
@@ -77,7 +83,7 @@ onBeforeUnmount(() => {
   <div class="app">
     <header class="app-header">
       <div class="app-header-left">
-        <div class="app-brand">Tower — RTS</div>
+        <div class="app-brand">TOWER <span>/ ПЕРВЫЙ СПУСК</span></div>
       <div v-if="isAuthed" class="app-nav">
         <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Co-op лобби</button>
         <!-- TD-режим (Game.vue) скрыт: проект перешёл на RTS. Co-op сейчас использует
@@ -111,8 +117,8 @@ onBeforeUnmount(() => {
 html, body, #app {
   height: 100%;
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: #0b1021;
+  font-family: Georgia, 'Times New Roman', serif;
+  background: #0d0e13;
 }
 button {
   cursor: pointer;
@@ -127,10 +133,11 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
-  background: #0f172a;
-  color: #e2e8f0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 46px;
+  padding: 7px clamp(10px, 1.4vw, 20px);
+  background: #111217;
+  color: #cbb99f;
+  border-bottom: 1px solid #54433c;
 }
 .app-header-left {
   display: flex;
@@ -139,24 +146,31 @@ button {
   flex-wrap: wrap;
 }
 .app-brand {
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  color: #ddc9ad;
+  font: 700 clamp(12px, 1vw, 15px) 'Lucida Console', Consolas, monospace;
+  letter-spacing: .09em;
+  text-shadow: 2px 2px 0 #07080b;
 }
+.app-brand span { color: #7f6c60; font-size: clamp(9px, .68vw, 11px); }
 .app-nav {
   display: flex;
-  gap: 8px;
+  gap: 3px;
   flex-wrap: wrap;
 }
 .nav-button {
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.05);
-  color: #e2e8f0;
-  padding: 6px 10px;
-  border-radius: 8px;
+  border: 1px solid #3f3532;
+  background: #17181d;
+  color: #83756b;
+  padding: 8px 11px;
+  border-radius: 0;
+  font: 10px 'Lucida Console', Consolas, monospace;
+  text-transform: uppercase;
 }
 .nav-button.active {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
+  background: #252026;
+  color: #d5bfa3;
+  border-color: #806757;
+  box-shadow: inset 0 -2px #b45441;
 }
 .app-header-right {
   display: flex;
@@ -180,13 +194,19 @@ button {
 }
 .btn {
   border: none;
-  border-radius: 8px;
+  border-radius: 0;
   padding: 8px 12px;
   font-weight: 600;
 }
 .btn.ghost {
-  background: #f1f5f9;
-  color: #0f172a;
-  border: 1px solid #e2e8f0;
+  background: #17181d;
+  color: #b7a48e;
+  border: 1px solid #4e403a;
+}
+
+@media (max-width: 760px) {
+  .app-header { align-items: flex-start; }
+  .app-header-right .user-meta { display: none; }
+  .app-brand span { display: none; }
 }
 </style>

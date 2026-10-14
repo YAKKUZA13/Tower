@@ -2,9 +2,9 @@
  * M8-fix smoke — RTS continuous terrain + new RTS assets.
  *
  * Headless (NullEngine): без браузера проверяет, что:
- *  1. createRtsGround строит корректный меш (vertex/index/normal/color) и
+ *  1. createRtsGround строит корректный chunk-root (vertex/index/normal/color) и
  *     ВЕРХ поверхности в клетке равен sampleHeight (центральный фикс парения).
- *  2. createRtsScene отдаёт name='ground', isPickable=true, receiveShadows=true
+ *  2. createRtsScene отдаёт name='ground' с pickable playable-чанками
  *     и НЕ создаёт «доску» (board-border / board-decorations).
  *  3. Новые voxel-билдеры (town-hall/l2, watch-tower, worker) возвращают
  *     непустые массивы вокселей (раньше их не было → fallback-бокс).
@@ -52,55 +52,56 @@ console.log('1. RTS ground mesh structure + heightmap match:');
 
   const ground = createRtsGround(scene, grid, heightmap, map.tiles ?? null, { apronRings: 6 });
 
-  const positions = ground.getVerticesData(VertexBuffer.PositionKind)!;
-  const colors = ground.getVerticesData(VertexBuffer.ColorKind)!;
-  const indices = ground.getIndices()!;
+  const chunks = ground.getChildMeshes().filter((mesh) =>
+    (mesh.metadata as { playableGround?: boolean } | null)?.playableGround === true
+  );
+  const firstChunk = chunks[0]!;
+  const positions = firstChunk.getVerticesData(VertexBuffer.PositionKind)!;
+  const colors = firstChunk.getVerticesData(VertexBuffer.ColorKind)!;
+  const indices = firstChunk.getIndices()!;
 
   check('ground.name === "ground"', ground.name === 'ground');
-  check('isPickable=true (контракт pickGrid)', ground.isPickable === true);
+  check('root is not pickable', ground.isPickable === false);
+  check('terrain split into 8x8 chunks', chunks.length === 64, `(chunks=${chunks.length})`);
+  check('playable chunks are pickable', chunks.every((mesh) => mesh.isPickable));
   check('receiveShadows=true (тени ложатся на террейн)', ground.receiveShadows === true);
   check('has positions', positions.length > 0, `(len=${positions.length})`);
   check('has colors (vertex-color из tiles)', colors.length > 0, `(len=${colors.length})`);
   check('has indices (>=2 triangles)', indices.length >= 6, `(len=${indices.length})`);
-  check('normals computed (3 per vertex)', (ground.getVerticesData(VertexBuffer.NormalKind)?.length ?? 0) === positions.length);
+  check('normals computed (3 per vertex)', (firstChunk.getVerticesData(VertexBuffer.NormalKind)?.length ?? 0) === positions.length);
 
-  // Главный фикс: вершина клетки (c,r) внутри карты стоит в ЦЕНТРЕ клетки и
-  // имеет Y = heightmap[r][c] = sampleHeight(c,r). Проверяем несколько клеток.
+  // Главный фикс: каждая клетка имеет собственную плоскую top-face на высоте
+  // heightmap[r][c], без интерполяции цвета/нормали через соседние материалы.
   let yMatchOk = true;
   let yMatchDetail = '';
   const halfW = (grid.cols * grid.cellSize) / 2;
   const halfH = (grid.rows * grid.cellSize) / 2;
-  const apronRings = 6;
-  const vCols = grid.cols + 2 * apronRings + 1;
   for (const [c, r] of [[5, 5], [32, 32], [50, 12], [12, 50]] as const) {
-    // вершина в центре клетки (c, r):
-    const ix = c + apronRings;
-    const iz = r + apronRings;
-    const idx = iz * vCols + ix;
-    const vx = positions[idx * 3];
-    const vy = positions[idx * 3 + 1];
-    const vz = positions[idx * 3 + 2];
-    const expectedX = (c + 0.5) * grid.cellSize - halfW;
-    const expectedZ = (r + 0.5) * grid.cellSize - halfH;
+    const chunk = chunks.find((mesh) => {
+      const meta = (mesh.metadata as { terrainChunk?: { col: number; row: number; size: number } } | null)?.terrainChunk;
+      return !!meta && c >= meta.col && c < meta.col + meta.size && r >= meta.row && r < meta.row + meta.size;
+    });
+    const data = chunk?.getVerticesData(VertexBuffer.PositionKind) ?? [];
+    const expectedX = c * grid.cellSize - halfW;
+    const expectedZ = r * grid.cellSize - halfH;
     const expectedY = heightmap[r]![c]!;
-    if (Math.abs(vx - expectedX) > 1e-3 || Math.abs(vz - expectedZ) > 1e-3) {
-      yMatchOk = false; yMatchDetail = `cell(${c},${r}) XZ mismatch`; break;
+    let found = false;
+    for (let i = 0; i <= data.length - 12; i += 12) {
+      if (Math.abs(data[i]! - expectedX) < 1e-3 && Math.abs(data[i + 1]! - expectedY) < 1e-3 && Math.abs(data[i + 2]! - expectedZ) < 1e-3) {
+        found = true;
+        break;
+      }
     }
-    if (Math.abs(vy - expectedY) > 1e-3) {
-      yMatchOk = false; yMatchDetail = `cell(${c},${r}) Y=${vy} expected=${expectedY}`; break;
-    }
+    if (!found) { yMatchOk = false; yMatchDetail = `cell(${c},${r}) top face not found`; break; }
   }
-  check('vertex at cell-center with Y=heightmap (объекты больше не парят)', yMatchOk, yMatchDetail);
+  check('each sampled cell owns a top face at Y=heightmap', yMatchOk, yMatchDetail);
 
   // Юнит стоит в центре клетки (col,row); его Y = sampleHeight(col,row,bilinear).
-  // sampleHeight(целые col,row) = heightmap[row][col] = Y вершины центра клетки →
-  // точное совпадение surface==object-Y.
+  // sampleHeight at integer cells remains the renderer/sim placement contract.
   const cc = 32, cr = 32;
   const unitY = sampleHeight(heightmap, grid, cc, cr, true);
-  const vertexIdx = (cr + apronRings) * vCols + (cc + apronRings);
-  const surfaceY = positions[vertexIdx * 3 + 1];
-  check('sampleHeight(int col,row) == terrain surface Y at cell center (точное совпадение)',
-    Math.abs(unitY - surfaceY) < 1e-6, `(unit=${unitY}, surface=${surfaceY})`);
+  check('sampleHeight(int col,row) == heightmap cell plateau',
+    Math.abs(unitY - heightmap[cr]![cc]!) < 1e-6, `(unit=${unitY})`);
 
   ground.dispose();
   engine.dispose();

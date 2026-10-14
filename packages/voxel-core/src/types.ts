@@ -4,6 +4,8 @@ export interface Voxel {
   x: number; y: number; z: number;
   sx: number; sy: number; sz: number;
   color: RGB;
+  /** Surface material identity; 0 is the default opaque material. */
+  material?: number;
 }
 
 export interface VoxelMeshOptions {
@@ -32,6 +34,8 @@ export interface GreedyGeometry {
   positions: number[];
   indices: number[];
   colors: number[];   // RGBA per vertex (baked tint*ao)
+  /** Optional material id per quad, in emission order (six indices per quad). */
+  materialIds?: number[];
   normals: number[];  // face normal per vertex
 }
 

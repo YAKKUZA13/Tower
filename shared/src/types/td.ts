@@ -100,6 +100,11 @@ export interface Enemy {
    * и башнями как обычный враг. Когда hp<=0 → game-sim фиксирует победу (status='won').
    */
   stationary?: boolean;
+  /** RTS opponents use tactical goals, never the TD path-progress adapter. */
+  rtsRole?: 'guard' | 'patrol' | 'raider';
+  homeCol?: number;
+  homeRow?: number;
+  combatCooldown?: number;
 }
 
 export interface WaveGroup {

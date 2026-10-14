@@ -12,6 +12,8 @@
  */
 import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
 import { type Scene } from '@babylonjs/core/scene.js';
 import type {
@@ -36,6 +38,7 @@ import { VOXEL_BUILDERS, builderEmissive } from '../voxel/voxel-builder';
 import { ACCENT } from '../voxel/dark-palette';
 import { SpellEffectManager, HpBarManager, type UnitSceneRenderer } from './unit-effects';
 import type { ShadowController } from '../enemies/enemy-renderer-rigged';
+import { createRigMotion, advanceRigMotion, type RigMotion } from '@tower/voxel-core';
 
 // ── Walk-cycle константы (согласованы с RiggedEnemyRenderer) ──
 const WALK_FREQ = 7.0;       // чуть медленнее, чем у врагов (размеренный шаг солдата)
@@ -74,7 +77,9 @@ interface MasterUnit {
 }
 
 interface UnitInstance {
+  motion: RigMotion;
   root: TransformNode;
+  pickProxy: Mesh;
   nodes: Map<string, TransformNode>;
   prevCooldown: number;
   /** Оставшееся время взмаха (>0 = анимация атаки). */
@@ -106,6 +111,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
 
   private readonly spells: SpellEffectManager;
   private readonly hpBars: HpBarManager;
+  private readonly pickMaterial: StandardMaterial;
   private lastNowMs = 0;
   /** M4: контроллер per-clone теней. */
   private shadowCtl: ShadowController | null;
@@ -130,6 +136,10 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
     this.baseRow = base.row;
     this.spells = new SpellEffectManager(scene, grid, heightmap);
     this.hpBars = new HpBarManager(scene, grid);
+    this.pickMaterial = new StandardMaterial('unit-pick-material', scene);
+    this.pickMaterial.alpha = 0;
+    this.pickMaterial.disableColorWrite = true;
+    this.pickMaterial.disableDepthWrite = true;
     this.shadowCtl = shadowCtl;
 
     // Мастер-риги юнитов (G2: приоритет .glTF, затем UNIT_RIGS, затем singlePart).
@@ -138,7 +148,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
       const root = assembleRig(scene, def, {
         meshing: 'greedy',
         emissive: builderEmissive(ut.modelRef.catalogId) ?? ACCENT.soul,
-        emissiveStrength: 0.22
+        emissiveStrength: 0.48
       });
       root.setEnabled(false);
       const hasWalk = walkNodesPresent(def);
@@ -147,7 +157,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
 
     // Здания — статичные InstancedMesh (структуры, не анимируются; recipe — M3).
     for (const bt of buildingTypes) {
-      const source = catalog.buildMaster(bt.modelRef.catalogId, `building-src-${bt.id}`, { emissiveStrength: 0.2 });
+      const source = catalog.buildMaster(bt.modelRef.catalogId, `building-src-${bt.id}`, { emissiveStrength: 0.28 });
       source.isVisible = false;
       source.isPickable = false;
       source.doNotSyncBoundingInfo = true;
@@ -160,7 +170,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
       const root = assembleRig(scene, def, {
         meshing: 'greedy',
         emissive: builderEmissive(commanderCatalogId) ?? ACCENT.arcane,
-        emissiveStrength: 0.3
+        emissiveStrength: 0.44
       });
       root.setEnabled(false);
       const hasWalk = walkNodesPresent(def);
@@ -185,11 +195,14 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
     };
   }
 
-  pickUnitId(mesh: { name: string } | null | undefined): string | null {
+  pickUnitId(mesh: { name: string; metadata?: unknown } | null | undefined): string | null {
     if (!mesh) return null;
+    const metadata = mesh.metadata as { rigId?: unknown; rigKind?: unknown } | null | undefined;
+    if (metadata?.rigKind === 'unit' && typeof metadata.rigId === 'string') return metadata.rigId;
     // rigged-юниты: рут-клон именован `unit-rig-<id>`; здания/командир не пикаются как юниты.
     if (mesh.name.startsWith('unit-rig-')) return mesh.name.slice('unit-rig-'.length);
     if (mesh.name.startsWith('unit-inst-')) return mesh.name.slice('unit-inst-'.length);
+    if (mesh.name.startsWith('unit-pick-')) return mesh.name.slice('unit-pick-'.length);
     return null;
   }
 
@@ -267,9 +280,14 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
         for (const m of meshes) {
           m.metadata = { ...(m.metadata as Record<string, unknown> | null), rigId: unit.id, rigKind: 'unit' };
           m.isPickable = true;
+          m.doNotSyncBoundingInfo = false;
+          m.alwaysSelectAsActiveMesh = true;
         }
+        const pickProxy = this.createPickProxy(root, unit.id);
         inst = {
           root,
+          pickProxy,
+          motion: createRigMotion(unit.position.x, unit.position.z),
           nodes: master.nodes.length > 0 ? findNodesByName(root, master.nodes) : new Map(),
           prevCooldown: unit.cooldown,
           attackT: 0,
@@ -284,9 +302,14 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
         this.addShadow(inst);
       }
 
-      const groundY = sampleHeight(this.heightmap, this.grid, unit.col, unit.row, true);
-      inst.root.position.set(unit.position.x, groundY + cellSize * 0.5, unit.position.z);
-      inst.root.scaling.set(cellSize, cellSize, cellSize);
+      const motion = advanceRigMotion(inst.motion, unit.position.x, unit.position.z, dt, cellSize);
+      const groundY = sampleHeight(this.heightmap, this.grid,
+        motion.x / cellSize + this.grid.cols / 2 - .5, motion.z / cellSize + this.grid.rows / 2 - .5, true);
+      // Slightly oversized silhouettes are intentional in the isometric RTS view:
+      // weapons, backpacks and class headgear must remain legible at normal zoom.
+      const unitScale = cellSize * 1.34;
+      inst.root.position.set(motion.x, groundY + unitScale * 0.5, motion.z);
+      inst.root.scaling.set(unitScale, unitScale, unitScale);
 
       // facing к цели
       if (unit.targetEnemyId) {
@@ -297,7 +320,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
           if (dx * dx + dz * dz > 1e-4) inst.facingY = Math.atan2(dx, dz);
         }
       }
-      inst.root.rotation.y = inst.facingY;
+      inst.root.rotation.y = unit.targetEnemyId ? inst.facingY : motion.facing;
 
       // attack detection: cooldown сбросился вверх → только что атаковал
       if (unit.cooldown > inst.prevCooldown + 0.01) {
@@ -305,11 +328,16 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
       }
       inst.prevCooldown = unit.cooldown;
 
-      const speed = dt > 0 ? Math.hypot(unit.position.x - inst.prevX, unit.position.z - inst.prevZ) / dt : 0;
       inst.prevX = unit.position.x;
       inst.prevZ = unit.position.z;
 
-      this.animateUnit(inst, t, speed, dt);
+      this.animateUnit(inst, motion.phase / WALK_FREQ, motion.speed / cellSize, dt);
+      if(unit.gatherState === 'gathering') {
+        const phase = t * 7;
+        const forearm = inst.nodes.get('forearmR'), spine = inst.nodes.get('spine');
+        if(forearm) forearm.rotation.x = -.35-Math.sin(phase)*.6;
+        if(spine) spine.rotation.x = .1+Math.max(0,Math.sin(phase))*.12;
+      }
 
       // HP-бар (общий менеджер)
       this.hpBars.update(unit, inst.root.position, groundY);
@@ -340,7 +368,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
       inst.attackT = Math.max(0, inst.attackT - dt);
       const p = 1 - inst.attackT / ATTACK_SWING_DURATION; // 0..1
       // косинусный замах: вверх (отриц) → вниз (положит) → возврат
-      swing = Math.sin(p * Math.PI) * ATTACK_SWING_AMP * (p < 0.5 ? -1 : 1);
+      swing = -Math.sin(p * Math.PI) * ATTACK_SWING_AMP + Math.sin(p * Math.PI * 2) * .25;
     }
 
     if (idle) {
@@ -353,7 +381,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
       setRot('forearmR', swing); // боеготовность/замах в idle
       return;
     }
-    const gain = Math.min(1, speed / 1.0);
+      const gain = Math.min(1, speed / 1.0);
     setRot('thighL', Math.sin(phase) * WALK_AMP_THIGH * gain);
     setRot('thighR', Math.sin(phase + Math.PI) * WALK_AMP_THIGH * gain);
     setRot('shinL', Math.max(0, Math.sin(phase + Math.PI / 2)) * WALK_AMP_SHIN * gain);
@@ -379,9 +407,13 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
       for (const m of meshes) {
         m.metadata = { ...(m.metadata as Record<string, unknown> | null), rigId: 'commander', rigKind: 'unit' };
         m.isPickable = true;
+        m.doNotSyncBoundingInfo = false;
       }
+      const pickProxy = this.createPickProxy(root, 'commander');
       this.commanderInstance = {
         root,
+        pickProxy,
+        motion: createRigMotion(0, 0),
         nodes: this.commanderMaster.nodes.length > 0
           ? findNodesByName(root, this.commanderMaster.nodes) : new Map(),
         prevCooldown: 0,
@@ -401,9 +433,10 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
     const x = (cc + 0.5) * cellSize - this.halfW;
     const z = (cr + 0.5) * cellSize - this.halfH;
     const groundY = sampleHeight(this.heightmap, this.grid, cc, cr, true);
-    inst.root.position.set(x, groundY + cellSize * 0.5, z);
-    inst.root.scaling.set(cellSize, cellSize, cellSize);
-    inst.root.rotation.y = state.tick * 0.01;
+    const commanderScale = cellSize * 1.34;
+    inst.root.position.set(x, groundY + commanderScale * 0.5, z);
+    inst.root.scaling.set(commanderScale, commanderScale, commanderScale);
+      inst.root.rotation.y = 0;
 
     // cast-pose: при новом заклинании командир поднимает посох.
     const newSpell = this.spells.consumeNewSpell(state);
@@ -427,6 +460,22 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
     }
   }
 
+  /**
+   * Rig parts are narrow and animated, which made cursor ray hits unreliable at
+   * the normal RTS zoom. A transparent, normalized body volume provides a
+   * stable interaction target without changing the visible model.
+   */
+  private createPickProxy(root: TransformNode, id: string): Mesh {
+    const proxy = MeshBuilder.CreateBox(`unit-pick-${id}`, { width: 0.82, height: 1.12, depth: 0.72 }, this.scene);
+    proxy.parent = root;
+    proxy.position.y = 0;
+    proxy.isPickable = true;
+    proxy.material = this.pickMaterial;
+    proxy.visibility = 1;
+    proxy.metadata = { rigId: id, rigKind: 'unit', pickProxy: true };
+    return proxy;
+  }
+
   dispose(): void {
     for (const inst of this.unitInstances.values()) { this.removeShadow(inst); disposeRig(inst.root); }
     this.unitInstances.clear();
@@ -440,6 +489,7 @@ export class RiggedUnitRenderer implements UnitSceneRenderer {
     if (this.commanderMaster) { disposeRig(this.commanderMaster.root); this.commanderMaster = null; }
     this.spells.dispose();
     this.hpBars.dispose();
+    this.pickMaterial.dispose();
   }
 
   /** M4: регистрирует/снимает меши клона в ShadowGenerator. */

@@ -13,6 +13,8 @@
     "@tower/voxel-babylon": "*",
     "@tower/engine-terrain": "*",
     "@tower/engine-recipe": "*",
+    "@tower/engine-scene": "*",
+    "@tower/scene-babylon": "*",
     "@babylonjs/core": "7.54.3"
   },
   "devDependencies": {

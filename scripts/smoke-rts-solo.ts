@@ -53,10 +53,10 @@ console.log('2. AI-opponent wave spawn:');
   const map = getRtsMap('rts-2p-crossroads')!;
   const sim = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'player' });
   const initialEnemies = sim.serialize().enemies.length;
-  check('initial enemies = 1 (just AI town-hall)', initialEnemies === 1, `(got ${initialEnemies})`);
+  check('initial enemies include town-hall, site guards and patrols', initialEnemies >= 5 && sim.state.enemies.some(e=>e.rtsRole==='guard') && sim.state.enemies.some(e=>e.rtsRole==='patrol'), `(got ${initialEnemies})`);
 
   // Helper: advance sim time by N seconds (step() processes ≤6 fixed-steps per call).
-  const advance = (sec: number): void => { for (let i = 0; i < sec * 31 + 2; i++) sim.step(1); };
+  const advance = (sec: number): void => { for (let i = 0; i < sec * 30; i++) sim.step(1/30); };
 
   // First wave at 35s
   check('first wave timer = 35s', sim.getAiNextWaveIn() === 35, `(got ${sim.getAiNextWaveIn()})`);

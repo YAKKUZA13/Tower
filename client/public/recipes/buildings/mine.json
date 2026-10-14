@@ -5,29 +5,30 @@
   "seed": 52,
   "units": [
     {
-      "type": "Part", "id": "mound", "asset": "hip_roof",
-      "params": { "w": { "Float": 5.0 }, "h": { "Float": 2.2 }, "d": { "Float": 5.0 } },
-      "at": { "type": "Origin", "offset": [0.0, 0.0, 0.0] }, "rotation": [0.0, 0.0, 0.0],
-      "label": "stone_warm"
-    },
-    {
-      "type": "Volume", "id": "entrance", "footprint": [2.4, 1.6], "height": 2.0,
-      "at": { "type": "Origin", "offset": [0.0, 0.0, 1.6] }, "rotation_y": 0.0,
-      "walls": { "material": "stone_warm", "thickness": 0.4, "quoins": "stone", "plinth": null },
-      "roof": { "kind": "Wedge", "height": 0.6, "overhang": 0.2, "material": "stone", "low_side": "South" },
-      "openings": [
-        { "face": "South", "kind": { "kind": "Arch", "w": 1.4, "h": 1.6 }, "off": 0.0, "trim": "oak_dark" }
+      "type": "Group", "id": "shaft",
+      "at": { "type": "Origin", "offset": [0, 0, 0] }, "rotation_y": 0,
+      "parts": [
+        { "id": "foundation", "asset": "box", "params": { "w": { "Float": 11 }, "h": { "Float": 1 }, "d": { "Float": 9 } }, "offset": [0, 0, 0], "label": "stone" },
+        { "id": "rock_left", "asset": "box", "params": { "w": { "Float": 3 }, "h": { "Float": 6 }, "d": { "Float": 6 } }, "offset": [-4, 1, -1], "label": "stone" },
+        { "id": "rock_right", "asset": "box", "params": { "w": { "Float": 3 }, "h": { "Float": 5 }, "d": { "Float": 5 } }, "offset": [4, 1, -2], "label": "stone" },
+        { "id": "rock_rear", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 4 }, "d": { "Float": 3 } }, "offset": [0, 1, -4], "label": "stone_dark" },
+        { "id": "rock_crown", "asset": "hip_roof", "params": { "w": { "Float": 7 }, "h": { "Float": 3 }, "d": { "Float": 5 } }, "offset": [0, 5, -3], "label": "stone" },
+        { "id": "rock_high", "asset": "box", "params": { "w": { "Float": 2 }, "h": { "Float": 2 }, "d": { "Float": 2 } }, "offset": [2, 8, -3], "label": "stone_dark" },
+        { "id": "portal", "asset": "box", "params": { "w": { "Float": 5 }, "h": { "Float": 6 }, "d": { "Float": 2 } }, "offset": [0, 1, 2], "label": "void" },
+        { "id": "post_left", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 7 }, "d": { "Float": 1 } }, "offset": [-3, 1, 4], "label": "oak_dark" },
+        { "id": "post_right", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 7 }, "d": { "Float": 1 } }, "offset": [3, 1, 4], "label": "oak_dark" },
+        { "id": "lintel", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [0, 7, 4], "label": "oak_dark" },
+        { "id": "rail_left", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 1 }, "d": { "Float": 7 } }, "offset": [-2, 1, 5], "label": "metal_light" },
+        { "id": "rail_right", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 1 }, "d": { "Float": 7 } }, "offset": [2, 1, 5], "label": "metal_light" },
+        { "id": "tie_near", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 1 }, "d": { "Float": 1 } }, "offset": [0, 0, 7], "label": "oak_dark" },
+        { "id": "tie_mid", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 1 }, "d": { "Float": 1 } }, "offset": [0, 0, 5], "label": "oak_dark" },
+        { "id": "tie_far", "asset": "box", "params": { "w": { "Float": 7 }, "h": { "Float": 1 }, "d": { "Float": 1 } }, "offset": [0, 0, 3], "label": "oak_dark" },
+        { "id": "cart", "asset": "box", "params": { "w": { "Float": 5 }, "h": { "Float": 2 }, "d": { "Float": 3 } }, "offset": [0, 2, 7], "label": "metal" },
+        { "id": "cart_ore", "asset": "box", "params": { "w": { "Float": 3 }, "h": { "Float": 1 }, "d": { "Float": 2 } }, "offset": [0, 4, 7], "label": "gold_ore" },
+        { "id": "ore_left", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [-4, 4, 2], "label": "gold_ore" },
+        { "id": "ore_right", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [4, 3, 1], "label": "gold_ore" },
+        { "id": "lantern", "asset": "box", "params": { "w": { "Float": 1 }, "h": { "Float": 2 }, "d": { "Float": 1 } }, "offset": [-3, 6, 3], "label": "fire_core" }
       ]
-    },
-    {
-      "type": "Part", "id": "beam", "asset": "box",
-      "params": { "w": { "Float": 2.6 }, "h": { "Float": 0.3 }, "d": { "Float": 0.3 } },
-      "at": { "type": "Origin", "offset": [0.0, 2.0, 1.6] }, "rotation": [0.0, 0.0, 0.0], "label": "oak_dark"
-    },
-    {
-      "type": "Part", "id": "cart", "asset": "box",
-      "params": { "w": { "Float": 1.0 }, "h": { "Float": 0.6 }, "d": { "Float": 0.7 } },
-      "at": { "type": "Origin", "offset": [0.0, 0.3, 2.8] }, "rotation": [0.0, 0.0, 0.0], "label": "oak"
     }
   ]
 }

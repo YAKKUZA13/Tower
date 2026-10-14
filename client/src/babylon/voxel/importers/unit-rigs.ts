@@ -27,7 +27,11 @@ export function knightRigged(): CharacterDef {
 
   const hips: PartNode = {
     name: 'hips', pivot: [0, 7, 0],
-    voxels: mk((v) => { box3(v, -2, 2, 7, 8, 0, 1, m); }), // набедренник
+    voxels: mk((v) => {
+      box3(v, -2, 2, 7, 8, 0, 1, m);
+      box3(v, -1, 1, 5, 8, 2, 2, shade(m, 0.82));      // front tabard
+      box3(v, -2, 2, 8, 8, 2, 2, g);                   // belt trim
+    }),
     children: []
   };
   const spine: PartNode = {
@@ -37,6 +41,8 @@ export function knightRigged(): CharacterDef {
       box3(v, -1, 1, 12, 13, 1, 1, ml);                // грудь-блик
       cube(v, 0, 11, 1, g);                             // эмблема
       box3(v, -3, -2, 10, 11, 0, 1, md); box3(v, 2, 3, 10, 11, 0, 1, md); // наплечники
+      box3(v, -2, 2, 8, 13, -2, -1, shade(md, 0.72));  // split heavy cape
+      cube(v, -2, 13, -1, g); cube(v, 2, 13, -1, g);   // cape clasps
     }),
     children: []
   };
@@ -44,7 +50,8 @@ export function knightRigged(): CharacterDef {
     name: 'head', pivot: [0, 14, 0],
     voxels: mk((v) => {
       box3(v, -2, 2, 14, 16, 0, 1, md);                // шлем
-      cube(v, 0, 17, 0, g);                             // гребень
+      box3(v, 0, 0, 17, 19, -1, 0, g);                 // tall readable crest
+      cube(v, -2, 16, 0, ml); cube(v, 2, 16, 0, ml);   // cheek guards
       cube(v, -1, 15, 1, e); cube(v, 1, 15, 1, e);     // глазница-щель
     }),
     children: []
@@ -64,8 +71,9 @@ export function knightRigged(): CharacterDef {
     voxels: mk((v) => {
       box3(v, -3, -2, 13, 14, 0, 0, md);
       // щит на левой руке
-      box3(v, -4, -3, 13, 14, 1, 2, shade(m, 0.9));
-      cube(v, -4, 13, 2, g);
+      box3(v, -5, -3, 11, 15, 1, 2, shade(m, 0.9));
+      box3(v, -5, -3, 12, 14, 3, 3, md);
+      box3(v, -4, -4, 12, 14, 3, 3, g);                // shield rune
     }),
     children: []
   };
@@ -76,6 +84,7 @@ export function knightRigged(): CharacterDef {
       // меч в правой кисти (качается при swing forearmR)
       cube(v, 3, 9, 1, wd);                             // рукоять
       box3(v, 3, 3, 10, 15, 1, 1, ml);                 // клинок
+      box3(v, 2, 4, 10, 10, 1, 1, g);                  // guard
       cube(v, 3, 16, 1, g);                             // набалдашник
     }),
     children: []
@@ -117,7 +126,11 @@ export function archerRigged(): CharacterDef {
 
   const hips: PartNode = {
     name: 'hips', pivot: [0, 7, 0],
-    voxels: mk((v) => { box3(v, -2, 2, 7, 13, 0, 1, shade(f, 0.85)); }), // туника-подол
+    voxels: mk((v) => {
+      box3(v, -2, 2, 7, 13, 0, 1, shade(f, 0.85));
+      box3(v, -2, 2, 6, 9, -2, -1, shade(fd, 0.72));   // short travelling cloak
+      box3(v, -2, 2, 8, 8, 2, 2, g);                  // utility belt
+    }),
     children: []
   };
   const spine: PartNode = {
@@ -125,6 +138,8 @@ export function archerRigged(): CharacterDef {
     voxels: mk((v) => {
       box3(v, -2, 2, 10, 13, 0, 1, shade(f, 0.85));    // лиф туники
       cube(v, 2, 12, 1, g);                             // пояс-пряжка
+      box3(v, -3, -2, 11, 12, 0, 1, shade(fd, 0.8));
+      box3(v, 2, 3, 11, 12, 0, 1, shade(fd, 0.8));     // leather shoulder guards
     }),
     children: []
   };
@@ -134,6 +149,7 @@ export function archerRigged(): CharacterDef {
       box3(v, -2, 2, 13, 14, -1, 1, fd); box3(v, -2, 2, 13, 14, 1, 2, fd); // капюшон
       box3(v, -1, 1, 14, 15, 0, 1, f);                 // лицо
       cube(v, -1, 14, 1, e); cube(v, 1, 14, 1, e);
+      cube(v, 0, 16, -1, shade(fd, 0.8));              // hood peak
     }),
     children: []
   };
@@ -143,7 +159,8 @@ export function archerRigged(): CharacterDef {
       box3(v, -3, -2, 12, 13, 0, 0, fd);
       // колчан за спиной (висит на плече)
       box3(v, -1, 1, 9, 12, -2, -2, w);
-      cube(v, 0, 13, -2, wl); cube(v, -1, 13, -2, wl);
+      box3(v, -1, 1, 8, 8, -2, -2, shade(fd, 0.7));
+      cube(v, 0, 13, -2, wl); cube(v, -1, 13, -2, wl); cube(v, 1, 13, -2, wl);
     }),
     children: []
   };
@@ -157,9 +174,9 @@ export function archerRigged(): CharacterDef {
     voxels: mk((v) => {
       box3(v, -3, -2, 13, 14, 0, 0, fd);
       // лук в левой руке (натягивается при swing forearmL)
-      box3(v, -3, -3, 11, 15, 1, 1, w);
-      cube(v, -3, 10, 1, w); cube(v, -3, 16, 1, w);
-      cube(v, -3, 13, 2, wl);                          // стрела на тетиве
+      box3(v, -4, -4, 10, 16, 1, 1, w);
+      cube(v, -3, 9, 1, w); cube(v, -3, 17, 1, w);
+      cube(v, -4, 13, 2, wl);                          // стрела на тетиве
     }),
     children: []
   };
@@ -198,81 +215,91 @@ export function archerRigged(): CharacterDef {
   return { name: 'archer', root: hips, animKind: 'humanoid' };
 }
 
-/** Маг — в мантии с посохом (правая рука) и капюшоном. */
+/** Маг — могильный капеллан: костяная маска, тяжёлая мантия и фонарь-посох. */
 export function mageRigged(): CharacterDef {
-  const sd = PALETTE.stoneDark, sl = PALETTE.stoneLight;
-  const ar = ACCENT.arcane, arc = ACCENT.arcaneCore;
+  const robe = shade(PALETTE.metalDark, 1.18), robeHi = shade(PALETTE.stoneDark, 1.32);
+  const bone = PALETTE.bone, boneDark = PALETTE.boneDark;
+  const soul = ACCENT.soul, soulCore = shade(ACCENT.soul, 1.15), blood = ACCENT.blood;
 
   const hips: PartNode = {
     name: 'hips', pivot: [0, 6, 0],
     voxels: mk((v) => {
-      box3(v, -2, 2, 0, 6, 0, 1, shade(sd, 0.7));      // подол мантии
-      box3(v, -1, 1, 3, 4, 0, 1, sl);                  // подкладка
+      box3(v, -3, 3, 0, 6, -1, 1, robe);               // тяжёлый треугольный подол
+      box3(v, -2, 2, 1, 6, 2, 2, robeHi);              // читаемая передняя пола
+      box3(v, -3, 3, 0, 1, -2, 2, shade(robe, 0.72));  // ступенчатый силуэт
+      box3(v, 0, 0, 1, 5, 3, 3, blood);                // орденская вертикаль
+      box3(v, -1, 1, 3, 3, 3, 3, blood);               // крест на мантии
     }),
     children: []
   };
   const spine: PartNode = {
     name: 'spine', pivot: [0, 9, 0],
     voxels: mk((v) => {
-      box3(v, -2, 2, 7, 11, 0, 1, sl);                 // лиф мантии
-      box3(v, -2, 2, 11, 12, 0, 1, shade(sd, 0.8));
-      cube(v, 0, 10, 1, ar);                           // руна на мантии
+      box3(v, -2, 2, 7, 11, -1, 1, robeHi);
+      box3(v, -2, 2, 11, 12, -1, 1, robe);
+      box3(v, -4, -2, 10, 12, -1, 1, robe);            // широкие плечи
+      box3(v, 2, 4, 10, 12, -1, 1, robe);
+      cube(v, -4, 12, 0, boneDark); cube(v, 4, 12, 0, boneDark);
     }),
     children: []
   };
   const head: PartNode = {
     name: 'head', pivot: [0, 12, 0],
     voxels: mk((v) => {
-      box3(v, -2, 2, 12, 15, 0, 1, sd);                // капюшон
-      box3(v, -1, 1, 13, 14, 1, 1, PALETTE.metalDark); // тень-лицо
-      cube(v, -1, 14, 1, arc); cube(v, 1, 14, 1, arc); // глаза-магия
+      box3(v, -3, 3, 12, 16, -1, 1, robe);             // массивный капюшон
+      box3(v, -2, 2, 13, 16, 2, 2, bone);              // костяная маска
+      cube(v, -2, 13, 2, boneDark); cube(v, 2, 13, 2, boneDark);
+      cube(v, -1, 15, 3, soulCore); cube(v, 1, 15, 3, soulCore);
+      box3(v, -1, 1, 17, 18, -1, 0, robeHi);           // высокий сломанный колпак
+      cube(v, 1, 19, -1, robeHi);
     }),
     children: []
   };
   const upperArmL: PartNode = {
     name: 'upperArmL', pivot: [-2, 11, 0],
-    voxels: mk((v) => { box3(v, -3, -2, 9, 11, 0, 0, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, -4, -3, 8, 11, 0, 1, robe); }),
     children: []
   };
   const upperArmR: PartNode = {
     name: 'upperArmR', pivot: [2, 11, 0],
-    voxels: mk((v) => { box3(v, 2, 3, 9, 11, 0, 0, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, 3, 4, 8, 11, 0, 1, robe); }),
     children: []
   };
   const forearmL: PartNode = {
     name: 'forearmL', pivot: [-2, 9, 0],
-    voxels: mk((v) => { box3(v, -3, -2, 7, 9, 0, 0, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, -4, -3, 6, 8, 0, 1, robeHi); }),
     children: []
   };
   const forearmR: PartNode = {
     name: 'forearmR', pivot: [2, 9, 0],
     voxels: mk((v) => {
-      box3(v, 2, 3, 7, 9, 0, 0, shade(sd, 0.7));
-      // посох с кристаллом (поднимается при касте)
-      box3(v, 3, 3, 6, 13, 1, 1, PALETTE.woodDark);
-      box3(v, 2, 4, 14, 15, 0, 2, ar);                // кристалл-ромб
-      cube(v, 3, 15, 1, arc);
+      box3(v, 3, 4, 6, 8, 0, 1, robeHi);
+      box3(v, 5, 5, 4, 15, 1, 1, boneDark);            // длинный костяной посох
+      box3(v, 4, 6, 15, 15, 1, 1, bone);               // перекладина-фонарь
+      cube(v, 4, 16, 1, bone); cube(v, 6, 16, 1, bone);
+      box3(v, 5, 5, 16, 18, 1, 1, soul);               // зелёное пламя
+      cube(v, 5, 19, 1, soulCore);
     }),
     children: []
   };
   const thighL: PartNode = {
     name: 'thighL', pivot: [-1, 5, 0],
-    voxels: mk((v) => { box3(v, -1, -1, 3, 5, 0, 1, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, -2, -1, 2, 5, 0, 1, robe); }),
     children: []
   };
   const thighR: PartNode = {
     name: 'thighR', pivot: [1, 5, 0],
-    voxels: mk((v) => { box3(v, 1, 1, 3, 5, 0, 1, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, 1, 2, 2, 5, 0, 1, robe); }),
     children: []
   };
   const shinL: PartNode = {
     name: 'shinL', pivot: [-1, 3, 0],
-    voxels: mk((v) => { box3(v, -1, -1, 0, 2, 0, 1, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, -2, -1, 0, 2, 0, 1, boneDark); }),
     children: []
   };
   const shinR: PartNode = {
     name: 'shinR', pivot: [1, 3, 0],
-    voxels: mk((v) => { box3(v, 1, 1, 0, 2, 0, 1, shade(sd, 0.7)); }),
+    voxels: mk((v) => { box3(v, 1, 2, 0, 2, 0, 1, boneDark); }),
     children: []
   };
   hips.children.push(spine);
@@ -387,14 +414,20 @@ export function commanderRigged(): CharacterDef {
  * → общий walk-cycle из RiggedUnitRenderer.
  */
 export function workerRigged(): CharacterDef {
-  const f = PALETTE.flesh, fd = PALETTE.fleshDark;
-  const w = PALETTE.wood, wd = PALETTE.woodDark, wl = PALETTE.woodLight;
-  const m = PALETTE.metal, md = PALETTE.metalDark;
+  // Workers are the first units visible in the RTS showcase. Lift the shared
+  // dark-fantasy palette locally so their hood, pack and tool read at RTS zoom.
+  const f = shade(PALETTE.flesh, 1.35), fd = shade(PALETTE.fleshDark, 1.35);
+  const w = shade(PALETTE.wood, 1.65), wd = shade(PALETTE.woodDark, 1.5), wl = shade(PALETTE.woodLight, 1.45);
+  const m = shade(PALETTE.metal, 1.35), md = shade(PALETTE.metalDark, 1.4);
   const e = ACCENT.soul;
 
   const hips: PartNode = {
     name: 'hips', pivot: [0, 7, 0],
-    voxels: mk((v) => { box3(v, -2, 2, 7, 12, 0, 1, shade(w, 0.85)); }), // туника-подол
+    voxels: mk((v) => {
+      box3(v, -2, 2, 7, 12, 0, 1, shade(w, 0.85));
+      box3(v, -2, 2, 7, 8, 2, 2, wd);                  // tool belt
+      cube(v, -2, 8, 3, m); cube(v, 2, 8, 3, m);       // belt tools
+    }),
     children: []
   };
   const spine: PartNode = {
@@ -402,6 +435,8 @@ export function workerRigged(): CharacterDef {
     voxels: mk((v) => {
       box3(v, -2, 2, 10, 13, 0, 1, shade(w, 0.9));       // лиф туники
       box3(v, -2, 2, 8, 9, 0, 1, shade(wd, 0.9));         // ремень
+      box3(v, -2, 2, 9, 12, -2, -1, wd);                // supply pack
+      box3(v, -1, 1, 10, 11, -3, -3, wl);               // rolled blanket
     }),
     children: []
   };
@@ -411,6 +446,7 @@ export function workerRigged(): CharacterDef {
       box3(v, -2, 2, 14, 15, 0, 1, f);                   // лицо
       box3(v, -2, 2, 15, 16, -1, 1, wd); box3(v, -2, 2, 15, 16, 1, 2, wd); // капюшон
       cube(v, -1, 14, 1, e); cube(v, 1, 14, 1, e);       // глаза
+      box3(v, -2, 2, 13, 13, 1, 1, wl);                  // scarf
     }),
     children: []
   };

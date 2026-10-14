@@ -10,7 +10,7 @@
  */
 import { box3, cube } from '../voxel-helpers.js';
 import type { Voxel } from '../types.js';
-import { PALETTE, shade } from '../dark-palette.js';
+import { ACCENT, PALETTE, shade } from '../dark-palette.js';
 import type { RGB } from '../dark-palette.js';
 import type { AssetDef, BBox, ParamDef, ParamValue, ParamMap } from '@tower/shared';
 import { sdfToVoxels, sdRoundCone, sdSphere, unionSdf, type SDF } from '../voxel-sdf.js';
@@ -203,10 +203,26 @@ function shingledHipRoofStamp(
 export function materialColor(label: string | null | undefined): RGB {
   if (!label) return PALETTE.stone;
   const lc = label.toLowerCase();
-  if (lc.includes('stone') || lc.includes('plaster')) return lc.includes('warm') ? shade(PALETTE.stone, 1.1) : PALETTE.stone;
-  if (lc.includes('oak')) return lc.includes('dark') ? PALETTE.woodDark : PALETTE.wood;
-  if (lc.includes('wood') || lc.includes('roof_slate')) return PALETTE.woodDark;
-  if (lc.includes('metal')) return PALETTE.metal;
+  if (lc.includes('gold') || lc.includes('ore')) return ACCENT.gold;
+  if (lc.includes('fire')) return lc.includes('core') ? ACCENT.fireCore : ACCENT.fire;
+  if (lc.includes('void')) return shade(PALETTE.metalDark, 0.42);
+  if (lc.includes('metal')) {
+    if (lc.includes('light')) return PALETTE.metalLight;
+    if (lc.includes('dark')) return PALETTE.metalDark;
+    return PALETTE.metal;
+  }
+  if (lc.includes('stone') || lc.includes('plaster')) {
+    if (lc.includes('dark')) return PALETTE.stoneDark;
+    if (lc.includes('light')) return PALETTE.stoneLight;
+    if (lc.includes('warm')) return shade(PALETTE.stone, 0.96);
+    return PALETTE.stone;
+  }
+  if (lc.includes('oak') || lc.includes('wood')) {
+    if (lc.includes('light')) return PALETTE.woodLight;
+    if (lc.includes('dark')) return PALETTE.woodDark;
+    return PALETTE.wood;
+  }
+  if (lc.includes('roof_slate')) return PALETTE.woodDark;
   if (lc.includes('grass')) return PALETTE.moss;
   if (lc.includes('moss')) return shade(PALETTE.moss, 0.8);
   if (lc.includes('ivy')) return shade(PALETTE.moss, 1.2);

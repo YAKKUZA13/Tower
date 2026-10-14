@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './rig-motion.js';
 export * from './dark-palette.js';
 export * from './voxel-helpers.js';
 export * from './voxel-greedy.js';
@@ -16,3 +17,4 @@ export * from './voxel-io/vox-writer.js';
 export * from './voxel-io/vox-importer.js';
 
 export * from './voxel-masonry.js';
+export * from './voxel-material-geometry.js';

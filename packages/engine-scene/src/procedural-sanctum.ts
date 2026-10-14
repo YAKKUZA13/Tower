@@ -130,9 +130,35 @@ export function generateProceduralSanctum(options: ProceduralSanctumOptions = {}
     });
   }
 
+  // A sparse fractured tile field fills the negative space between the ritual
+  // dais and outer ruins. It stays deterministic and non-blocking.
+  let gridIndex = 0;
+  for (let row = -4; row <= 4; row++) {
+    for (let col = -5; col <= 5; col++) {
+      const x = col * 1.16 * scale;
+      const z = row * 1.02 * scale + 0.28 * scale;
+      const distance = Math.hypot(x, z);
+      if (distance < 4.05 * scale || random() > 0.34 + density * 0.34) continue;
+      const width = (0.72 + random() * 0.34) * scale;
+      const depth = (0.5 + random() * 0.28) * scale;
+      extra.push({
+        id: `crypt-paver-grid-${gridIndex++}`,
+        parent: 'sanctum-root',
+        material: random() > 0.82 ? 'stone-moss' : random() > 0.46 ? 'stone-dark' : 'stone-worn',
+        primitive: { kind: 'box', size: [width, 0.045 * scale, depth] },
+        transform: {
+          position: [x + (random() - 0.5) * 0.16 * scale, 0, z + (random() - 0.5) * 0.14 * scale],
+          rotation: [(random() - 0.5) * 0.028, (random() - 0.5) * 0.12, (random() - 0.5) * 0.028]
+        },
+        terrainAnchor: { offset: 0.03 * scale },
+        tags: ['district-floor', 'crypt-paving', 'receives-shadows']
+      });
+    }
+  }
+
   spec.nodes.push(...extra);
-  spec.budget.maxNodes = 256;
-  spec.budget.maxEstimatedTriangles = 14_000;
+  spec.budget.maxNodes = 480;
+  spec.budget.maxEstimatedTriangles = 24_000;
   spec.quality.criticalFeatures.push('seeded outer ruin rhythm with two readable gameplay gates');
   return spec;
 }

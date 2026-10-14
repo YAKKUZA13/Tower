@@ -1,62 +1,35 @@
-/**
- * M8-fix — RTS continuous terrain (replaces the floating «voxel board»).
- *
- * Проблема: createScene для TD делает «доску в космосе» — плоская плита +
- * тёмная бездна под ней + крепостной бордюр (зубцы/руны/черепа). Для RTS это
- * неправильно: в StarCraft/AoE карта — это сплошной террейн, уходящий в туман.
- *
- * Доп. баг: createScene ИГНОРИРОВАЛ heightmap (_heightmap), рисуя плоский пол
- * на y=0, тогда как все рендереры ставят объекты на `groundY = sampleHeight(...)`
- * (1.0..2.0 на RTS-картах с rolling-heightmap). Из-за этого юниты/здания/ресурсы
- * «парили» на 1–2 единицы над видимой плитой. На минимапе они были (минимап читает
- * col/row из сима, а не world-Y), а на сцене — нет.
- *
- * Решение: один Mesh-«ground» с (cols+1)×(rows+1) вершин, смещённых по heightmap,
- * так что ВЕРХ поверхности в клетке (c,r) в точности равен sampleHeight(c,r).
- * Вершины стоят на углах клеток → билинейная интерполяция поверхности в центре
- * клетки = среднее 4 углов = ровно sampleHeight(bilinear=true, центр). Юниты/здания
- * ставятся через `sampleHeight + offset` → основание ровно на террейне.
- *
- * Цвета: per-quad vertex-colors по tiles-матрице (grass/dirt/water/rock/sand),
- * с детерминированным per-cell jitter (hand-painted feel). Один материал, 1 draw call.
- *
- * Apron: вокс-периметр расширен на `apronRings` колец за пределы карты. Высота и
- * цвет плавно сходятся к fog-цвету → нет резкого края «доски», террейн уходит в
- * туман как в каноничных RTS.
- *
- * Контракт для пикеров и рендереров сохранён: name='ground', isPickable=true,
- * receiveShadows=true, top-surface y = sampleHeight value.
- */
 import { Color3 } from '@babylonjs/core/Maths/math.color.js';
-import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
 import { type Scene } from '@babylonjs/core/scene.js';
 import type { GridData, TileType } from '@tower/shared';
-import { fieldMaterialColor, tileToFieldMaterial } from '../voxel/voxel-field';
-import { shade } from '../voxel/dark-palette';
-import type { RGB } from '../voxel/dark-palette';
 
-/** Колец «апрона» вокруг карты (каждое кольцо = 1 клетка толщиной). */
-const DEFAULT_APRON_RINGS = 18;
-/**
- * Во что растворяется апрон. Раньше = fog-цвет (тёмно-навигационный) → низ кадра у
- * ребра карты читался как «чёрная бездна/void». Теперь = нейтральный тёмный ЗЕМЛЯНОЙ
- * тон: апрон выглядит как «дальний террейн», а не как дыра (как в StarCraft/AoE —
- * карта без void, террейн уходит за горизонт тёмной полосой, а не провалом).
- */
-const APRON_FADE_COLOR: RGB = [0.12, 0.11, 0.09];
-/** Амплитуда per-cell цветового jitter (±). */
-const CELL_JITTER = 0.06;
+type RGB = readonly [number, number, number];
+
+const DEFAULT_APRON_RINGS = 16;
+const DEFAULT_CHUNK_SIZE = 8;
+const HEIGHT_EPSILON = 0.001;
+
+const SURFACE_COLORS: Record<TileType, RGB> = {
+  grass: [0.14, 0.27, 0.21],
+  dirt: [0.27, 0.18, 0.13],
+  road: [0.23, 0.24, 0.22],
+  water: [0.07, 0.20, 0.30],
+  rock: [0.29, 0.32, 0.33],
+  sand: [0.37, 0.30, 0.19]
+};
 
 export interface RtsGroundOptions {
-  /** Колец апрона за периметром карты. 0 = без апрона. */
   apronRings?: number;
+  chunkSize?: number;
 }
 
 /**
- * Создаёт сплошной RTS-террейн, следующий heightmap, с tile-цветами и apron-фадом.
- * Возвращает Mesh с name='ground' (isPickable=true, receiveShadows=true).
+ * Builds independently culled terrain chunks. Every logical cell owns its
+ * vertices, so material boundaries remain crisp instead of smearing through a
+ * shared colour grid. Height differences get darker voxel-like side faces.
  */
 export function createRtsGround(
   scene: Scene,
@@ -65,147 +38,165 @@ export function createRtsGround(
   tiles: TileType[][] | null | undefined,
   options: RtsGroundOptions = {}
 ): Mesh {
+  const root = new Mesh('ground', scene);
+  root.isPickable = false;
+  root.receiveShadows = true;
+  root.metadata = { terrainRoot: true, terrainHeightmap: heightmap };
+
+  const chunkSize = Math.max(2, Math.floor(options.chunkSize ?? DEFAULT_CHUNK_SIZE));
+  const material = createTerrainMaterial(scene);
+
+  for (let row = 0; row < grid.rows; row += chunkSize) {
+    for (let col = 0; col < grid.cols; col += chunkSize) {
+      const chunk = buildChunk(
+        scene,
+        grid,
+        heightmap,
+        tiles,
+        col,
+        Math.min(grid.cols, col + chunkSize),
+        row,
+        Math.min(grid.rows, row + chunkSize)
+      );
+      chunk.parent = root;
+      chunk.material = material;
+      chunk.isPickable = true;
+      chunk.receiveShadows = true;
+      chunk.metadata = { playableGround: true, terrainChunk: { col, row, size: chunkSize } };
+    }
+  }
+
+  const apronRings = Math.max(0, Math.floor(options.apronRings ?? DEFAULT_APRON_RINGS));
+  if (apronRings > 0) createApron(scene, root, grid, apronRings);
+
+  return root;
+}
+
+function buildChunk(
+  scene: Scene,
+  grid: GridData,
+  heightmap: number[][] | null | undefined,
+  tiles: TileType[][] | null | undefined,
+  colStart: number,
+  colEnd: number,
+  rowStart: number,
+  rowEnd: number
+): Mesh {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const colors: number[] = [];
   const cs = grid.cellSize;
-  const cols = grid.cols;
-  const rows = grid.rows;
-  const apronRings = Math.max(0, options.apronRings ?? DEFAULT_APRON_RINGS);
+  const halfW = grid.cols * cs * 0.5;
+  const halfH = grid.rows * cs * 0.5;
 
-  const halfW = (cols * cs) / 2;
-  const halfH = (rows * cs) / 2;
-
-  // Безопасный доступ к heightmap (вне диапазона / null → 0).
-  const hAt = (c: number, r: number): number => {
-    if (!heightmap) return 0;
-    const rr = Math.max(0, Math.min(rows - 1, r));
-    const cc = Math.max(0, Math.min(cols - 1, c));
-    const v = heightmap[rr]?.[cc];
-    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  const heightAt = (col: number, row: number): number => {
+    const c = Math.max(0, Math.min(grid.cols - 1, col));
+    const r = Math.max(0, Math.min(grid.rows - 1, row));
+    const value = heightmap?.[r]?.[c];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   };
 
-  // Логическая сетка вершин: col `C` ∈ [-apronRings .. cols+apronRings].
-  // Это даёт (cols + 2*apronRings + 1) вершин по X (и аналогично по Z).
-  const vCols = cols + 2 * apronRings + 1;
-  const vRows = rows + 2 * apronRings + 1;
-  const vertexCount = vCols * vRows;
+  const addFace = (vertices: readonly number[], color: RGB): void => {
+    const base = positions.length / 3;
+    positions.push(...vertices);
+    for (let i = 0; i < 4; i++) colors.push(color[0], color[1], color[2], 1);
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
 
-  const positions = new Float32Array(vertexCount * 3);
-  const colors = new Float32Array(vertexCount * 4);
+  for (let row = rowStart; row < rowEnd; row++) {
+    for (let col = colStart; col < colEnd; col++) {
+      const x0 = col * cs - halfW;
+      const x1 = x0 + cs;
+      const z0 = row * cs - halfH;
+      const z1 = z0 + cs;
+      const y = heightAt(col, row);
+      const tile = tiles?.[row]?.[col] ?? 'grass';
+      const top = terrainColor(tile, col, row);
+      const side = shade(top, tile === 'water' ? 0.88 : 0.82);
 
-  // 1) Вершины.
-  let p = 0; // индекс в positions/colors (step = 3 / 4)
-  for (let iz = 0; iz < vRows; iz++) {
-    const logicalR = iz - apronRings; // ряд вершины: 0..rows внутри карты
-    // +cs*0.5: вершина «логической (c,r)» стоит в ЦЕНТРЕ клетки (c,r), а не в углу.
-    // Тогда terrain Y в клетке = heightmap[r][c] = sampleHeight(col,row) точно (без
-    // half-cell offset) → юниты/здания/ресурсы стоят ровно на поверхности.
-    const worldZ = (logicalR + 0.5) * cs - halfH;
-    for (let ix = 0; ix < vCols; ix++) {
-      const logicalC = ix - apronRings; // колонка вершины: 0..cols внутри карты
-      const worldX = (logicalC + 0.5) * cs - halfW;
+      addFace([x0, y, z0, x0, y, z1, x1, y, z1, x1, y, z0], top);
 
-      // расстояние за пределами карты (в клетках), приведённое к [0..1] по apronRings.
-      const outsideC = Math.max(0, -logicalC, logicalC - cols);
-      const outsideR = Math.max(0, -logicalR, logicalR - rows);
-      const outside = Math.max(outsideC, outsideR);
-      // fadeFactor: 1.0 на границе карты (outside=0) → 0.0 на внешнем кольце (outside=apronRings).
-      const fadeFactor = apronRings > 0 ? Math.max(0, 1 - outside / apronRings) : 1;
+      const north = row > 0 ? heightAt(col, row - 1) : 0;
+      const south = row + 1 < grid.rows ? heightAt(col, row + 1) : 0;
+      const west = col > 0 ? heightAt(col - 1, row) : 0;
+      const east = col + 1 < grid.cols ? heightAt(col + 1, row) : 0;
 
-      // Высота: внутри карты — heightmap; снаружи — плавный сход к 0.
-      const hInside = hAt(logicalC, logicalR);
-      const y = hInside * fadeFactor;
-
-      // Цвет: внутри — tile-цвет с jitter; снаружи — lerp к fog.
-      const cellCol = Math.max(0, Math.min(cols - 1, logicalC));
-      const cellRow = Math.max(0, Math.min(rows - 1, logicalR));
-      const tile: TileType = tiles?.[cellRow]?.[cellCol] ?? 'grass';
-      const baseRGB = fieldMaterialColor(tileToFieldMaterial(tile));
-      // jitter детерминированный (без rng): sin-hash по клетке.
-      const j = (hash01(cellCol, cellRow) - 0.5) * 2 * CELL_JITTER;
-      const tinted: RGB = [
-        clamp01(baseRGB[0] + j),
-        clamp01(baseRGB[1] + j),
-        clamp01(baseRGB[2] + j * 0.5)
-      ];
-      // water — чуть затемнённая (читается как «глубина»), rock — высветлена для объёма.
-      let surface: RGB = tinted;
-      if (tile === 'water') surface = shade(tinted, 0.82);
-      else if (tile === 'rock') surface = shade(tinted, 1.12);
-      // lerp к земляному апрону по fadeFactor (на границе карты — дальний террейн,
-      // не «бездна»). Чуть высветляем APRON_FADE_COLOR когда рядом с картой, чтобы
-      // переход был плавным, а не ступенькой.
-      const fr = APRON_FADE_COLOR[0] + (surface[0] - APRON_FADE_COLOR[0]) * fadeFactor;
-      const fg = APRON_FADE_COLOR[1] + (surface[1] - APRON_FADE_COLOR[1]) * fadeFactor;
-      const fb = APRON_FADE_COLOR[2] + (surface[2] - APRON_FADE_COLOR[2]) * fadeFactor;
-
-      positions[p * 3] = worldX;
-      positions[p * 3 + 1] = y;
-      positions[p * 3 + 2] = worldZ;
-      colors[p * 4] = fr;
-      colors[p * 4 + 1] = fg;
-      colors[p * 4 + 2] = fb;
-      colors[p * 4 + 3] = 1;
-      p++;
+      if (y > north + HEIGHT_EPSILON) addFace([x1, north, z0, x0, north, z0, x0, y, z0, x1, y, z0], side);
+      if (y > south + HEIGHT_EPSILON) addFace([x0, south, z1, x1, south, z1, x1, y, z1, x0, y, z1], side);
+      if (y > west + HEIGHT_EPSILON) addFace([x0, west, z0, x0, west, z1, x0, y, z1, x0, y, z0], side);
+      if (y > east + HEIGHT_EPSILON) addFace([x1, east, z1, x1, east, z0, x1, y, z0, x1, y, z1], side);
     }
   }
 
-  // 2) Индексы: каждый квад (logical cell) = 2 треугольника.
-  //    Полное число квадратов = (vCols-1)*(vRows-1).
-  const quadCount = (vCols - 1) * (vRows - 1);
-  const indices = new Uint32Array(quadCount * 6);
-  let ii = 0;
-  for (let iz = 0; iz < vRows - 1; iz++) {
-    for (let ix = 0; ix < vCols - 1; ix++) {
-      const v0 = iz * vCols + ix;
-      const v1 = v0 + 1;
-      const v2 = v0 + vCols + 1;
-      const v3 = v0 + vCols;
-      // CCW с верхней точки зрения: v0, v1, v2, v0, v2, v3
-      indices[ii++] = v0;
-      indices[ii++] = v1;
-      indices[ii++] = v2;
-      indices[ii++] = v0;
-      indices[ii++] = v2;
-      indices[ii++] = v3;
-    }
-  }
+  const normals = new Array<number>(positions.length).fill(0);
+  VertexData.ComputeNormals(positions, indices, normals);
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  data.normals = normals;
+  data.colors = colors;
 
-  // 3) Normals — пусть Babylon посчитает по позициям + индексам.
-  const vd = new VertexData();
-  vd.positions = positions;
-  vd.indices = indices;
-  vd.colors = colors;
-  vd.normals = new Float32Array(vertexCount * 3); // заполнит computeNormals
-  VertexData.ComputeNormals(positions, indices, vd.normals);
-
-  const mesh = new Mesh('ground', scene);
-  vd.applyToMesh(mesh, false);
-
-  // Материал: vertex-colors как diffuse, минимальный specular (mate, читает тени/тун-шейдинг).
-  const mat = new StandardMaterial('rts-ground-mat', scene);
-  mat.diffuseColor = new Color3(1, 1, 1); // → видны vertex colors
-  mat.specularColor = new Color3(0.02, 0.02, 0.02);
-  mat.roughness = 0.95;
-  mat.backFaceCulling = true;
-  mesh.material = mat;
-
-  mesh.receiveShadows = true;
-  mesh.isPickable = true;
-  mesh.isVisible = true;
-  mesh.metadata = { playableGround: true };
-
+  const mesh = new Mesh(`ground-chunk-${colStart}-${rowStart}`, scene);
+  data.applyToMesh(mesh, false);
   return mesh;
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// helpers
-// ──────────────────────────────────────────────────────────────────────
-
-function clamp01(x: number): number {
-  return x < 0 ? 0 : x > 1 ? 1 : x;
+function createTerrainMaterial(scene: Scene): StandardMaterial {
+  const material = new StandardMaterial('rts-terrain-mat', scene);
+  material.diffuseColor = Color3.White();
+  material.ambientColor = new Color3(0.3, 0.3, 0.24);
+  // Terrain uses authored vertex colours as its primary read. Unlit shading
+  // keeps biomes legible across the whole orthographic view; cliffs already
+  // carry their own darker colour and actors retain dynamic light/shadows.
+  material.disableLighting = true;
+  material.emissiveColor = Color3.White();
+  material.specularColor = new Color3(0.025, 0.025, 0.02);
+  material.roughness = 0.94;
+  // Chunks contain independently authored top and cliff quads. Keeping both
+  // sides visible avoids camera-angle cracks along terrace and chunk borders.
+  material.backFaceCulling = false;
+  return material;
 }
 
-/** Детерминированный pseudo-random [0,1) из int-ключа (per-cell jitter). */
-function hash01(c: number, r: number): number {
-  const h = Math.sin((c + 1) * 12.9898 + (r + 1) * 78.233) * 43758.5453;
-  return h - Math.floor(h);
+function createApron(scene: Scene, root: Mesh, grid: GridData, rings: number): void {
+  const width = (grid.cols + rings * 2) * grid.cellSize;
+  const height = (grid.rows + rings * 2) * grid.cellSize;
+  const apron = MeshBuilder.CreateGround('ground-apron', { width, height, subdivisions: 1 }, scene);
+  apron.position.y = -0.035;
+  apron.parent = root;
+  apron.isPickable = false;
+  apron.receiveShadows = true;
+  const material = new StandardMaterial('rts-apron-mat', scene);
+  material.diffuseColor = new Color3(0.08, 0.11, 0.13);
+  material.specularColor = Color3.Black();
+  material.roughness = 1;
+  apron.material = material;
+}
+
+function terrainColor(tile: TileType, col: number, row: number): RGB {
+  const base = SURFACE_COLORS[tile] ?? SURFACE_COLORS.grass;
+  const macro = (hash01(Math.floor(col / 5), Math.floor(row / 5)) - 0.5) * 0.055;
+  const micro = (hash01(col, row) - 0.5) * 0.025;
+  const variation = macro + micro;
+  return [
+    clamp01(base[0] + variation * 0.75),
+    clamp01(base[1] + variation),
+    clamp01(base[2] + variation * 0.55)
+  ];
+}
+
+function shade(color: RGB, factor: number): RGB {
+  return [color[0] * factor, color[1] * factor, color[2] * factor];
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function hash01(x: number, z: number): number {
+  let value = Math.imul(x + 0x632be5ab, 0x9e3779b1) ^ Math.imul(z + 0x85157af5, 0x85ebca77);
+  value ^= value >>> 16;
+  value = Math.imul(value, 0x7feb352d);
+  value ^= value >>> 15;
+  return (value >>> 0) / 4294967296;
 }

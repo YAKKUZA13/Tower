@@ -67,6 +67,10 @@ export interface AtmosphereOptions {
   ambientIntensity?: number;
   /** Интенсивность направленного sun (TD default 0.9). RTS → ~1.15. */
   sunIntensity?: number;
+  /** Сила ambient occlusion (TD default 1.8). Большому RTS-полю нужен более мягкий AO. */
+  ssaoStrength?: number;
+  /** Радиус ambient occlusion (TD default 0.85). */
+  ssaoRadius?: number;
   /** Keep geometry edges on the low-resolution pixel grid instead of smoothing them with AA. */
   pixelArt?: boolean;
 }
@@ -138,8 +142,8 @@ export class AtmosphereRenderer {
     // crevice-затенение как на воксель-референсе. Консервативные значения: видимый,
     // но не давящий AO. При артефактах — изолированно отключается одним полем.
     this.ssao = new SSAO2RenderingPipeline('ssao2', scene, { ssaoRatio: 0.5, blurRatio: 0.5 }, [camera]);
-    this.ssao.totalStrength = 1.8;
-    this.ssao.radius = 0.85;
+    this.ssao.totalStrength = options.ssaoStrength ?? 1.8;
+    this.ssao.radius = options.ssaoRadius ?? 0.85;
     this.ssao.samples = 16;
     this.ssao.expensiveBlur = true;
     this.ssao.bilateralSamples = 8;

@@ -41,27 +41,44 @@ const groups = computed(() => {
 
 <style scoped>
 .ctrl-groups {
+  position: absolute;
+  top: 140px;
+  left: 14px;
+  z-index: 6;
   display: flex;
-  gap: 4px;
+  gap: 3px;
+  padding: 4px;
+  background: rgba(13, 14, 18, 0.86);
+  border: 1px solid rgba(159, 125, 104, 0.28);
   pointer-events: auto;
 }
 .group-badge {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  background: rgba(20, 28, 40, 0.85);
-  border: 1px solid rgba(120, 140, 170, 0.55);
-  color: #cfe1ff;
+  width: 30px;
+  height: 30px;
+  border-radius: 0;
+  background: #17181d;
+  border: 1px solid #4c403a;
+  color: #d7c3a7;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 11px;
+  font: 11px 'Lucida Console', Consolas, monospace;
   padding: 0;
 }
-.group-badge:hover { background: rgba(40, 60, 90, 0.95); }
-.group-badge.empty { opacity: 0.45; }
+.group-badge:hover { background: #252026; border-color: #9f7d68; }
+.group-badge.empty { opacity: 0.35; }
 .group-badge .num { font-weight: 700; }
-.group-badge .count { font-size: 9px; opacity: 0.8; }
+.group-badge .count { font-size: 9px; color: #83c7a3; }
+
+@media (max-width: 1180px) {
+  .ctrl-groups { top: 136px; left: 12px; }
+  .group-badge { width: 27px; height: 27px; }
+}
+
+@media (max-width: 820px) {
+  .ctrl-groups { top: auto; bottom: 124px; }
+  .group-badge.empty { display: none; }
+}
 </style>

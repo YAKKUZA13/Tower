@@ -40,6 +40,7 @@ export interface UnitsTickDeps {
   grid: GridData;
   dt: number;
   tick: number;
+  move?: (unit: DefenderUnit, col: number, row: number, distance: number, radius: number) => boolean;
 }
 
 export interface UnitsTickOutcome {
@@ -72,6 +73,8 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
     if (!type) continue;
 
     unit.cooldown = Math.max(0, unit.cooldown - dt);
+    // Gathering owns worker locomotion; never pull the worker home simultaneously.
+    if (type.worker && (unit.gatherNodeId || ((unit.carry ?? 0) > 0 && unit.gatherState === 'to-base'))) continue;
 
     // ── M8.2: прямой приказ игрока override AI (move/attack). ──
     const hasMoveOrder = unit.moveOrderCol !== undefined && unit.moveOrderRow !== undefined;
@@ -86,7 +89,7 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
         if (unit.cooldown <= 0) {
           const dx = ordered.position.x - unit.position.x;
           const dz = ordered.position.z - unit.position.z;
-          const hitRadius = Math.max(grid.cellSize * 0.6, type.range * grid.cellSize - grid.cellSize * 0.2);
+          const hitRadius = grid.cellSize * (Math.max(.8,type.range) + (ordered.stationary ? 1.4 : .1));
           if (dx * dx + dz * dz <= hitRadius * hitRadius) {
             const died = applyUnitDamage(ordered, type.damage);
             if (died) killed += 1;
@@ -96,6 +99,10 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
         }
       } else {
         unit.attackOrderEnemyId = null; // цель мертва → снять приказ
+      }
+      if (ordered) {
+        const stop = grid.cellSize * (Math.max(.8,type.range) + (ordered.stationary ? 1.4 : .1));
+        if (Math.hypot(ordered.position.x - unit.position.x, ordered.position.z - unit.position.z) <= stop) continue;
       }
     } else if (hasMoveOrder) {
       moveTarget = gridToWorldData(grid, unit.moveOrderCol!, unit.moveOrderRow!);
@@ -110,8 +117,15 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
         const dist = Math.sqrt(distSq);
         const step = type.speed * grid.cellSize * dt;
         const k = Math.min(1, step / dist);
-        unit.position.x += dx * k;
-        unit.position.z += dz * k;
+        if (deps.move) {
+          const goal = worldToColRow(grid, moveTarget);
+          const ordered = attackOrderId ? enemies.find(e=>e.id===attackOrderId) : undefined;
+          const arrived = deps.move(unit, goal.col, goal.row, step, attackOrderId ? Math.max(1, type.range + (ordered?.stationary ? 1.2 : -.2)) : 0);
+          if (arrived && hasMoveOrder && !attackOrderId) {
+            unit.homeCol = unit.col; unit.homeRow = unit.row;
+            unit.moveOrderCol = undefined; unit.moveOrderRow = undefined;
+          }
+        } else { unit.position.x += dx * k; unit.position.z += dz * k; }
         const g = worldToColRow(grid, unit.position);
         unit.col = g.col;
         unit.row = g.row;
@@ -133,7 +147,7 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
       const dx = target.position.x - unit.position.x;
       const dz = target.position.z - unit.position.z;
       const distSq = dx * dx + dz * dz;
-      const hitRadius = Math.max(grid.cellSize * 0.6, rangeWorld - grid.cellSize * 0.2);
+      const hitRadius = grid.cellSize * (Math.max(.8,type.range) + (target.stationary ? 1.4 : .1));
 
       if (distSq <= hitRadius * hitRadius) {
         // в дистанции атаки
@@ -149,8 +163,10 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
         const dist = Math.sqrt(distSq);
         const step = type.speed * grid.cellSize * dt;
         const k = Math.min(1, step / dist);
-        unit.position.x += dx * k;
-        unit.position.z += dz * k;
+        if (deps.move) {
+          const goal = worldToColRow(grid, target.position);
+          deps.move(unit, goal.col, goal.row, step, Math.max(1, type.range + (target.stationary ? 1.2 : -.2)));
+        } else { unit.position.x += dx * k; unit.position.z += dz * k; }
         // обновим col/row по позиции
         const g = worldToColRow(grid, unit.position);
         unit.col = g.col;
@@ -169,8 +185,8 @@ export function tickUnits(deps: UnitsTickDeps): UnitsTickOutcome {
           const dist = Math.sqrt(distSq);
           const step = type.speed * grid.cellSize * dt;
           const k = Math.min(1, step / dist);
-          unit.position.x += dx * k;
-          unit.position.z += dz * k;
+          if (deps.move) deps.move(unit, unit.homeCol, unit.homeRow, step, 0);
+          else { unit.position.x += dx * k; unit.position.z += dz * k; }
           const g = worldToColRow(grid, unit.position);
           unit.col = g.col;
           unit.row = g.row;
@@ -308,20 +324,7 @@ export function castSpell(deps: SpellCastDeps): SpellCastOutcome {
 
   switch (spell.effect) {
     case 'meteor': {
-      const r2 = radius * radius;
-      for (const e of enemies) {
-        if (!e.alive) continue;
-        const dx = e.position.x - center.x;
-        const dz = e.position.z - center.z;
-        if (dx * dx + dz * dz <= r2) {
-          e.hp -= spell.power;
-          if (e.hp <= 0) {
-            e.hp = 0;
-            e.alive = false;
-            killed += 1;
-          }
-        }
-      }
+      // The warning circle and falling projectile precede impact by 0.7 seconds.
       break;
     }
     case 'freeze': {
@@ -363,7 +366,11 @@ export function castSpell(deps: SpellCastDeps): SpellCastOutcome {
     spellId: spell.id,
     col,
     row,
-    remainingTicks: spell.effect === 'freeze' ? Math.round(spell.power / FIXED_DT) : 1
+    remainingTicks: Math.round((spell.effect === 'freeze' ? spell.power : 2) / FIXED_DT),
+    radius: spell.radius ?? 1,
+    effect: spell.effect,
+    impactAfterTicks: spell.effect === 'meteor' ? Math.round(.7 / FIXED_DT) : undefined,
+    power: spell.power
   };
   return { killed, active, goldGained };
 }
@@ -376,6 +383,23 @@ export function tickActiveSpells(active: ActiveSpell[]): ActiveSpell[] {
     if (a.remainingTicks > 0) out.push(a);
   }
   return out;
+}
+
+export function tickSpellImpacts(active: ActiveSpell[], enemies: Enemy[], grid: GridData): number {
+  let killed = 0;
+  for (const spell of active) {
+    if (spell.impactAfterTicks === undefined || spell.impactAfterTicks <= 0) continue;
+    spell.impactAfterTicks--;
+    if (spell.impactAfterTicks > 0) continue;
+    const center = gridToWorldData(grid,spell.col,spell.row);
+    const radius = (spell.radius ?? 1)*grid.cellSize;
+    for(const enemy of enemies) {
+      if(!enemy.alive || Math.hypot(enemy.position.x-center.x,enemy.position.z-center.z)>radius) continue;
+      enemy.hp = Math.max(0,enemy.hp-(spell.power ?? 0));
+      if(enemy.hp===0) {enemy.alive=false;killed++;}
+    }
+  }
+  return killed;
 }
 
 // ── Утилиты ────────────────────────────────────────────────────────────

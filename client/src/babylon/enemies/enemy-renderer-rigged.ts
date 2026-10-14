@@ -33,12 +33,14 @@ import { ACCENT } from '../voxel/dark-palette';
 import type { AnimKind } from '../voxel/voxel-parts';
 import { classifyLod } from '../lod';
 import type { EnemySceneRenderer } from './enemy-renderer';
+import { createRigMotion, advanceRigMotion, type RigMotion } from '@tower/voxel-core';
 
 // ── M4: LOD + per-clone shadows (D2/D3/D13) ──
 /** Максимум одновременно shadowed-клонов (ближайшие к фокусу). Bounds shadow-pass cost. */
 const MAX_SHADOWED_ENEMIES = 24;
 /** Максимум одновременно animated-клонов (walk-cycle); сверх — static (позиция/facing только). */
 const MAX_ANIMATED_ENEMIES = 80;
+const AI_TOWN_HALL_MASTER = '__ai-town-hall';
 
 /** Контроллер теней: add/remove меша в/из ShadowGenerator (M4). */
 export interface ShadowController {
@@ -119,10 +121,10 @@ const ANIM_NODE_SETS: Record<AnimKind, readonly string[]> = {
 /** Множитель размера по категории (как в EnemyRenderer). */
 function categorySizeMult(category: EnemyType['category']): number {
   switch (category) {
-    case 'boss': return 1.7;
-    case 'tank': return 1.2;
-    case 'fast': return 0.85;
-    default: return 1.0;
+    case 'boss': return 1.85;
+    case 'tank': return 1.32;
+    case 'fast': return 1.0;
+    default: return 1.12;
   }
 }
 
@@ -163,6 +165,7 @@ interface MasterRig {
 }
 
 interface InstanceView {
+  motion: RigMotion;
   root: TransformNode;
   nodes: Map<string, TransformNode>;
   phaseSeed: number;
@@ -233,13 +236,30 @@ export class RiggedEnemyRenderer implements EnemySceneRenderer {
       const root = assembleRig(scene, def, {
         meshing: 'greedy',
         emissive: em,
-        emissiveStrength: 0.18
+        emissiveStrength: 0.32
       });
       root.setEnabled(false); // мастер скрыт; рендерятся только клоны
       // M1: animKind из def (или авто-детект по walk-нодам для back-compat).
       const animKind: AnimKind = def.animKind ?? (listHasWalkNodes(def) ? 'humanoid' : 'static');
       this.masters.set(type.id, { root, def, animKind, bodyVoxels: collectBodyVoxels(def) });
     }
+
+    // Combat code keeps the AI objective as a stationary Enemy. Rendering it
+    // through a dedicated master gives the player a real fortress to attack.
+    const hallDef = singlePartDef('building:enemy-town-hall', 'enemy-town-hall');
+    const hallRoot = assembleRig(scene, hallDef, {
+      meshing: 'greedy',
+      emissive: ACCENT.eyeRed,
+      emissiveStrength: 0.46
+    });
+    hallRoot.setEnabled(false);
+    this.masters.set(AI_TOWN_HALL_MASTER, {
+      root: hallRoot,
+      def: hallDef,
+      animKind: 'static',
+      bodyVoxels: collectBodyVoxels(hallDef)
+    });
+    this.sizeByType.set(AI_TOWN_HALL_MASTER, 3.45);
   }
 
   sync(state: GameSnapshot): void {
@@ -255,9 +275,12 @@ export class RiggedEnemyRenderer implements EnemySceneRenderer {
     const currentIds = new Set<string>();
     for (const enemy of state.enemies) {
       currentIds.add(enemy.id);
-      const master = this.masters.get(enemy.typeId);
+      const masterKey = enemy.stationary && enemy.id.startsWith('ai-th-')
+        ? AI_TOWN_HALL_MASTER
+        : enemy.typeId;
+      const master = this.masters.get(masterKey);
       if (!master) continue;
-      const sizeMult = this.sizeByType.get(enemy.typeId) ?? 1;
+      const sizeMult = this.sizeByType.get(masterKey) ?? 1;
       let inst = this.instances.get(enemy.id);
       if (!inst) {
         // spawn: клонируем мастер-риг
@@ -268,14 +291,27 @@ export class RiggedEnemyRenderer implements EnemySceneRenderer {
         const meshes = collectRigMeshes(root);
         // Тегируем меши метаданными — picking/attack-order находят врага по любому парту.
         for (const m of meshes) {
-          m.metadata = { ...(m.metadata as Record<string, unknown> | null), rigId: enemy.id, rigKind: 'enemy' };
+          m.metadata = {
+            ...(m.metadata as Record<string, unknown> | null),
+            rigId: enemy.id,
+            rigKind: 'enemy',
+            rigRole: masterKey === AI_TOWN_HALL_MASTER ? 'town-hall' : 'unit'
+          };
           m.isPickable = true;
+          // Part meshes are animated through a TransformNode hierarchy. The rig
+          // master freezes bounding-info updates, which is useful while hidden,
+          // but cloned enemies must not inherit that optimisation: stale bounds
+          // make whole squads disappear when the orthographic camera zooms.
+          m.doNotSyncBoundingInfo = false;
+          m.alwaysSelectAsActiveMesh = true;
+          m.refreshBoundingInfo();
         }
         // M1: собираем ноды по animKind (для walk/flap/scuttle/hover/squash).
         const nodeSet = ANIM_NODE_SETS[master.animKind];
         const nodes = nodeSet.length > 0 ? findNodesByName(root, nodeSet) : new Map();
         inst = {
           root,
+          motion: createRigMotion(enemy.position.x, enemy.position.z),
           nodes,
           phaseSeed: phaseFromId(enemy.id),
           sizeMult,
@@ -286,15 +322,16 @@ export class RiggedEnemyRenderer implements EnemySceneRenderer {
           shadowed: false
         };
         this.instances.set(enemy.id, inst);
-        this.typeIdByEnemyId.set(enemy.id, enemy.typeId);
+        this.typeIdByEnemyId.set(enemy.id, masterKey);
       }
 
       const scale = cs * sizeMult;
+      const motion = advanceRigMotion(inst.motion, enemy.position.x, enemy.position.z, dt, cs);
       // позиция: base модели (-0.5 локально) → на groundY (enemy.position.y).
       inst.root.position.set(
-        enemy.position.x,
+        motion.x,
         enemy.position.y + 0.5 * scale,
-        enemy.position.z
+        motion.z
       );
       inst.root.scaling.set(scale, scale, scale);
 
@@ -302,13 +339,13 @@ export class RiggedEnemyRenderer implements EnemySceneRenderer {
       const dx = enemy.position.x - inst.prevX;
       const dz = enemy.position.z - inst.prevZ;
       const moved = Math.hypot(dx, dz);
-      const speed = dt > 0 ? moved / dt : 0;
+      const speed = motion.speed / cs;
       if (moved > 1e-5) {
         inst.facingY = Math.atan2(dx, dz);
       }
       inst.prevX = enemy.position.x;
       inst.prevZ = enemy.position.z;
-      inst.root.rotation.y = inst.facingY;
+      inst.root.rotation.y = motion.facing;
 
       // M4: per-clone тени + LOD-анимация по тиру.
       const tier = tiers.get(enemy.id) ?? 'animated';
@@ -316,7 +353,12 @@ export class RiggedEnemyRenderer implements EnemySceneRenderer {
       else if (tier !== 'shadowed' && inst.shadowed) this.removeInstanceShadow(inst);
       // walk-cycle только для non-static (static — позиция/facing, без joint-апдейтов).
       if (tier !== 'static') {
-        this.animate(inst, master, t, speed);
+        this.animate(inst, master, master.animKind === 'humanoid' ? motion.phase / WALK_FREQ : t, speed);
+        if(master.animKind==='humanoid' && (enemy.combatCooldown ?? 0) > .7) {
+          const p=Math.max(0,Math.min(1,(1-(enemy.combatCooldown ?? 0))/.3));
+          const arm=inst.nodes.get('forearmR');
+          if(arm) arm.rotation.x=-Math.sin(p*Math.PI)*1.2;
+        }
       }
     }
 

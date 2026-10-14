@@ -8,7 +8,8 @@ import { Scene } from '@babylonjs/core/scene.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import '@babylonjs/core/Culling/ray.js';
 import type { GridData, TileType } from '../domain/map';
 import { gridToWorld, worldToGrid, sampleHeight } from './terrain/terrain-math';
 import { createVoxelBoard } from './voxel/voxel-floor';
@@ -153,17 +154,49 @@ export function setGridVisible(scene: Scene, visible: boolean): void {
 }
 
 export function pickWorld(scene: Scene): Vector3 | null {
-  const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh.name === 'ground');
+  const pick = scene.pick(
+    scene.pointerX,
+    scene.pointerY,
+    (mesh) => mesh.name === 'ground' || (mesh.metadata as { playableGround?: boolean } | null)?.playableGround === true
+  );
   return pick?.pickedPoint || null;
 }
 
 export function pickGrid(scene: Scene, grid: GridData): { col: number; row: number } | null {
-  const point = pickWorld(scene);
+  const point = pickWorld(scene) ?? pickTerrainByRay(scene, grid);
   if (!point) return null;
   const { col, row } = worldToGrid(grid, point);
   const cell = { col: Math.floor(col), row: Math.floor(row) };
   if (cell.col < 0 || cell.row < 0 || cell.col >= grid.cols || cell.row >= grid.rows) return null;
   return cell;
+}
+
+/**
+ * Chunked terrain can be visible before Babylon has synchronized every chunk's
+ * triangle-picking data. Intersect the camera ray with the authored heightmap
+ * so ground orders and building placement remain deterministic.
+ */
+function pickTerrainByRay(scene: Scene, grid: GridData): Vector3 | null {
+  const camera = scene.activeCamera;
+  if (!camera) return null;
+  const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, Matrix.Identity(), camera);
+  if (Math.abs(ray.direction.y) < 1e-6) return null;
+  const root = scene.getMeshByName('ground');
+  const metadata = root?.metadata as { terrainHeightmap?: number[][] | null } | null;
+  const heightmap = metadata?.terrainHeightmap;
+  let surfaceY = 0;
+  let point = Vector3.Zero();
+  for (let i = 0; i < 4; i++) {
+    const distance = (surfaceY - ray.origin.y) / ray.direction.y;
+    if (!Number.isFinite(distance) || distance < 0) return null;
+    point = ray.origin.add(ray.direction.scale(distance));
+    const cell = worldToGrid(grid, point);
+    const col = Math.floor(cell.col);
+    const row = Math.floor(cell.row);
+    if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return null;
+    surfaceY = sampleHeight(heightmap, grid, col, row, true);
+  }
+  return point;
 }
 
 export function makePreviewMesh(scene: Scene): Mesh {
