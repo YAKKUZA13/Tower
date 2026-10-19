@@ -1,28 +1,36 @@
 const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join } = require('node:path');
+const { join, resolve } = require('node:path');
 const { spawn } = require('node:child_process');
+const { ensureLocalRtsServer } = require('./lib/local-rts-server.cjs');
 
 const chrome = process.env.TOWER_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const url = process.argv[2] || 'http://127.0.0.1:5173/?demo=rts&map=rts-2p-crossroads';
 const port = 9300 + Math.floor(Math.random() * 400);
 const profile = mkdtempSync(join(tmpdir(), 'tower-rts-smoke-'));
 
-const child = spawn(chrome, [
-  '--headless=new',
-  '--no-first-run',
-  '--no-default-browser-check',
-  `--user-data-dir=${profile}`,
-  `--remote-debugging-port=${port}`,
-  '--use-angle=swiftshader',
-  '--enable-webgl',
-  '--ignore-gpu-blocklist',
-  '--hide-scrollbars',
-  '--window-size=1600,900',
-  url
-], { stdio: 'ignore', windowsHide: true });
+const repoRoot = resolve(__dirname, '..');
+let chromeChild = null;
+let localServer = null;
+let cdpSocket = null;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function startChrome() {
+  chromeChild = spawn(chrome, [
+    '--headless=new',
+    '--no-first-run',
+    '--no-default-browser-check',
+    `--user-data-dir=${profile}`,
+    `--remote-debugging-port=${port}`,
+    '--use-angle=swiftshader',
+    '--enable-webgl',
+    '--ignore-gpu-blocklist',
+    '--hide-scrollbars',
+    '--window-size=1600,900',
+    url
+  ], { stdio: 'ignore', windowsHide: true });
+}
 
 async function retry(fn, timeoutMs = 15_000) {
   const started = Date.now();
@@ -68,24 +76,39 @@ async function connect() {
     const promise = pending.get(message.id);
     if (!promise) return;
     pending.delete(message.id);
+    clearTimeout(promise.timer);
     if (message.error) promise.reject(new Error(message.error.message));
     else promise.resolve(message.result);
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Browser command timed out: ${method}`));
+    }, 20_000);
+    pending.set(id, { resolve, reject, timer });
     socket.send(JSON.stringify({ id, method, params }));
+  });
+  socket.addEventListener('close', () => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error('Browser connection closed'));
+    }
+    pending.clear();
   });
   return { socket, send, runtimeErrors };
 }
 
 async function main() {
+  localServer = await ensureLocalRtsServer(url, repoRoot);
+  startChrome();
   const { socket, send, runtimeErrors } = await connect();
+  cdpSocket = socket;
   await send('Runtime.enable');
   await send('Page.enable');
 
   const evaluate = async (expression) => {
-    const result = await send('Runtime.evaluate', { expression, returnByValue: true });
+    const result = await send('Runtime.evaluate', { expression, returnByValue: true, includeCommandLineAPI: true });
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
     return result.result.value;
   };
@@ -101,9 +124,37 @@ async function main() {
     if (!ready) throw new Error('RTS view is not ready');
     return true;
   }, 20_000);
-  // DOM readiness is earlier than Babylon/WebGL material compilation in the
-  // software-rendered CI browser. Wait for the first complete gameplay frame.
-  await delay(12_000);
+  // Wait for actual gameplay frames rather than treating a mounted canvas as
+  // a running match, or sleeping for an arbitrary shader-compilation interval.
+  const waitForMatch = () => retry(async () => {
+    const ready = await evaluate(`(() => {
+      const component = document.querySelector('.rts-layout')?.__vueParentComponent;
+      const rawScene = component?.exposed?.scene;
+      const rawSim = component?.exposed?.sim;
+      const scene = rawScene?.value ?? rawScene;
+      const sim = rawSim?.value ?? rawSim;
+      return Boolean(scene && !scene.isDisposed && scene.getFrameId() >= 3 && sim?.state.tick > 0);
+    })()`);
+    if (!ready) throw new Error('RTS simulation has not rendered three frames');
+  }, 30_000);
+  await waitForMatch();
+  const activeResizeListeners = await evaluate(`getEventListeners(window).resize?.length ?? 0`);
+  await evaluate(`(() => {
+    const component = document.querySelector('.rts-layout').__vueParentComponent;
+    const rawScene = component.exposed.scene, rawSim = component.exposed.sim;
+    const scene = rawScene?.value ?? rawScene, sim = rawSim?.value ?? rawSim;
+    const ids = sim.state.defenderUnits.filter(unit => unit.typeId === 'worker').map(unit => unit.id);
+    const deliveries = Object.fromEntries(ids.map(id => [id, 0]));
+    const previousCargo = Object.fromEntries(ids.map(id => [id, 0]));
+    const observer = scene.onBeforeRenderObservable.add(() => {
+      for (const unit of sim.state.defenderUnits) {
+        if (!(unit.id in deliveries)) continue;
+        if (previousCargo[unit.id] > 0 && unit.carry === 0) deliveries[unit.id]++;
+        previousCargo[unit.id] = unit.carry ?? 0;
+      }
+    });
+    window.__workerDeliveries = { deliveries, stop: () => scene.onBeforeRenderObservable.remove(observer) };
+  })()`);
   const workerPoint = await evaluate(`(() => {
     const component = document.querySelector('.rts-layout')?.__vueParentComponent;
     const rawScene = component?.exposed?.scene;
@@ -267,6 +318,37 @@ async function main() {
   }
   if (!sawmillBuilt) throw new Error('Sawmill could not be placed on visible valid terrain');
   console.log('  ✓ sawmill command placed a production building on the terrain');
+
+  // A gather order being accepted is not evidence that a worker can complete
+  // the route. Check every starting worker through repeated pickup/drop-off.
+  await evaluate(`(() => {
+    document.querySelector('.rts-mode-banner button')?.click();
+    const speed = [...document.querySelectorAll('.hud-corner.top-right button')].find(button => button.textContent.includes('×'));
+    speed.click(); speed.click();
+  })()`);
+  await retry(async () => {
+    const deliveries = await evaluate(`window.__workerDeliveries.deliveries`);
+    if (Object.keys(deliveries).length !== 3 || Object.values(deliveries).some(count => count < 3)) {
+      const state = await evaluate(`(() => {
+        const raw = document.querySelector('.rts-layout').__vueParentComponent.exposed.sim;
+        const sim = raw?.value ?? raw;
+        return { tick: sim.state.tick, units: sim.state.defenderUnits.map(unit => ({
+          id: unit.id, state: unit.gatherState, carry: unit.carry, node: unit.gatherNodeId,
+          col: unit.col, row: unit.row, navigation: unit.navigationStatus
+        })) };
+      })()`);
+      throw new Error(`Workers cannot repeat resource deliveries around player buildings: ${JSON.stringify({ deliveries, state })}`);
+    }
+  }, 90_000);
+  const workerDeliveries = await evaluate(`(() => {
+    const result = window.__workerDeliveries.deliveries;
+    window.__workerDeliveries.stop();
+    delete window.__workerDeliveries;
+    const speed = [...document.querySelectorAll('.hud-corner.top-right button')].find(button => button.textContent.includes('×'));
+    speed.click();
+    return result;
+  })()`);
+  console.log(`  ✓ Each worker repeatedly gathers and delivers after manual orders and construction: ${JSON.stringify(workerDeliveries)}`);
 
   if (process.env.TOWER_RTS_SMOKE_SCREENSHOT) {
     await delay(300);
@@ -441,6 +523,10 @@ async function main() {
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   })()`);
   if (!backButton) throw new Error('RTS back button is unavailable');
+  await evaluate(`(() => {
+    const raw = document.querySelector('.rts-layout').__vueParentComponent.exposed.scene;
+    window.__previousRtsEngine = (raw?.value ?? raw).getEngine();
+  })()`);
   await click(backButton.x, backButton.y);
   await retry(async () => {
     const ready = await evaluate(`document.querySelectorAll('.rts-lobby .map-card').length === 3`);
@@ -466,6 +552,96 @@ async function main() {
     const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     writeFileSync(process.env.TOWER_RTS_LOBBY_SCREENSHOT, Buffer.from(shot.data, 'base64'));
   }
+
+  const lobbyResizeListeners = await evaluate(`getEventListeners(window).resize?.length ?? 0`);
+  const assertReleasedMatch = async () => {
+    const state = await evaluate(`(() => {
+      const engine = window.__previousRtsEngine;
+      return {
+        disposed: engine?.isDisposed,
+        scenes: engine?.scenes.length,
+        renderLoops: engine?._activeRenderLoops.length,
+        resizeListeners: getEventListeners(window).resize?.length ?? 0
+      };
+    })()`);
+    if (!state?.disposed || state.scenes !== 0 || state.renderLoops !== 0 || state.resizeListeners !== lobbyResizeListeners) {
+      throw new Error(`Leaving RTS retained engine resources: ${JSON.stringify(state)}`);
+    }
+  };
+  await assertReleasedMatch();
+  for (const mapIndex of [0, 1, 2]) {
+    const selectedMap = await evaluate(`(() => {
+      const card = document.querySelectorAll('.rts-lobby .map-card')[${mapIndex}];
+      card?.click();
+      return Boolean(card);
+    })()`);
+    if (!selectedMap) throw new Error(`Map ${mapIndex} is unavailable`);
+    await evaluate(`document.querySelector('.rts-lobby .btn.primary').click()`);
+    await waitForMatch();
+    const session = await evaluate(`(() => {
+      const component = document.querySelector('.rts-layout').__vueParentComponent;
+      const rawScene = component.exposed.scene;
+      const rawSim = component.exposed.sim;
+      const scene = rawScene?.value ?? rawScene;
+      const sim = rawSim?.value ?? rawSim;
+      window.__previousRtsEngine = scene.getEngine();
+      return { tick: sim.state.tick, resizeListeners: getEventListeners(window).resize?.length ?? 0 };
+    })()`);
+    if (session.resizeListeners !== activeResizeListeners) {
+      throw new Error(`Restarting RTS leaked resize handlers: ${JSON.stringify(session)}`);
+    }
+    if (mapIndex === 0) {
+      await evaluate(`document.querySelector('.rts-canvas').focus()`);
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 500, y: 350 });
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyE', key: 'e' });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyE', key: 'e' });
+      await retry(async () => {
+        const yaw = await evaluate(`window.__previousRtsEngine.scenes[0].activeCamera.alpha`);
+        if (Math.abs(yaw) > 0.001) throw new Error('Q/E rotation did not settle at the next camera angle');
+      });
+      await evaluate(`(() => {
+        const scene = window.__previousRtsEngine.scenes[0];
+        window.__cameraPanOrigin = scene.activeCamera.target.clone();
+      })()`);
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'ArrowRight', key: 'ArrowRight' });
+      try {
+        await retry(async () => {
+          const moved = await evaluate(`window.__previousRtsEngine.scenes[0].activeCamera.target.subtract(window.__cameraPanOrigin).length() > 0.1`);
+          if (!moved) throw new Error('Camera has not processed ArrowRight yet');
+        });
+      } finally {
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'ArrowRight', key: 'ArrowRight' });
+      }
+      await delay(500);
+      const pan = await evaluate(`(() => {
+        const scene = window.__previousRtsEngine.scenes[0];
+        const camera = scene.activeCamera;
+        const delta = camera.target.subtract(window.__cameraPanOrigin);
+        delete window.__cameraPanOrigin;
+        return { x: delta.x, z: delta.z };
+      })()`);
+      if (pan.z <= 0.1 || Math.abs(pan.x) > 0.05) {
+        throw new Error(`ArrowRight follows the wrong world axis after rotation: ${JSON.stringify(pan)}`);
+      }
+      console.log('  ✓ Q/E rotation keeps keyboard panning aligned with the displayed battlefield');
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width: 1010 + mapIndex * 20, height: 650, deviceScaleFactor: 1, mobile: false });
+    await retry(async () => {
+      const tick = await evaluate(`(() => {
+        const raw = document.querySelector('.rts-layout').__vueParentComponent.exposed.sim;
+        return (raw?.value ?? raw).state.tick;
+      })()`);
+      if (tick <= session.tick + 2) throw new Error('RTS stopped advancing after resize');
+    });
+    await evaluate(`document.querySelector('.hud-corner.top-right .ctrl-btn.ghost').click()`);
+    await retry(async () => {
+      if (!await evaluate(`Boolean(document.querySelector('.rts-lobby'))`)) throw new Error('RTS lobby did not reopen');
+    });
+    await assertReleasedMatch();
+    await evaluate(`window.dispatchEvent(new Event('resize'))`);
+  }
+  await evaluate(`delete window.__previousRtsEngine`);
+  console.log('  ✓ All three maps restart, advance after resize and release engines, scenes, render loops and resize handlers');
 
   const coopNav = await evaluate(`(() => {
     const button = [...document.querySelectorAll('.nav-button')].find((node) => node.textContent.includes('Co-op'));
@@ -551,6 +727,7 @@ async function main() {
     throw new Error(`Welcome screen overflows at 390px; ${JSON.stringify(mobileWelcome)}`);
   }
   console.log('  ✓ welcome screen uses the responsive fortress-gate layout');
+  if (runtimeErrors.length) throw new Error(`Browser runtime errors: ${JSON.stringify(runtimeErrors)}`);
   console.log('✅ RTS browser interaction smoke passed');
   socket.close();
 }
@@ -561,7 +738,9 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    child.kill();
+    cdpSocket?.close();
+    chromeChild?.kill();
+    await localServer?.stop();
     await delay(250);
     try { rmSync(profile, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 }); } catch { /* Chrome can briefly retain the profile lock. */ }
   });

@@ -6,7 +6,14 @@ TD-MVP-PLAN.md
 redy.md
 docs/*
 !docs/sciens/
+!docs/media/
+docs/media/*
+!docs/media/rts-command-feedback.png
 !docs/media/rts-crossroads.png
+!docs/media/rts-enemy-fortress.png
+!docs/media/rts-meteor.png
+!docs/media/rts-frost.png
+!docs/media/rts-welcome.png
 .env
 .env.*
 !.env.example

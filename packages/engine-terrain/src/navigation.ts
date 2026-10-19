@@ -48,9 +48,25 @@ export class GridNavigator {
       col: Math.floor(position.x / grid.cellSize + grid.cols / 2),
       row: Math.floor(position.z / grid.cellSize + grid.rows / 2)
     };
+    const goalX = (goal.col + .5 - grid.cols / 2) * grid.cellSize;
+    const goalZ = (goal.row + .5 - grid.rows / 2) * grid.cellSize;
+    // Interaction orders end inside an area, not at the exact centre of one
+    // path cell. Separation can displace an agent from that centre every tick.
+    const hasArrived = (): boolean => {
+      const col = Math.floor(position.x / grid.cellSize + grid.cols / 2);
+      const row = Math.floor(position.z / grid.cellSize + grid.rows / 2);
+      return col >= 0 && col < grid.cols && row >= 0 && row < grid.rows
+        && !this.blocked(col, row)
+        && Math.hypot(position.x - goalX, position.z - goalZ) <= (radius > 0 ? radius + .1 : 1e-6) * grid.cellSize;
+    };
+    if (hasArrived()) {
+      this.routes.delete(id);
+      return 'arrived';
+    }
     const key = `${goal.col}:${goal.row}:${radius}`;
     let route = this.routes.get(id);
-    if (!route || route.key !== key || route.path.slice(route.cursor).some(c => this.blocked(c.col, c.row))) {
+    if (!route || route.key !== key || route.cursor >= route.path.length
+      || route.path.slice(route.cursor).some(c => this.blocked(c.col, c.row))) {
       const path = findNavigationPath(grid, cell, goal, this.blocked, radius);
       if (!path) { this.routes.delete(id); return 'blocked'; }
       route = { key, path, cursor: path.length > 1 ? 1 : 0 };
@@ -64,6 +80,7 @@ export class GridNavigator {
       const dx = x - position.x, dz = z - position.z, length = Math.hypot(dx, dz);
       if (length > remaining + 1e-6) {
         if (remaining > 0) { position.x += dx / length * remaining; position.z += dz / length * remaining; }
+        if (hasArrived()) { this.routes.delete(id); return 'arrived'; }
         return 'moving';
       }
       position.x = x; position.z = z;
@@ -76,8 +93,13 @@ export class GridNavigator {
 
 /** Deterministic local spacing, constrained to traversable ground. Not a physics solver. */
 export function separateNavigationAgents(grid: NavigationGrid,
-  agents: readonly { id: string; position: { x: number; z: number } }[], blocked: NavigationBlocked, spacing = .55): void {
+  agents: readonly { id: string; position: { x: number; z: number } }[], blocked: NavigationBlocked,
+  spacing = .55, dt = 1 / 30): void {
   const minimum = spacing * grid.cellSize;
+  // Share one correction budget across all neighbours. Pairwise full-strength
+  // pushes used to exceed locomotion when three workers met on the same path,
+  // continuously knocking them away from their next waypoint.
+  const budgets = agents.map(() => grid.cellSize * Math.max(0, dt));
   const tryOffset = (agent: typeof agents[number], dx: number, dz: number): void => {
     const x = agent.position.x + dx, z = agent.position.z + dz;
     const col = Math.floor(x/grid.cellSize+grid.cols/2), row = Math.floor(z/grid.cellSize+grid.rows/2);
@@ -91,7 +113,10 @@ export function separateNavigationAgents(grid: NavigationGrid,
     let distance=Math.hypot(dx,dz);
     if(distance>=minimum) continue;
     if(distance<1e-6) { dx=1;dz=0;distance=1; }
-    const push=Math.min(grid.cellSize*.15,(minimum-Math.hypot(b.position.x-a.position.x,b.position.z-a.position.z))*.5);
+    const push=Math.min(budgets[i]!,budgets[j]!,
+      (minimum-Math.hypot(b.position.x-a.position.x,b.position.z-a.position.z))*.5);
+    budgets[i]! -= push;
+    budgets[j]! -= push;
     tryOffset(a,-dx/distance*push,-dz/distance*push);
     tryOffset(b,dx/distance*push,dz/distance*push);
   }

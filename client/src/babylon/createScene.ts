@@ -27,7 +27,11 @@ function makeMaterial(scene: Scene, name: string, color: Color3, alpha = 1): Sta
 
 export function createEngine(canvas: HTMLCanvasElement): Engine {
   const engine = new Engine(canvas, true);
-  window.addEventListener('resize', () => engine.resize());
+  const onResize = (): void => engine.resize();
+  window.addEventListener('resize', onResize);
+  engine.onDisposeObservable.addOnce(() => {
+    window.removeEventListener('resize', onResize);
+  });
   return engine;
 }
 

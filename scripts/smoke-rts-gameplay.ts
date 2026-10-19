@@ -10,6 +10,33 @@ import type { Enemy, Spell } from '@tower/shared';
 
 const advance = (sim:GameSim, seconds:number) => { for(let i=0;i<seconds*30;i++) sim.step(1/30); };
 {
+  const map = structuredClone(getRtsMap('rts-2p-crossroads')!);
+  const originalNodes = structuredClone(map.resourceNodes);
+  const first = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'first' });
+  const second = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'second' });
+  advance(first, 20);
+  assert.notDeepEqual(first.map.resourceNodes, originalNodes, 'the running match consumes its own deposits');
+  assert.deepEqual(map.resourceNodes, originalNodes, 'gathering must preserve the map catalog');
+  assert.deepEqual(second.map.resourceNodes, originalNodes, 'parallel matches must have independent deposits');
+
+  const worker = first.state.defenderUnits![0]!;
+  const nodeId = worker.gatherNodeId!;
+  const lastDeposit = first.map.resourceNodes!.find(node => node.id === nodeId)!;
+  lastDeposit.amount = 1;
+  worker.col = lastDeposit.col - 1;
+  worker.row = lastDeposit.row;
+  worker.position = gridToWorldData(first.map.grid, worker.col, worker.row);
+  worker.carry = 0;
+  worker.gatherState = 'gathering';
+  worker.gatherTimer = 10;
+  advance(first, 0.1);
+  assert(!first.map.resourceNodes!.some(node => node.id === nodeId), 'depleted deposits are removed in the current match');
+  const restarted = new GameSim({ map, catalog: DEFAULT_CATALOG, ownerId: 'restarted' });
+  assert.deepEqual(restarted.map.resourceNodes, originalNodes, 'restarting restores every original deposit');
+  assert(restarted.state.defenderUnits!.every(unit => restarted.map.resourceNodes!.some(node => node.id === unit.gatherNodeId)));
+  console.log('✓ Gathering and depletion are isolated per match; restarting restores resources and worker assignments');
+}
+{
   const grid={cols:12,rows:10,cellSize:1};
   const blocked=(col:number,row:number)=>col===5 && row!==8;
   const path=findNavigationPath(grid,{col:2,row:2},{col:8,row:2},blocked)!;

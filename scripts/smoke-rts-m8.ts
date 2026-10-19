@@ -221,8 +221,8 @@ console.log('===');
 console.log('5. RTS camera basis:');
 {
   const zero = rtsCameraBasis(0);
-  check('yaw 0 faces map north', zero.forwardX === 0 && zero.forwardZ === 1);
-  check('yaw 0 right axis is east', zero.rightX === 1 && Object.is(zero.rightZ, -0));
+  check('alpha 0 looks towards negative X', zero.forwardX === -1 && zero.forwardZ === 0);
+  check('alpha 0 screen-right points towards positive Z', zero.rightX === 0 && zero.rightZ === 1);
 
   const iso = rtsCameraBasis(-Math.PI / 4);
   const forwardLength = Math.hypot(iso.forwardX, iso.forwardZ);

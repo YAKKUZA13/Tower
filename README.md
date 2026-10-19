@@ -19,6 +19,8 @@ Tower — модульный TypeScript/Babylon.js-движок для дете�
 - адаптивный полевой HUD без отдельного «мобильного» режима;
 - детерминированную симуляцию, пригодную для prediction/rollback и сетевого режима.
 
+![Crossroads battlefield at the start of a match](docs/media/rts-crossroads.png)
+
 ![Enemy fortress objective](docs/media/rts-enemy-fortress.png)
 
 ![Guarded world objective and meteor](docs/media/rts-meteor.png)
@@ -61,14 +63,17 @@ npm run typecheck
 npx tsx scripts/smoke-rts.ts
 npx tsx scripts/smoke-rts-solo.ts
 npx tsx scripts/smoke-rts-m8.ts
+npx tsx scripts/smoke-rts-camera.ts
 npx tsx scripts/smoke-rts-terrain.ts
 npx tsx scripts/smoke-rts-gameplay.ts
+npx tsx scripts/smoke-rts-workers.ts
 npx tsx scripts/smoke-rts-rendering.ts
 npm run smoke:rts:browser
 npm run build
 ```
 
-Обновить README-кадр при запущенном `dev:rts`:
+Сделать свежий README-кадр. Команда сама соберёт engine-пакеты, временно
+поднимет локальный Vite и освободит порт после снимка:
 
 ```bash
 npm run capture:rts

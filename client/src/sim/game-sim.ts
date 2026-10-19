@@ -143,7 +143,12 @@ export class GameSim {
   private readonly navigator: GridNavigator;
 
   constructor(config: GameSimConfig) {
-    this.map = config.map;
+    // Terrain/configuration are shared definitions. Deposits are mutable match
+    // data: gathering decrements amounts and removes exhausted nodes.
+    this.map = {
+      ...config.map,
+      resourceNodes: config.map.resourceNodes?.map(node => ({ ...node }))
+    };
     this.catalog = config.catalog;
     this.rng = mulberry32(config.seed ?? DEFAULT_SEED);
     this.staticBlockedCells = new Set((config.staticBlockedCells ?? []).map((cell) => `${cell.col}:${cell.row}`));
@@ -1300,7 +1305,7 @@ export class GameSim {
       if (this.rtsSolo && this.aiTownHallId) {
         this.tickRtsAi(dt);
         separateNavigationAgents(this.map.grid,[...(state.defenderUnits ?? []),...state.enemies.filter(e=>e.alive && !e.stationary)],
-          (col,row)=>this.isNavigationBlocked(col,row));
+          (col,row)=>this.isNavigationBlocked(col,row), .55, dt);
         for(const unit of state.defenderUnits ?? []) {
           unit.col=Math.floor(unit.position.x/this.map.grid.cellSize+this.map.grid.cols/2);
           unit.row=Math.floor(unit.position.z/this.map.grid.cellSize+this.map.grid.rows/2);

@@ -55,6 +55,10 @@ console.log('2. AI-opponent wave spawn:');
   const initialEnemies = sim.serialize().enemies.length;
   check('initial enemies include town-hall, site guards and patrols', initialEnemies >= 5 && sim.state.enemies.some(e=>e.rtsRole==='guard') && sim.state.enemies.some(e=>e.rtsRole==='patrol'), `(got ${initialEnemies})`);
 
+  // Isolate the spawn schedule from combat: with working crowd navigation an
+  // undefended hall can fall before wave five. Defeat is tested separately.
+  sim.state.lives = 1_000_000;
+
   // Helper: advance sim time by N seconds (step() processes ≤6 fixed-steps per call).
   const advance = (sec: number): void => { for (let i = 0; i < sec * 30; i++) sim.step(1/30); };
 
@@ -80,7 +84,7 @@ console.log('2. AI-opponent wave spawn:');
   // Wave 5+: should have demons spawned at least once
   advance(30); advance(30); advance(30);
   const aiWaveIdx5 = (sim as unknown as { aiWaveIndex: number }).aiWaveIndex;
-  check('by ~155s: aiWaveIndex >= 5', aiWaveIdx5 >= 5, `(aiWaveIndex=${aiWaveIdx5})`);
+  check('by ~155s: aiWaveIndex >= 5', aiWaveIdx5 >= 5, `(aiWaveIndex=${aiWaveIdx5}, status=${sim.state.status}, lives=${sim.state.lives}, tick=${sim.state.tick})`);
 }
 
 // ── 3. Win condition ─────────────────────────────────────────────

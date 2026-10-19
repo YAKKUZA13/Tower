@@ -54,11 +54,27 @@ interface PlanarBasis {
 }
 
 export function rtsCameraBasis(yaw: number): PlanarBasis {
+  // ArcRotate alpha measures the camera's position from +X towards +Z.
+  // Its look direction points back towards the target.
   return {
-    forwardX: Math.sin(yaw),
-    forwardZ: Math.cos(yaw),
-    rightX: Math.cos(yaw),
-    rightZ: -Math.sin(yaw)
+    forwardX: -Math.cos(yaw),
+    forwardZ: -Math.sin(yaw),
+    rightX: -Math.sin(yaw),
+    rightZ: Math.cos(yaw)
+  };
+}
+
+/** Offset on the target-height plane for a normalized screen point (Y down). */
+export function rtsCameraGroundOffset(yaw: number, beta: number, visibleH: number,
+  aspect: number, screenX: number, screenY: number): { x: number; z: number } {
+  const basis = rtsCameraBasis(yaw);
+  const right = screenX * visibleH * 0.5 * aspect;
+  // ArcRotate beta is measured from the vertical, so cos(beta) projects a
+  // horizontal ground displacement onto the camera's vertical screen axis.
+  const forward = -screenY * visibleH * 0.5 / Math.max(0.01, Math.cos(beta));
+  return {
+    x: basis.rightX * right + basis.forwardX * forward,
+    z: basis.rightZ * right + basis.forwardZ * forward
   };
 }
 
@@ -164,17 +180,17 @@ export function attachRtsCamera(
   const zoomAtPointer = (event: WheelEvent): void => {
     if (!enabled) return;
     event.preventDefault();
+    pointerX = event.clientX;
+    pointerY = event.clientY;
     const oldH = desiredVisibleH;
     desiredVisibleH = clamp(oldH * Math.exp(event.deltaY * zoomSpeed * 0.01), minVisibleH, maxVisibleH);
     if (!pointerInside || oldH === desiredVisibleH) return;
 
     const ndc = cursorNdc();
-    const basis = rtsCameraBasis(desiredYaw);
     const aspect = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
-    const scaleDelta = (oldH - desiredVisibleH) * 0.5;
-    const verticalCompensation = 1 / Math.max(0.55, Math.sin(pitch));
-    desiredTarget.x += basis.rightX * ndc.x * scaleDelta * aspect + basis.forwardX * -ndc.y * scaleDelta * verticalCompensation;
-    desiredTarget.z += basis.rightZ * ndc.x * scaleDelta * aspect + basis.forwardZ * -ndc.y * scaleDelta * verticalCompensation;
+    const offset = rtsCameraGroundOffset(camera.alpha, pitch, oldH - desiredVisibleH, aspect, ndc.x, ndc.y);
+    desiredTarget.x += offset.x;
+    desiredTarget.z += offset.z;
     clampTarget();
   };
 
@@ -188,9 +204,9 @@ export function attachRtsCamera(
     const dy = event.clientY - dragLastY;
     dragLastX = event.clientX;
     dragLastY = event.clientY;
-    const basis = rtsCameraBasis(desiredYaw);
+    const basis = rtsCameraBasis(camera.alpha);
     const worldPerPixel = desiredVisibleH / Math.max(1, rect.height);
-    const verticalCompensation = 1 / Math.max(0.55, Math.sin(pitch));
+    const verticalCompensation = 1 / Math.max(0.01, Math.cos(pitch));
     desiredTarget.x -= basis.rightX * dx * worldPerPixel;
     desiredTarget.z -= basis.rightZ * dx * worldPerPixel;
     desiredTarget.x += basis.forwardX * dy * worldPerPixel * verticalCompensation;
@@ -219,7 +235,7 @@ export function attachRtsCamera(
       event.preventDefault();
     };
     const onUp = (event: PointerEvent): void => stopDrag(event);
-    const onWindowBlur = (): void => { keys.clear(); stopDrag(); };
+    const onWindowBlur = (): void => { keys.clear(); pointerInside = false; stopDrag(); };
     canvas.addEventListener('pointerenter', onEnter);
     canvas.addEventListener('pointerleave', onLeave);
     canvas.addEventListener('pointermove', onPointerMove);
@@ -243,7 +259,7 @@ export function attachRtsCamera(
   const beforeRenderObserver = scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
     if (enabled) {
-      const basis = rtsCameraBasis(desiredYaw);
+      const basis = rtsCameraBasis(camera.alpha);
       let right = 0;
       let forward = 0;
       if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1;
@@ -307,6 +323,7 @@ export function attachRtsCamera(
       clampTarget();
     },
     dispose() {
+      stopDrag();
       scene.onKeyboardObservable.remove(keyboardObserver);
       scene.onBeforeRenderObservable.remove(beforeRenderObserver);
       engine.onResizeObservable.remove(resizeObserver);
