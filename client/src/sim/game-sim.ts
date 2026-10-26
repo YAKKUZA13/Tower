@@ -69,7 +69,7 @@ import {
 } from './systems/rts';
 import { computeFormation } from './systems/formations';
 import { tickGathering, pruneDepletedNodes } from './systems/gathering';
-import { GridNavigator, findNavigationPath, sampleHeight, separateNavigationAgents } from '@tower/engine-terrain';
+import { GridNavigator, findNavigationPath, sampleHeight, separateNavigationAgents } from '@voxkera/engine-terrain';
 import { makeWorldSite, tickWorldSites, tickRtsOpponents } from './systems/rts-world';
 
 export interface GameSimConfig {

@@ -34,6 +34,7 @@
 <body>
   <canvas id="canvas"></canvas>
   <div id="panel">
+    <p id="backend-status">Starting renderer…</p>
     <div id="tabs">
       <button id="tab-ritual">Ritual</button>
       <button id="tab-material">Materials</button>
@@ -42,8 +43,15 @@
       <button id="tab-kit">Kit</button>
       <button id="tab-terrain">Terrain</button>
       <button id="tab-recipe">Recipe</button>
+      <button id="tab-character">Character</button>
     </div>
     <div id="tab-content"></div>
+    <details><summary>Device verification</summary>
+      <p>Use a real device. Keep the same fixture, view and resolution for both backends.</p>
+      <button id="benchmark-run">Measure 60 warmup + 180 frames</button>
+      <button id="benchmark-save" disabled>Download result JSON</button>
+      <pre id="benchmark-result" style="white-space:pre-wrap"></pre>
+    </details>
     <div id="stats">
       <div>Triangles: <span id="stat-tri">0</span></div>
       <div>Voxels: <span id="stat-vox">0</span></div>

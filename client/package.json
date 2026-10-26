@@ -10,16 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tower/engine-scene": "*",
-    "@tower/scene-babylon": "*",
-    "@tower/voxel-babylon": "*",
     "@tower/shared": "*",
-    "@tower/voxel-core": "*",
-    "@tower/engine-terrain": "*",
     "@babylonjs/core": "7.54.3",
     "@babylonjs/loaders": "7.54.3",
     "pinia": "^3.0.4",
-    "vue": "^3.5.12"
+    "vue": "^3.5.12",
+    "@voxkera/engine-scene": "0.1.0",
+    "@voxkera/scene-babylon": "0.1.0",
+    "@voxkera/voxel-babylon": "0.1.0",
+    "@voxkera/voxel-core": "0.1.0",
+    "@voxkera/engine-terrain": "0.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.4",

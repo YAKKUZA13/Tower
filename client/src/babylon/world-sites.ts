@@ -5,7 +5,7 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
 import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { GridData, RtsWorldSite } from '@tower/shared';
-import { sampleHeight } from '@tower/engine-terrain';
+import { sampleHeight } from '@voxkera/engine-terrain';
 
 /** Readable landmarks for optional objectives; their state belongs to the simulation. */
 export class WorldSiteRenderer {

@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1, "kind": "character", "id": "lantern-beetle",
+  "palette": [
+    { "id": "shell", "color": [0.23, 0.40, 0.37] },
+    { "id": "legs", "color": [0.24, 0.19, 0.16] },
+    { "id": "lantern", "color": [0.20, 0.85, 0.60], "surface": { "emissive": [0.1, 0.8, 0.4], "emissiveStrength": 1.5 } }
+  ],
+  "parts": [
+    { "id": "body", "pivot": [0, 3, 0], "shapes": [{ "kind": "ellipsoid", "center": [0, 3, 0], "radii": [3, 2, 4], "color": "shell" }] },
+    { "id": "head", "parent": "body", "pivot": [0, 3, 4], "shapes": [{ "kind": "ellipsoid", "center": [0, 3, 4], "radii": [2, 1, 2], "color": "legs" }, { "kind": "box", "min": [-1, 3, 6], "max": [1, 3, 6], "color": "lantern" }] },
+    { "id": "legFL", "parent": "body", "pivot": [-2, 2, 2], "shapes": [{ "kind": "box", "min": [-5, 1, 2], "max": [-2, 2, 2], "color": "legs" }] },
+    { "id": "legFR", "parent": "body", "pivot": [2, 2, 2], "shapes": [{ "kind": "box", "min": [2, 1, 2], "max": [5, 2, 2], "color": "legs" }] },
+    { "id": "legBL", "parent": "body", "pivot": [-2, 2, -2], "shapes": [{ "kind": "box", "min": [-5, 1, -2], "max": [-2, 2, -2], "color": "legs" }] },
+    { "id": "legBR", "parent": "body", "pivot": [2, 2, -2], "shapes": [{ "kind": "box", "min": [2, 1, -2], "max": [5, 2, -2], "color": "legs" }] },
+    { "id": "tail", "parent": "body", "pivot": [0, 3, -3], "shapes": [{ "kind": "ellipsoid", "center": [0, 3, -4], "radii": [2, 1, 2], "color": "lantern" }] }
+  ],
+  "sockets": [{ "id": "tail-light", "part": "tail", "position": [0, 3, -5] }],
+  "clips": [{ "id": "scuttle", "duration": 0.8, "loop": true, "events": [{ "id": "step", "time": 0.4 }], "tracks": [
+    { "part": "legFL", "interpolation": "linear", "keys": [{ "time": 0, "rotation": [0, -0.3, 0], "translation": [0, 0, 0] }, { "time": 0.4, "rotation": [0, 0.3, 0], "translation": [0, 0, 0] }, { "time": 0.8, "rotation": [0, -0.3, 0], "translation": [0, 0, 0] }] },
+    { "part": "legFR", "interpolation": "linear", "keys": [{ "time": 0, "rotation": [0, 0.3, 0], "translation": [0, 0, 0] }, { "time": 0.4, "rotation": [0, -0.3, 0], "translation": [0, 0, 0] }, { "time": 0.8, "rotation": [0, 0.3, 0], "translation": [0, 0, 0] }] },
+    { "part": "legBL", "interpolation": "linear", "keys": [{ "time": 0, "rotation": [0, 0.3, 0], "translation": [0, 0, 0] }, { "time": 0.4, "rotation": [0, -0.3, 0], "translation": [0, 0, 0] }, { "time": 0.8, "rotation": [0, 0.3, 0], "translation": [0, 0, 0] }] },
+    { "part": "legBR", "interpolation": "linear", "keys": [{ "time": 0, "rotation": [0, -0.3, 0], "translation": [0, 0, 0] }, { "time": 0.4, "rotation": [0, 0.3, 0], "translation": [0, 0, 0] }, { "time": 0.8, "rotation": [0, -0.3, 0], "translation": [0, 0, 0] }] }
+  ] }],
+  "budget": { "maxCandidateCells": 5000, "maxMeshingCells": 5000, "maxVoxels": 2000 },
+  "quality": { "criticalFeatures": ["Low broad shell", "Four independent legs", "Only lantern regions emit light"], "requiredViews": ["front", "side", "back", "three-quarter"] }
+}

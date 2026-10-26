@@ -10,7 +10,7 @@ import { type Scene } from '@babylonjs/core/scene.js';
 import {
   sampleHeight,
   computeHeightRange
-} from '@tower/engine-terrain';
+} from '@voxkera/engine-terrain';
 import type { LabScene } from './greedy-lab';
 
 type StatsFn = (tri: number, vox: number, meshing: string) => void;

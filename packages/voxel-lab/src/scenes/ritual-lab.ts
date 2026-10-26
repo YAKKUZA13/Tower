@@ -2,9 +2,9 @@ import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js
 import { ImageProcessingConfiguration } from '@babylonjs/core/Materials/imageProcessingConfiguration.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import type { Scene } from '@babylonjs/core/scene.js';
-import { generateProceduralSanctum } from '@tower/engine-scene';
-import { buildSceneKit, type SceneKitHandle } from '@tower/scene-babylon';
-import { createVoxelStage } from '@tower/voxel-babylon';
+import { generateProceduralSanctum } from '../fixtures/procedural-sanctum';
+import { buildSceneKit, type SceneKitHandle } from '@voxkera/scene-babylon';
+import { createVoxelStage } from '@voxkera/voxel-babylon';
 import type { LabScene } from './greedy-lab';
 
 type RitualView = 'reference' | 'opposite' | 'top';

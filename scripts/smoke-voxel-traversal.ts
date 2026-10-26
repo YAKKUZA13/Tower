@@ -1,5 +1,5 @@
 /** Scientific fixture for bounded Amanatides-Woo voxel traversal. */
-import { traverseVoxelGrid } from '../packages/voxel-core/src/index';
+import { traverseVoxelGrid } from '@voxkera/voxel-core';
 
 let failures = 0;
 function check(name: string, condition: boolean, details = ''): void {

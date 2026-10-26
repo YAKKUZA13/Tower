@@ -1,5 +1,5 @@
 import type { Enemy, EnemyType, GameSnapshot, GridData, RtsWorldSite } from '@tower/shared';
-import type { GridNavigator } from '@tower/engine-terrain';
+import type { GridNavigator } from '@voxkera/engine-terrain';
 
 export interface RtsOpponentDeps {
   state: GameSnapshot; types: Map<string, EnemyType>; grid: GridData;

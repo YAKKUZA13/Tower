@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue';
 import path from 'path';
 
 export default defineConfig(({ mode }) => ({
+  // Pages may host the client below /<repository>/; normal dev keeps '/'.
+  base: process.env.TOWER_BASE || (mode === 'pages' ? './' : '/'),
   plugins: [vue()],
   define: {
     'import.meta.env.VITE_API_BASE': JSON.stringify(process.env.VITE_API_BASE || 'http://localhost:3000'),

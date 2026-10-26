@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { GridNavigator, findNavigationPath, gridToWorldData } from '../packages/engine-terrain/src/index';
-import { createRigMotion, advanceRigMotion } from '../packages/voxel-core/src/index';
+import { GridNavigator, findNavigationPath, gridToWorldData } from '@voxkera/engine-terrain';
+import { createRigMotion, advanceRigMotion } from '@voxkera/voxel-core';
 import { GameSim } from '../client/src/sim/game-sim';
 import { castSpell, tickSpellImpacts } from '../client/src/sim/systems/rts';
 import { tickWorldSites, tickRtsOpponents } from '../client/src/sim/systems/rts-world';

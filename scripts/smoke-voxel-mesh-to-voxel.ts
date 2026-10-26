@@ -10,7 +10,7 @@
  *
  * Run: npx tsx scripts/smoke-voxel-mesh-to-voxel.ts
  */
-import { solidVoxelize, triangleIntersectsAabb } from '../packages/voxel-core/src/index';
+import { solidVoxelize, triangleIntersectsAabb } from '@voxkera/voxel-core';
 
 let failures = 0;
 function check(name: string, cond: boolean, details = ''): void {

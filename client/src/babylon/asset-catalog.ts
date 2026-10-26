@@ -32,14 +32,15 @@ import { importGltfParts } from './voxel/importers/gltf-parts';
 import { RIGGED_DEFS } from './voxel/importers/manual-parts';
 import type { CharacterDef, PartNode } from './voxel/voxel-parts';
 import { VoxelStampRegistry, assembleRecipe } from './voxel/primitives/voxel-stamps';
+import { publicAssetUrl } from '../services/public-assets';
 
-const DEFAULT_MANIFEST_URL = '/catalog/manifest.json';
-const DEFAULT_GLB_BASE = '/catalog/';
+const DEFAULT_MANIFEST_URL = publicAssetUrl('catalog/manifest.json');
+const DEFAULT_GLB_BASE = publicAssetUrl('catalog/');
 
 /** Имена walk-нод для авто-детекта animKind импортированного gltf-рига. */
 const WALK_NODE_NAMES = new Set(['spine', 'thighL', 'shinL', 'thighR', 'shinR', 'upperArmL', 'forearmL', 'upperArmR', 'forearmR', 'hips', 'head']);
 /** Базовый URL для recipe JSON (M3). */
-const DEFAULT_RECIPE_BASE = '/recipes/';
+const DEFAULT_RECIPE_BASE = publicAssetUrl('recipes/');
 
 /** Легаси-каталоги ('primitive:arrow' из Phase 1) → канонические воксель-id. */
 function resolveLegacy(id: string): string {

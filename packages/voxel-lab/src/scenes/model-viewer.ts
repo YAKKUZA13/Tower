@@ -1,4 +1,4 @@
-import { applyGreedyGeometry } from '@tower/voxel-babylon';
+import { applyGreedyGeometry } from '@voxkera/voxel-babylon';
 /**
  * Model Viewer — browse all VOXEL_BUILDERS models
  * Rebuilds on model switch; shows tri/voxel counts.
@@ -8,12 +8,8 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { type Scene } from '@babylonjs/core/scene.js';
-import {
-  computeGreedyGeometry,
-  VOXEL_BUILDERS,
-  builderEmissive,
-  type Voxel
-} from '@tower/voxel-core';
+import {computeGreedyGeometry, type Voxel} from '@voxkera/voxel-core';
+import {VOXEL_BUILDERS, builderEmissive} from '../../../../client/src/babylon/voxel/content/index.js';
 import type { LabScene } from './greedy-lab';
 
 type StatsFn = (tri: number, vox: number, meshing: string) => void;

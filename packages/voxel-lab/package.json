@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tower/voxel-core": "*",
-    "@tower/voxel-babylon": "*",
-    "@tower/engine-terrain": "*",
-    "@tower/engine-recipe": "*",
-    "@tower/engine-scene": "*",
-    "@tower/scene-babylon": "*",
-    "@babylonjs/core": "7.54.3"
+    "@babylonjs/core": "7.54.3",
+    "@voxkera/voxel-core": "0.1.0",
+    "@voxkera/voxel-babylon": "0.1.0",
+    "@voxkera/engine-terrain": "0.1.0",
+    "@voxkera/engine-recipe": "0.1.0",
+    "@voxkera/engine-scene": "0.1.0",
+    "@voxkera/scene-babylon": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

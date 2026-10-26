@@ -5,12 +5,6 @@
     "shared",
     "server",
     "client",
-    "packages/voxel-core",
-    "packages/voxel-babylon",
-    "packages/engine-recipe",
-    "packages/engine-terrain",
-    "packages/engine-scene",
-    "packages/scene-babylon",
     "packages/voxel-lab"
   ],
   "scripts": {
@@ -21,12 +15,17 @@
     "dev:db:up": "docker compose up -d --wait postgres redis && npm run migrate",
     "dev:db:logs": "docker compose logs -f postgres redis",
     "dev:down": "docker compose down",
-    "build:pkgs": "npm --workspace @tower/engine-recipe run build && npm --workspace @tower/engine-terrain run build && npm --workspace @tower/engine-scene run build && npm --workspace @tower/scene-babylon run build && npm --workspace @tower/voxel-core run build && npm --workspace @tower/voxel-babylon run build",
+    "build:pkgs": "node scripts/check-voxkera-artifacts.cjs",
     "build": "npm run build:pkgs && npm --workspace shared run build && npm --workspace server run build && npm --workspace client run build && npm run check:bundle",
     "check:bundle": "node scripts/check-client-bundle.mjs",
     "capture:rts": "npm run build:pkgs && npm --workspace shared run build && node scripts/shoot-rts.cjs",
-    "smoke:rts:browser": "npm run build:pkgs && npm --workspace shared run build && node scripts/smoke-rts-browser.cjs",
-    "typecheck": "npm --workspace @tower/engine-recipe run typecheck && npm --workspace @tower/engine-terrain run typecheck && npm --workspace @tower/engine-scene run typecheck && npm --workspace @tower/scene-babylon run typecheck && npm --workspace @tower/voxel-core run typecheck && npm --workspace @tower/voxel-babylon run typecheck && npm --workspace @tower/voxel-lab run typecheck && npm --workspace shared run typecheck && npm --workspace server run typecheck && npm --workspace client run typecheck",
+    "smoke:rts:browser": "npm run build:pkgs && npm --workspace shared run build && node scripts/smoke-rts-browser-owned.cjs",
+    "dev:lab": "npm run build:pkgs && npm --workspace @tower/voxel-lab run dev -- --host 127.0.0.1 --port 5184",
+    "smoke:assets": "npm run build:pkgs && node --import tsx scripts/smoke-character-assets.ts && node --import tsx scripts/smoke-character-runtime.ts && node --import tsx scripts/smoke-lab-backend.ts",
+    "smoke:engine:consumer": "npm run build:pkgs && node scripts/smoke-engine-consumer.cjs",
+    "export:engine": "node scripts/export-engine.cjs",
+    "smoke:assets:browser": "npm run build:pkgs && node scripts/smoke-character-browser.cjs",
+    "typecheck": "npm run check:engine && npm --workspace @tower/voxel-lab run typecheck && npm --workspace shared run typecheck && npm --workspace server run typecheck && npm --workspace client run typecheck",
     "start": "npm --workspace server run start",
     "db:up": "docker compose up -d --wait postgres redis",
     "db:down": "docker compose down",
@@ -35,13 +34,31 @@
     "db:setup": "npm run db:up && npm run migrate",
     "migrate": "npm --workspace server run migrate",
     "migrate:json": "npm --workspace server run migrate:json",
-    "install:all": "npm install --workspaces"
+    "install:all": "npm install --workspaces",
+    "check:engine": "node scripts/check-voxkera-artifacts.cjs",
+    "smoke:content": "node --import tsx scripts/smoke-voxkera-content.ts",
+    "smoke:rts": "node scripts/smoke-rts-all.cjs",
+    "smoke:clean-install": "node scripts/smoke-clean-install.cjs",
+    "audit:dependencies": "node scripts/audit-engine-dependencies.cjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "smoke:pages": "node scripts/smoke-pages.mjs",
+    "capture:engine": "node scripts/capture-voxkera-showcase.mjs",
+    "engine:source": "node scripts/set-engine-source.cjs"
   },
   "devDependencies": {
-    "concurrently": "^9.0.1"
+    "concurrently": "^9.0.1",
+    "tsx": "4.22.3",
+    "typescript": "6.0.3",
+    "playwright": "1.56.1",
+    "@voxkera/engine-recipe": "0.1.0",
+    "@voxkera/engine-terrain": "0.1.0",
+    "@voxkera/engine-scene": "0.1.0",
+    "@voxkera/voxel-core": "0.1.0",
+    "@voxkera/voxel-babylon": "0.1.0",
+    "@voxkera/scene-babylon": "0.1.0"
   },
   "dependencies": {
     "@fastify/websocket": "^11.2.0"
   },
-  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+  "packageManager": "npm@11.6.2"
 }

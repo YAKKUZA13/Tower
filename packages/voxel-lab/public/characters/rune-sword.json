@@ -1,0 +1,18 @@
+{
+  "formatVersion": 1, "kind": "character", "id": "rune-sword",
+  "palette": [
+    { "id": "steel", "color": [0.55, 0.64, 0.68] },
+    { "id": "grip", "color": [0.28, 0.18, 0.11] },
+    { "id": "rune", "color": [0.15, 0.75, 0.95], "surface": { "emissive": [0.15, 0.75, 0.95], "emissiveStrength": 1.5 } }
+  ],
+  "parts": [{ "id": "blade", "pivot": [0, 1, 0], "shapes": [
+    { "kind": "box", "min": [0, 0, 0], "max": [0, 2, 0], "color": "grip" },
+    { "kind": "box", "min": [-2, 3, 0], "max": [2, 3, 0], "color": "steel" },
+    { "kind": "box", "min": [-1, 4, 0], "max": [1, 11, 0], "color": "steel" },
+    { "kind": "box", "min": [0, 5, 1], "max": [0, 9, 1], "color": "rune" },
+    { "kind": "box", "min": [0, 12, 0], "max": [0, 13, 0], "color": "steel" }
+  ] }],
+  "sockets": [{ "id": "grip", "part": "blade", "position": [0, 1, 0] }], "clips": [],
+  "budget": { "maxCandidateCells": 1000, "maxMeshingCells": 1000, "maxVoxels": 500 },
+  "quality": { "criticalFeatures": ["Blade, guard and grip remain readable", "Grip socket is inside handle", "Emission restricted to rune"], "requiredViews": ["front", "side", "back", "three-quarter"] }
+}

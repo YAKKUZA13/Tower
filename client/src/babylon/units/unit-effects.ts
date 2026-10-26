@@ -12,7 +12,7 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
-import { AreaEffectRenderer } from '@tower/scene-babylon';
+import { AreaEffectRenderer } from '@voxkera/scene-babylon';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { type Scene } from '@babylonjs/core/scene.js';

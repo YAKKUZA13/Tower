@@ -7,7 +7,7 @@
  *
  * Run: npx tsx scripts/smoke-voxel-winding.ts
  */
-import { computeGreedyGeometry, box3, validateVertexColors, type Voxel } from '../packages/voxel-core/src/index';
+import { computeGreedyGeometry, box3, validateVertexColors, type Voxel } from '@voxkera/voxel-core';
 
 let failures = 0;
 function check(name: string, cond: boolean, details = ''): void {

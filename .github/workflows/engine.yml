@@ -1,0 +1,49 @@
+name: Tower on Voxkera artifacts
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tower-regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm install --global npm@11.6.2
+      - run: node scripts/check-voxkera-artifacts.cjs --tarballs-only
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm --workspace shared run build
+      - run: npm run smoke:content
+      - run: npm run smoke:rts
+      - run: npm run smoke:assets
+      - run: npm run smoke:engine:consumer
+      - run: npx playwright install --with-deps chromium
+      - name: Select owned Chromium
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV, 'TOWER_CHROME=' + require('playwright').chromium.executablePath() + '\n')"
+      - run: npm run smoke:rts:browser
+      - run: npm run smoke:assets:browser
+      - run: npm run build
+      - run: npm --workspace @tower/voxel-lab run build
+      - name: Build offline RTS below a repository prefix
+        run: npm run build:pages
+        env:
+          TOWER_BASE: /tower-ci/
+      - name: Verify static Pages assets and offline startup
+        run: npm run smoke:pages
+        env:
+          TOWER_BASE: /tower-ci/
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: tower-${{ matrix.os }}
+          path: artifacts/

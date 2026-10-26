@@ -1,3 +1,3 @@
 /** Compatibility facade; reusable character rigs live in the renderer package. */
-export * from '@tower/voxel-core';
-export * from '@tower/voxel-babylon';
+export * from '@voxkera/voxel-core';
+export * from '@voxkera/voxel-babylon';

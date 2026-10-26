@@ -6,8 +6,9 @@
  */
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { type Scene } from '@babylonjs/core/scene.js';
-import { VOXEL_BUILDERS, type Voxel } from '@tower/voxel-core';
-import { buildVoxelMesh, buildVoxelMeshGreedy } from '@tower/voxel-babylon';
+import {type Voxel} from '@voxkera/voxel-core';
+import {VOXEL_BUILDERS} from '../../../../client/src/babylon/voxel/content/index.js';
+import { buildVoxelMesh, buildVoxelMeshGreedy } from '@voxkera/voxel-babylon';
 
 export interface LabScene {
   dispose(): void;

@@ -1,4 +1,5 @@
-import { applyGreedyGeometry } from '@tower/voxel-babylon';
+import {VoxelStampRegistry} from '../../../../client/src/babylon/voxel/content/stamp-materials.js';
+import { applyGreedyGeometry } from '@voxkera/voxel-babylon';
 /**
  * Recipe Lab — live recipe editor + 3D preview
  * Edit JSON, compile, see assembled voxels immediately.
@@ -12,13 +13,8 @@ import {
   loadRecipe,
   compileErrorMessage,
   type RecipeV3
-} from '@tower/engine-recipe';
-import {
-  computeGreedyGeometry,
-  VoxelStampRegistry,
-  assembleRecipe,
-  type Voxel
-} from '@tower/voxel-core';
+} from '@voxkera/engine-recipe';
+import {computeGreedyGeometry, assembleRecipe, type Voxel} from '@voxkera/voxel-core';
 import type { LabScene } from './greedy-lab';
 
 type StatsFn = (tri: number, vox: number, meshing: string) => void;

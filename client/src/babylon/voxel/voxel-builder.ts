@@ -1,6 +1,3 @@
-/**
- * Compatibility facade for existing client imports.
- * Pure voxel geometry lives in @tower/voxel-core; Babylon integration lives
- * in @tower/voxel-babylon.
- */
-export * from '@tower/voxel-babylon';
+/** Game-facing facade: engine artifacts plus Tower-owned models. */
+export * from '@voxkera/voxel-babylon';
+export * from './content/index.js';

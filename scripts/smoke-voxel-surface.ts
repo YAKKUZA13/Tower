@@ -3,8 +3,8 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
 import { Scene } from '@babylonjs/core/scene.js';
 import { MultiMaterial } from '@babylonjs/core/Materials/multiMaterial.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
-import { computeGreedyGeometry, partitionVoxelMaterials, box3, type Voxel } from '../packages/voxel-core/src/index';
-import { buildVoxelMaterialMesh } from '../packages/voxel-babylon/src/index';
+import { computeGreedyGeometry, partitionVoxelMaterials, box3, type Voxel } from '@voxkera/voxel-core';
+import { buildVoxelMaterialMesh } from '@voxkera/voxel-babylon';
 
 // Reference fixture: slab, raised support and asymmetric overhangs, all the same albedo.
 const voxels: Voxel[] = [];
@@ -79,6 +79,9 @@ assert.throws(() => computeGreedyGeometry([{ ...pair[0]!, material: -1 }], false
 console.log('PASS material partition: shared occupancy, hidden interfaces, label separation, unchanged buffers');
 
 const engine = new NullEngine(); const scene = new Scene(engine);
+// Babylon lazily allocates this scene-owned singleton while creating submeshes.
+// It outlives individual meshes; measure owned material disposal after warming it.
+void scene.defaultMaterial;
 const baseline = { meshes: scene.meshes.length, materials: scene.materials.length, multis: scene.multiMaterials.length };
 assert.throws(() => buildVoxelMaterialMesh(scene, pair, { name: 'bad', materials: { 0: {} } }));
 assert.throws(() => buildVoxelMaterialMesh(scene, pair, { name: 'budget', maxMaterials: 1, materials: { 0: {}, 1: {} } }));

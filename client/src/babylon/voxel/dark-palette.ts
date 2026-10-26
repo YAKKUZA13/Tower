@@ -1,1 +1,1 @@
-export * from '@tower/voxel-core';
+export * from './content/dark-palette.js';

@@ -33,7 +33,7 @@ import { ACCENT } from '../voxel/dark-palette';
 import type { AnimKind } from '../voxel/voxel-parts';
 import { classifyLod } from '../lod';
 import type { EnemySceneRenderer } from './enemy-renderer';
-import { createRigMotion, advanceRigMotion, type RigMotion } from '@tower/voxel-core';
+import { createRigMotion, advanceRigMotion, type RigMotion } from '@voxkera/voxel-core';
 
 // ── M4: LOD + per-clone shadows (D2/D3/D13) ──
 /** Максимум одновременно shadowed-клонов (ближайшие к фокусу). Bounds shadow-pass cost. */

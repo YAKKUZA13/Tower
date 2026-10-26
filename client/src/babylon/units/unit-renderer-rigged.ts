@@ -38,7 +38,7 @@ import { VOXEL_BUILDERS, builderEmissive } from '../voxel/voxel-builder';
 import { ACCENT } from '../voxel/dark-palette';
 import { SpellEffectManager, HpBarManager, type UnitSceneRenderer } from './unit-effects';
 import type { ShadowController } from '../enemies/enemy-renderer-rigged';
-import { createRigMotion, advanceRigMotion, type RigMotion } from '@tower/voxel-core';
+import { createRigMotion, advanceRigMotion, type RigMotion } from '@voxkera/voxel-core';
 
 // ── Walk-cycle константы (согласованы с RiggedEnemyRenderer) ──
 const WALK_FREQ = 7.0;       // чуть медленнее, чем у врагов (размеренный шаг солдата)

@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@tower/shared",
   "version": "0.2.0",
   "private": true,
@@ -16,6 +16,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tower/engine-recipe": "*"
+    "@voxkera/engine-recipe": "0.1.0"
   }
 }

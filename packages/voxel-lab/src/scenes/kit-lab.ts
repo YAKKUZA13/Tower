@@ -1,4 +1,4 @@
-import { applyGreedyGeometry } from '@tower/voxel-babylon';
+import { applyGreedyGeometry } from '@voxkera/voxel-babylon';
 /**
  * Kit Lab — procedural character kit assembler
  * Seed → assembleCharacter → greedy mesh preview
@@ -7,13 +7,8 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { type Scene } from '@babylonjs/core/scene.js';
-import {
-  computeGreedyGeometry,
-  assembleCharacter,
-  assembleCrowd,
-  type Voxel,
-  type CharacterDef
-} from '@tower/voxel-core';
+import {computeGreedyGeometry, type Voxel, type CharacterDef} from '@voxkera/voxel-core';
+import {assembleCharacter, assembleCrowd} from '../../../../client/src/babylon/voxel/content/index.js';
 import type { LabScene } from './greedy-lab';
 
 type StatsFn = (tri: number, vox: number, meshing: string) => void;

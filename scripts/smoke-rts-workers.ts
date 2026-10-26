@@ -6,7 +6,7 @@ import { RtsSceneryRenderer } from '../client/src/babylon/terrain/rts-scenery';
 import { GameSim } from '../client/src/sim/game-sim';
 import { RTS_MAPS } from '../shared/src/maps/rts-maps';
 import { DEFAULT_CATALOG } from '../shared/src/catalogs/default';
-import { GridNavigator, gridToWorldData, separateNavigationAgents } from '../packages/engine-terrain/src/index';
+import { GridNavigator, gridToWorldData, separateNavigationAgents } from '@voxkera/engine-terrain';
 
 {
   const grid = { cols: 16, rows: 16, cellSize: 1.5 };

@@ -19,6 +19,7 @@ type View = 'lobby' | 'game' | 'rts-lobby' | 'rts-game';
 const view = ref<View>('lobby');
 const username = computed(() => user.value?.username || user.value?.login || '');
 const rtsMapId = ref<string | undefined>(undefined);
+const staticRtsBuild = import.meta.env.MODE === 'pages';
 
 function handleAuthed(destination: 'coop' | 'rts' = 'coop'): void {
   view.value = destination === 'rts' ? 'rts-lobby' : 'lobby';
@@ -65,6 +66,13 @@ watch(coopPhase, (p) => {
 });
 
 onMounted(async () => {
+  if (staticRtsBuild) {
+    // GitHub Pages hosts an offline RTS showcase, without account/API restore.
+    authStore.loginAsGuest('Demo commander');
+    rtsMapId.value = new URLSearchParams(window.location.search).get('map') || 'rts-2p-crossroads';
+    view.value = 'rts-game';
+    return;
+  }
   await authStore.restoreSession();
   const demo = new URLSearchParams(window.location.search).get('demo');
   if (demo === 'rts') {
@@ -85,7 +93,7 @@ onBeforeUnmount(() => {
       <div class="app-header-left">
         <div class="app-brand">TOWER <span>/ ПЕРВЫЙ СПУСК</span></div>
       <div v-if="isAuthed" class="app-nav">
-        <button class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Co-op лобби</button>
+        <button v-if="!staticRtsBuild" class="nav-button" :class="{ active: view === 'lobby' }" @click="view='lobby'">Co-op лобби</button>
         <!-- TD-режим (Game.vue) скрыт: проект перешёл на RTS. Co-op сейчас использует
              тот же TD-рендер, но как отдельный multiplayer-трек; прямой «TD-игра» вход убран. -->
         <button class="nav-button" :class="{ active: view === 'rts-lobby' || view === 'rts-game' }" @click="view='rts-lobby'">RTS соло</button>
@@ -97,7 +105,7 @@ onBeforeUnmount(() => {
           <span v-if="coopStore.sessionId" class="muted">· {{ coopStore.isHost ? 'хост' : 'гость' }}</span>
         </div>
         <button v-if="view === 'game' && coopPhase === 'playing'" class="btn ghost" @click="backToLobby">В лобби</button>
-        <button class="btn ghost" @click="logout">Выйти</button>
+        <button v-if="!staticRtsBuild" class="btn ghost" @click="logout">Выйти</button>
       </div>
     </header>
 
@@ -106,7 +114,7 @@ onBeforeUnmount(() => {
       <template v-else>
         <CoopLobby v-if="view==='lobby'" @start-game="onStartGame" />
         <Game v-else-if="view==='game'" @back-to-lobby="onBackToLobby" />
-        <RtsLobby v-else-if="view==='rts-lobby'" @start="onStartRts" @back="view='lobby'" />
+        <RtsLobby v-else-if="view==='rts-lobby'" @start="onStartRts" @back="view=staticRtsBuild ? 'rts-game' : 'lobby'" />
         <RtsGame v-else-if="view==='rts-game'" :map-id="rtsMapId" @back="onRtsBack" />
       </template>
     </div>

@@ -1,4 +1,4 @@
-import { applyGreedyGeometry } from '@tower/voxel-babylon';
+import { applyGreedyGeometry } from '@voxkera/voxel-babylon';
 /**
  * M8.1 — Chunked VoxelField rendering для большой RTS-карты (≥64×64).
  *

@@ -5,14 +5,14 @@ import { Scene } from '@babylonjs/core/scene.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import {
   createSceneRandom,
-  createRitualCasterFragment,
-  createRitualSanctumKit,
-  generateProceduralSanctum,
   instantiateSceneFragment,
   rasterizeNavBlockers,
   validateSceneKit
-} from '../packages/engine-scene/src/index';
-import { buildSceneKit } from '../packages/scene-babylon/src/index';
+} from '@voxkera/engine-scene';
+import { createRitualCasterFragment } from '../packages/voxel-lab/src/fixtures/ritual-caster';
+import { createRitualSanctumKit } from '../packages/voxel-lab/src/fixtures/ritual-sanctum';
+import { generateProceduralSanctum } from '../packages/voxel-lab/src/fixtures/procedural-sanctum';
+import { buildSceneKit } from '@voxkera/scene-babylon';
 
 let failures = 0;
 function check(name: string, condition: boolean, details = ''): void {
@@ -104,8 +104,10 @@ check('stable ritual socket is exposed', handle.sockets.has('ritual-origin'));
 check('collider metadata survives backend build', handle.colliders.length > 5);
 check('destruction groups survive backend build', handle.destructionGroups.size > 5);
 check('shadow families are batched', handle.shadowCasters.length > 0 && handle.shadowCasters.length < handle.meshes.size);
-check('backend mesh count stays within declared nodes plus batched families',
-  scene.meshes.length <= generatedA.nodes.length + 16, `(meshes=${scene.meshes.length})`);
+check('backend mesh accounting includes exact render, geometry and emitter families',
+  scene.meshes.length === handle.resources.renderInstances + handle.resources.geometryMasters + handle.resources.emitterMeshes,
+  `(meshes=${scene.meshes.length})`);
+check('batching does not allocate a geometry master per render instance', handle.resources.geometryMasters < handle.resources.renderInstances);
 const anchoredDefinition = generatedA.nodes.find((node) => node.id.startsWith('outer-wall-'))!;
 const anchoredNode = handle.nodes.get(anchoredDefinition.id)!;
 anchoredNode.computeWorldMatrix(true);

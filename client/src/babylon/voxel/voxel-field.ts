@@ -1,4 +1,4 @@
-import { applyGreedyGeometry } from '@tower/voxel-babylon';
+import { applyGreedyGeometry } from '@voxkera/voxel-babylon';
 /**
  * Воксельное поле боя — destructible field + heightmap→voxel (M5, research §13/§15.2D).
  *

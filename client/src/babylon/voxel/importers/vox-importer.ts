@@ -1,1 +1,1 @@
-export * from '@tower/voxel-core';
+export * from '@voxkera/voxel-core';

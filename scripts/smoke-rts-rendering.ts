@@ -3,8 +3,8 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
 import { Scene } from '@babylonjs/core/scene.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
-import { AreaEffectRenderer } from '../packages/scene-babylon/src/area-effects';
-import { assembleRig, cloneRig, disposeRig, collectRigMeshes } from '../packages/voxel-babylon/src/rig';
+import { AreaEffectRenderer } from '@voxkera/scene-babylon';
+import { assembleRig, cloneRig, disposeRig, collectRigMeshes } from '@voxkera/voxel-babylon';
 import { skeletonRigged } from '../client/src/babylon/voxel/importers/manual-parts';
 import { SpellEffectManager } from '../client/src/babylon/units/unit-effects';
 

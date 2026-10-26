@@ -1,10 +1,10 @@
-export * from '@tower/voxel-core';
+export * from './content/indexed-palette.js';
 
 import { Constants } from '@babylonjs/core/Engines/constants.js';
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture.js';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
 import { type Scene } from '@babylonjs/core/scene.js';
-import { INDEXED_PALETTE, PALETTE_MAX } from '@tower/voxel-core';
+import { INDEXED_PALETTE, PALETTE_MAX } from './content/indexed-palette.js';
 
 export function buildPaletteTexture(scene: Scene): RawTexture {
   const data = new Uint8Array(PALETTE_MAX * 4);

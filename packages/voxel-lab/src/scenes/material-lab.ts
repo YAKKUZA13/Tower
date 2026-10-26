@@ -3,8 +3,9 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import type { Scene } from '@babylonjs/core/scene.js';
-import { createMasonryVoxels, VOXEL_BUILDERS, isAccentColor, type Voxel, type MasonryOptions } from '@tower/voxel-core';
-import { buildVoxelMaterialMesh, createVoxelStage } from '@tower/voxel-babylon';
+import {createMasonryVoxels, isAccentColor, type Voxel, type MasonryOptions} from '@voxkera/voxel-core';
+import {VOXEL_BUILDERS} from '../../../../client/src/babylon/voxel/content/index.js';
+import { buildVoxelMaterialMesh, createVoxelStage } from '@voxkera/voxel-babylon';
 import type { LabScene } from './greedy-lab';
 
 /** Independent consumers of the same masonry generator and rendering stage. */

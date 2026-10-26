@@ -7,8 +7,8 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
-import { createMasonryVoxels, computeGreedyGeometry } from '../packages/voxel-core/src/index';
-import { applyGreedyGeometry, buildVoxelMesh, buildVoxelMeshGreedy, createVoxelStage } from '../packages/voxel-babylon/src/index';
+import { createMasonryVoxels, computeGreedyGeometry } from '@voxkera/voxel-core';
+import { applyGreedyGeometry, buildVoxelMesh, buildVoxelMeshGreedy, createVoxelStage } from '@voxkera/voxel-babylon';
 
 const options = { width: 24, height: 18, depth: 4, seed: 17 };
 const wall = createMasonryVoxels(options);

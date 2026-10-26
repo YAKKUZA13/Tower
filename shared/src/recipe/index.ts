@@ -1,5 +1,5 @@
 /**
  * recipe-compiler public API (Фаза P-MO, research §15).
- * S0 рефакторинг: реэкспорт из @tower/engine-recipe для back-compat.
+ * S0 рефакторинг: реэкспорт из @voxkera/engine-recipe для back-compat.
  */
-export * from '@tower/engine-recipe';
+export * from '@voxkera/engine-recipe';

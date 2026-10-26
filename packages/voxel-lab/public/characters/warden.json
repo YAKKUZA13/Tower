@@ -1,0 +1,66 @@
+{
+  "formatVersion": 1,
+  "kind": "character",
+  "id": "warden",
+  "palette": [
+    { "id": "steel", "color": [0.32, 0.39, 0.46] },
+    { "id": "gold", "color": [0.82, 0.57, 0.20] },
+    { "id": "cloth", "color": [0.16, 0.32, 0.29] },
+    { "id": "face", "color": [0.72, 0.55, 0.39] }
+  ],
+  "parts": [
+    { "id": "hips", "pivot": [0, 9, 0], "shapes": [{ "kind": "box", "min": [-2, 8, -1], "max": [2, 9, 1], "color": "cloth" }] },
+    { "id": "spine", "parent": "hips", "pivot": [0, 10, 0], "shapes": [
+      { "kind": "ellipsoid", "center": [0, 12, 0], "radii": [3, 3, 2], "color": "steel" },
+      { "kind": "box", "min": [-1, 11, 2], "max": [1, 13, 2], "color": "gold" }
+    ] },
+    { "id": "head", "parent": "spine", "pivot": [0, 15, 0], "shapes": [
+      { "kind": "ellipsoid", "center": [0, 17, 0], "radii": [2, 2, 2], "color": "steel" },
+      { "kind": "box", "min": [-1, 16, 2], "max": [1, 17, 2], "color": "face" },
+      { "kind": "box", "min": [0, 19, -1], "max": [0, 21, 1], "color": "gold" }
+    ] },
+    { "id": "upperArmL", "parent": "spine", "pivot": [-3, 13, 0], "shapes": [{ "kind": "box", "min": [-4, 10, -1], "max": [-3, 13, 1], "color": "steel" }] },
+    { "id": "forearmL", "parent": "upperArmL", "pivot": [-3, 10, 0], "shapes": [{ "kind": "box", "min": [-4, 7, -1], "max": [-3, 9, 1], "color": "cloth" }] },
+    { "id": "upperArmR", "parent": "spine", "pivot": [3, 13, 0], "shapes": [{ "kind": "box", "min": [3, 10, -1], "max": [4, 13, 1], "color": "steel" }] },
+    { "id": "forearmR", "parent": "upperArmR", "pivot": [3, 10, 0], "shapes": [{ "kind": "box", "min": [3, 7, -1], "max": [4, 9, 1], "color": "cloth" }] },
+    { "id": "thighL", "parent": "hips", "pivot": [-1, 8, 0], "shapes": [{ "kind": "box", "min": [-2, 4, -1], "max": [-1, 7, 1], "color": "cloth" }] },
+    { "id": "shinL", "parent": "thighL", "pivot": [-1, 4, 0], "shapes": [{ "kind": "box", "min": [-2, 0, -1], "max": [-1, 3, 2], "color": "steel" }] },
+    { "id": "thighR", "parent": "hips", "pivot": [1, 8, 0], "shapes": [{ "kind": "box", "min": [1, 4, -1], "max": [2, 7, 1], "color": "cloth" }] },
+    { "id": "shinR", "parent": "thighR", "pivot": [1, 4, 0], "shapes": [{ "kind": "box", "min": [1, 0, -1], "max": [2, 3, 2], "color": "steel" }] }
+  ],
+  "sockets": [
+    { "id": "weapon", "part": "forearmR", "position": [4, 7, 1] },
+    { "id": "offhand", "part": "forearmL", "position": [-4, 7, 1] }
+  ],
+  "clips": [
+    { "id": "stride", "duration": 0.8, "loop": true, "tracks": [
+      { "part": "thighL", "interpolation": "linear", "keys": [
+        { "time": 0, "rotation": [-0.5, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.4, "rotation": [0.5, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.8, "rotation": [-0.5, 0, 0], "translation": [0, 0, 0] }
+      ] },
+      { "part": "thighR", "interpolation": "linear", "keys": [
+        { "time": 0, "rotation": [0.5, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.4, "rotation": [-0.5, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.8, "rotation": [0.5, 0, 0], "translation": [0, 0, 0] }
+      ] },
+      { "part": "upperArmR", "interpolation": "linear", "keys": [
+        { "time": 0, "rotation": [-0.3, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.4, "rotation": [0.3, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.8, "rotation": [-0.3, 0, 0], "translation": [0, 0, 0] }
+      ] }
+    ] },
+    { "id": "salute", "duration": 1, "loop": false, "tracks": [
+      { "part": "forearmR", "interpolation": "linear", "keys": [
+        { "time": 0, "rotation": [0, 0, 0], "translation": [0, 0, 0] },
+        { "time": 0.5, "rotation": [-1.5, 0, 0], "translation": [0, 0, 0] },
+        { "time": 1, "rotation": [0, 0, 0], "translation": [0, 0, 0] }
+      ] }
+    ] }
+  ],
+  "budget": { "maxCandidateCells": 10000, "maxMeshingCells": 10000, "maxVoxels": 4000 },
+  "quality": {
+    "criticalFeatures": ["Readable gold crest", "Separate articulated arms and legs", "Weapon socket follows right forearm"],
+    "requiredViews": ["front", "side", "back", "three-quarter"]
+  }
+}

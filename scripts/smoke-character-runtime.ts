@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { CharacterAnimator, compileCharacterAsset } from '@voxkera/voxel-core';
+import { createCharacterAssetTemplate, collectRigMeshes } from '@voxkera/voxel-babylon';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { MultiMaterial } from '@babylonjs/core/Materials/multiMaterial.js';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+
+const recipe = JSON.parse(readFileSync('packages/voxel-lab/public/characters/warden.json', 'utf8'));
+recipe.palette.push({ id: 'glow', color: [.1, .9, .6], surface: { emissive: [.1, .9, .6], emissiveStrength: 2 } });
+recipe.parts[2].shapes.push({ kind: 'box', min: [0, 17, 2], max: [0, 17, 2], color: 'glow' });
+recipe.clips[1].events = [{ id: 'impact', time: .5 }];
+const result = compileCharacterAsset(recipe); assert.ok(result.ok);
+const asset = result.asset;
+const engine = new NullEngine(), scene = new Scene(engine);
+const counts = () => [scene.meshes.length, scene.geometries.length, scene.materials.length, scene.multiMaterials.length, scene.transformNodes.length];
+try {
+  const baseline = counts();
+  for (let repeat = 0; repeat < 3; repeat++) {
+    const template = createCharacterAssetTemplate(scene, asset), instances = Array.from({ length: 100 }, () => template.instantiate());
+    assert.equal(template.liveInstances, 100);
+    assert.equal(scene.geometries.length, 11, 'Meshing happens once per part, not per instance');
+    const a = collectRigMeshes(instances[0]!.root), b = collectRigMeshes(instances[1]!.root);
+    a.forEach((mesh, i) => assert.equal(mesh.geometry, b[i]!.geometry));
+    instances[0]!.sampleClip('salute', .5);
+    assert.equal(instances[1]!.parts.get('forearmR')!.rotation.x, 0);
+    const multi = a[0]!.material as MultiMaterial;
+    assert.equal(Math.hypot(...(multi.subMaterials[0] as StandardMaterial).emissiveColor.asArray()), 0);
+    assert.ok(Math.hypot(...(multi.subMaterials[4] as StandardMaterial).emissiveColor.asArray()) > 1);
+    assert.ok(a.some(mesh => mesh.subMeshes.some(sub => sub.materialIndex === 4)), 'Glow is a distinct visible region');
+    instances[0]!.dispose(); template.dispose(); assert.throws(() => template.instantiate());
+    assert.ok(collectRigMeshes(instances[1]!.root).every(mesh => mesh.getTotalVertices() > 0));
+    for (const instance of instances.slice(1).reverse()) instance.dispose();
+    template.dispose(); assert.deepEqual(counts(), baseline);
+  }
+  const template = createCharacterAssetTemplate(scene, asset), a = template.instantiate(), b = template.instantiate();
+  const detach = a.attach('weapon', b.root, 3, b.sockets.get('offhand'));
+  const parentSocket = a.sockets.get('weapon')!, childSocket = b.sockets.get('offhand')!;
+  parentSocket.computeWorldMatrix(true); childSocket.computeWorldMatrix(true);
+  assert.ok(parentSocket.getAbsolutePosition().subtract(childSocket.getAbsolutePosition()).length() < 1e-6, 'Grip anchor aligns exactly');
+  a.sampleClip('salute', .5); parentSocket.computeWorldMatrix(true); childSocket.computeWorldMatrix(true);
+  assert.ok(parentSocket.getAbsolutePosition().subtract(childSocket.getAbsolutePosition()).length() < 1e-6);
+  assert.throws(() => b.attach('weapon', a.root));
+  detach(); a.dispose(); assert.equal(b.root.isDisposed(), false); b.dispose(); template.dispose();
+  assert.deepEqual(counts(), baseline);
+} finally { scene.dispose(); engine.dispose(); }
+console.log('PASS templates/materials: 100 shared-geometry instances, independent poses/emission, anchored attachments, all disposal orders');
+
+const animator = new CharacterAnimator(asset.recipe.clips, asset.recipe.parts.map(part => part.id));
+animator.play('salute');
+assert.equal(animator.advance(.25).events[0]!.type, 'started');
+assert.equal(animator.advance(.25).events[0]!.id, 'impact');
+assert.equal(animator.advance(.5).events[0]!.type, 'completed');
+assert.equal(animator.advance(1).events.length, 0, 'Completion/marker never repeat');
+animator.seek('salute', .5);
+animator.play('stride', { fadeSeconds: 1 });
+const blended = animator.advance(.5);
+assert.equal(blended.pose.find(p => p.part === 'forearmR')!.rotation[0], -.75);
+animator.play('salute', { fadeSeconds: 1 });
+assert.equal(animator.advance(0).pose.find(p => p.part === 'forearmR')!.rotation[0], -.75, 'Interrupted fade starts from displayed pose');
+animator.stop(); assert.ok(animator.advance(0).pose.every(p => p.rotation.every(x => x === 0)));
+assert.throws(() => animator.advance(Infinity)); assert.throws(() => animator.advance(-1));
+const loop = structuredClone(asset.recipe.clips[0]!); loop.events = [{ id: 'step', time: .4 }];
+const looping = new CharacterAnimator([loop], ['thighL']); looping.play(loop.id);
+assert.equal(looping.advance(2).events.filter(e => e.type === 'marker').length, 3);
+assert.equal(looping.advance(0).events.length, 0);
+const tiny = { ...loop, duration: .001, events: [{ id: 'tick', time: 0 }] };
+const limited = new CharacterAnimator([tiny], ['thighL'], 8); limited.play(tiny.id);
+assert.throws(() => limited.advance(1), /budget/);
+assert.equal(limited.advance(0).events[0]!.type, 'started', 'Overflow leaves state/queued events intact');
+console.log('PASS animator: one-shot/loop markers, completion, rest reset, fades, interruption, seek, bounded transactional delivery');
